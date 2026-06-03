@@ -1,0 +1,47 @@
+id: python-patterns
+description: Python development patterns and tooling for this workstation
+activation_keywords:
+  - python
+  - pip
+  - uv
+  - fastapi
+  - django
+  - pytest
+activation_paths:
+  - "*.py"
+  - "pyproject.toml"
+  - "requirements.txt"
+activation_packages:
+  - fastapi
+  - django
+  - flask
+  - pytest
+content: |
+  ## Python Development Patterns
+
+  ### Package Management
+  - Use `uv` for dependency management (10-100x faster than pip)
+  - Project init: `uv init`
+  - Add dependency: `uv add <package>`
+  - Sync: `uv sync`
+  - Run: `uv run python script.py`
+
+  ### Project Structure
+  - Use `pyproject.toml` (not setup.py)
+  - Source layout: `src/<package>/`
+  - Tests: `tests/`
+
+  ### Testing
+  - Framework: pytest
+  - Run: `uv run pytest`
+  - Coverage: `uv run pytest --cov`
+
+  ### Linting & Formatting
+  - Linter: ruff (`uv run ruff check .`)
+  - Formatter: ruff (`uv run ruff format .`)
+  - Type checker: pyright or mypy
+
+  ### Virtual Environments
+  - uv creates `.venv` automatically
+  - Activate: `source .venv/bin/activate`
+  - Or just use `uv run` prefix

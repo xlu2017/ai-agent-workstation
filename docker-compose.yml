@@ -16,6 +16,7 @@ services:
       - "4000:4000"
     volumes:
       - ./config/litellm_config.yaml:/app/config.yaml:ro
+      - litellm_logs:/app/logs
     environment:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
@@ -77,7 +78,8 @@ networks:
   workstation:
     driver: bridge
 
-# Uncomment if using Caddy
-# volumes:
-#   caddy_data:
-#   caddy_config:
+volumes:
+  litellm_logs:
+  # Uncomment if using Caddy
+  # caddy_data:
+  # caddy_config:

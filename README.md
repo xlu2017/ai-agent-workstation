@@ -1,6 +1,6 @@
 # AI Coding Agent Workstation
 
-A production-quality, self-hosted development workstation for AI coding agents. Runs OpenHands with DeepSeek models via LiteLLM Proxy on a Hetzner Cloud server.
+A production-quality, self-hosted development workstation for AI coding agents. Runs OpenHands with DeepSeek models via LiteLLM Proxy on Hetzner Cloud, with multi-agent worktree isolation, knowledge system, observability, and UI-to-code bridging.
 
 ## Current Deployment
 
@@ -8,11 +8,15 @@ A production-quality, self-hosted development workstation for AI coding agents. 
 |-----------|--------|
 | Server | `ubuntu-32gb-fsn1-1` — CCX33, 8 vCPU, 32GB RAM, Falkenstein |
 | IP | `167.233.31.65` |
-| LiteLLM Proxy | Running on port 4000 (healthy) |
+| LiteLLM Proxy | Running on port 4000 (healthy), budget: $150/mo cap |
 | OpenHands | Running on port 3000 |
-| DeepSeek API | Active, topped up |
+| DeepSeek API | Active (V4-Flash primary) |
 | Remote Desktop | xRDP on port 3389 (XFCE 4) |
-| Tailscale | Installed, needs `sudo tailscale up` |
+| Node Exporter | Active on port 9100 |
+| Chrome | v149, installed with remote debugging support |
+| BorgBackup | Configured, daily 3AM cron |
+| Knowledge System | 2 knowledge files loaded |
+| Worktree Scripts | Installed at /opt/workstation/scripts/ |
 
 ## Quick Start
 
@@ -20,14 +24,14 @@ A production-quality, self-hosted development workstation for AI coding agents. 
 # SSH into the server
 ssh -i ~/.ssh/hetzner_workstation agent@167.233.31.65
 
-# Services are already running. Check status:
+# Check status
 cd ~/ai-workstation && docker compose ps
 
-# Access OpenHands (via SSH port forward):
+# Access web UIs via SSH port forward:
 ssh -L 3000:localhost:3000 -L 4000:localhost:4000 -i ~/.ssh/hetzner_workstation agent@167.233.31.65
 # Then open http://localhost:3000 in your local browser
 
-# Or use RDP for graphical desktop:
+# RDP for graphical desktop:
 # Host: 167.233.31.65, Port: 3389, User: agent
 ```
 
@@ -37,106 +41,141 @@ ssh -L 3000:localhost:3000 -L 4000:localhost:4000 -i ~/.ssh/hetzner_workstation 
 Hetzner Cloud CCX33 ($74/mo)
 ├── OpenHands (AI agent runtime, port 3000)
 ├── LiteLLM Proxy (model gateway, port 4000)
-│   └── DeepSeek V4-Flash (primary) → Qwen (fallback) → Claude (emergency)
-├── Docker (agent sandboxes)
-├── xRDP + XFCE4 (remote desktop, port 3389)
-├── Tailscale (secure mesh VPN)
-├── tmux (session management)
-└── Git worktrees (parallel agent workspaces)
+│   └── DeepSeek V4-Flash → Qwen → Claude (fallback chain)
+├── Docker Engine (agent sandboxes)
+├── /opt/workstation/
+│   ├── repos/          (git bare repos + worktrees)
+│   ├── knowledge/      (YAML knowledge files)
+│   ├── scripts/        (worktree, backup, knowledge-loader)
+│   ├── logs/           (application logs)
+│   └── backups/        (BorgBackup repository)
+├── Observability (prometheus-node-exporter :9100)
+├── Chrome (remote debugging :9222)
+├── xRDP + XFCE4 (remote desktop :3389)
+├── UI-Bridge Service (source map resolution :9876)
+└── Security (ufw, fail2ban, chrony, SSH key-only)
 ```
 
-**Model routing:** DeepSeek V4-Flash (primary, $0.14/M tokens) → Qwen-turbo (fallback) → Claude Haiku (emergency)
+See [docs/architecture.md](docs/architecture.md) for full details.
 
-**Total cost:** $80–95/month for moderate usage (well under $200 budget)
-
-## File Structure
+## Repository Structure
 
 ```
 .
-├── setup.sh                    # Idempotent server setup (run as root)
-├── docker-compose.yml          # Service definitions
-├── .env.example                # Template for secrets
+├── docker-compose.yml              # Service orchestration
+├── setup.sh                        # Idempotent server setup
+├── .env.example                    # API key template
 ├── config/
-│   ├── litellm_config.yaml     # Model routing configuration
-│   └── Caddyfile               # Optional HTTPS reverse proxy
-├── DEPLOYMENT-LOG.md           # Complete deployment record
-├── remote-desktop-guide.md     # RDP/SSH/Tailscale access guide
-├── operations.md               # Day-to-day operations guide
-├── backup.md                   # Backup, restore, pause/resume
-├── provider-comparison.md      # Infrastructure & API comparison
-├── cost-model.md               # Budget projections
-├── recommended-architecture.md # Architecture decisions
-├── provisioning-plan.md        # Step-by-step provisioning
-└── risks-and-mitigations.md    # Risk analysis
+│   └── litellm_config.yaml         # Model routing + budget limits
+├── scripts/
+│   ├── create-worktree.sh          # Create isolated agent workspace
+│   ├── destroy-worktree.sh         # Clean up worktree + resources
+│   ├── list-worktrees.sh           # Show active worktrees
+│   ├── backup-now.sh               # Manual BorgBackup
+│   └── knowledge-loader.py         # Context-aware knowledge activation
+├── knowledge/
+│   ├── example-react.yaml          # React patterns knowledge
+│   └── example-python.yaml         # Python patterns knowledge
+├── browser-extension/              # UI-to-Code bridge (Phase 1)
+│   ├── manifest.json
+│   ├── content.js
+│   ├── background.js
+│   └── popup.html
+├── ui-bridge-service/              # Source map resolution server
+│   ├── server.py
+│   └── ARCHITECTURE.md
+├── docs/
+│   ├── architecture.md             # System architecture
+│   ├── provider-comparison.md      # Infra & API comparison
+│   ├── cost-model.md               # Budget projections
+│   ├── operations.md               # Day-to-day operations
+│   ├── troubleshooting.md          # Common issues & fixes
+│   ├── upgrade.md                  # Upgrade procedures
+│   └── backup.md                   # Backup & restore
+└── rfcs/
+    ├── RFC-001-multi-agent-scheduler.md
+    ├── RFC-002-source-aware-ui-selection.md
+    ├── RFC-003-react-native-bridge.md
+    ├── RFC-004-flutter-bridge.md
+    ├── RFC-005-android-emulator-integration.md
+    ├── RFC-006-burst-gpu-workers.md
+    ├── RFC-007-persistent-agent-memory.md
+    └── RFC-008-vm-snapshot-management.md
 ```
 
-## Access Methods
+## Multi-Agent Worktrees
 
-| Method | Use Case | Command |
-|--------|----------|---------|
-| SSH | Terminal access | `ssh -i ~/.ssh/hetzner_workstation agent@167.233.31.65` |
-| SSH + Port Forward | Web UIs locally | `ssh -L 3000:localhost:3000 -L 4000:localhost:4000 ...` |
-| RDP | Full graphical desktop | Any RDP client → `167.233.31.65:3389` |
-| VS Code Remote | IDE with extensions | Remote-SSH extension → `agent@167.233.31.65` |
-| Tailscale | Secure private access | `sudo tailscale up` on server first |
+Each agent session gets isolated resources:
 
-See [remote-desktop-guide.md](remote-desktop-guide.md) for detailed instructions.
+```bash
+# Clone repo as bare (once)
+git clone --bare https://github.com/user/repo.git /opt/workstation/repos/repo.git
 
-## Key Operations
+# Create worktree for agent
+/opt/workstation/scripts/create-worktree.sh repo feature/new-api main
+# → Creates: worktree, tmux session, browser profile, port allocation
 
-| Task | Command |
-|------|---------|
-| Start services | `cd ~/ai-workstation && docker compose up -d` |
-| Stop services | `cd ~/ai-workstation && docker compose down` |
-| View logs | `docker compose logs -f` |
-| Check health | `curl -s http://localhost:4000/health/liveliness` |
-| Test API | `curl -H "Authorization: Bearer $KEY" http://localhost:4000/v1/chat/completions -d '...'` |
-| Start tmux sessions | `~/ai-workstation/scripts/start-sessions.sh` |
-| Pause workstation | Snapshot → Delete server (see [backup.md](backup.md)) |
-| Resume workstation | Create server from snapshot (30 seconds) |
+# List active
+/opt/workstation/scripts/list-worktrees.sh
 
-See [operations.md](operations.md) for comprehensive operations guide.
+# Destroy when done
+/opt/workstation/scripts/destroy-worktree.sh repo-feature-new-api
+```
 
-## Pause/Resume (Cost Saving)
+## Knowledge System
 
-When not in use:
+YAML-based knowledge files activate based on task context:
 
-1. **Snapshot the server** via Hetzner Console
-2. **Delete the server** (stops billing at $74/mo)
-3. **Snapshot storage:** ~$0.36/mo for a 30GB image
+```bash
+python3 /opt/workstation/scripts/knowledge-loader.py \
+  --task "Create a React component with useState" \
+  --packages react typescript
+# → Activates: react-patterns (score 8.5)
+```
 
-To resume: Create new server from snapshot (30 seconds, no setup fee).
+## Installed Tools
 
-See [backup.md](backup.md) for detailed procedures.
+| Category | Tools |
+|----------|-------|
+| Languages | Node.js 22, Python 3.14, zsh |
+| Package Mgmt | npm, uv, pipx |
+| Containers | Docker Engine, Docker Compose |
+| Dev Tools | git, tmux, ripgrep, fd, jq, htop, ncdu |
+| Build | build-essential, curl, wget, unzip |
+| Browser | Google Chrome 149 |
+| Backup | BorgBackup 1.4.4 |
+| Monitoring | prometheus-node-exporter |
+| Security | ufw, fail2ban, chrony, unattended-upgrades |
 
-## Migration to Dedicated
+## Cost Summary
 
-When ready for always-on use, migrate to Hetzner Dedicated AX42-U ($59/mo):
+| Scenario | Monthly |
+|----------|---------|
+| Paused (snapshot only) | $0.36 |
+| Light (5 sessions/day) | ~$92 |
+| Moderate (20 sessions/day) | ~$107 |
+| Heavy (50 sessions/day) | ~$143 |
 
-1. Create snapshot of cloud server
-2. Order AX42-U (1–5 day delivery)
-3. rsync from cloud → dedicated
-4. Update Tailscale routing
-5. Delete cloud server
+All under $200/month. See [docs/cost-model.md](docs/cost-model.md).
 
-All software is infrastructure-agnostic — `setup.sh` works identically on dedicated hardware.
+## Remote Desktop Recommendation
+
+**Evaluated:**
+- **Option A: NoMachine** — Commercial, efficient NX protocol, good for CPU-only servers
+- **Option B: Sunshine + Moonlight** — Open-source, low-latency game streaming protocol
+
+**Recommendation: xRDP (current) + NoMachine (future upgrade)**
+
+For a CPU-only cloud server, xRDP provides reliable baseline access. NoMachine offers better performance (NX protocol is more efficient than RDP for interactive use). Sunshine/Moonlight excels on GPU-equipped servers but requires hardware encoding (NVENC/VAAPI) for optimal performance.
+
+For future Android emulator use (RFC-005), upgrade to Sunshine when GPU hardware is available.
 
 ## Security
 
-- **Network:** Tailscale-only access planned (close port 3389 after Tailscale setup)
+- **Network:** ufw restricts to SSH (22) + RDP (3389) only
 - **SSH:** Key-only authentication (Ed25519), fail2ban enabled
 - **Secrets:** `.env` file (600 permissions, never committed)
 - **Docker:** Agent sandboxes isolated from host
-- **Updates:** Automatic security patches via unattended-upgrades
-- **LiteLLM:** Protected by master key (required for all API calls)
-
-## Requirements
-
-- **Server:** 8+ vCPUs, 32+ GB RAM, Ubuntu 24.04 LTS
-- **API keys:** DeepSeek (required), DashScope/Anthropic/OpenAI (optional)
-- **Tailscale account:** Free at https://tailscale.com
-- **SSH key:** Ed25519 key at `~/.ssh/hetzner_workstation`
-
-## License
-
-Private repository. Not for redistribution.
+- **Updates:** unattended-upgrades for automatic security patches
+- **Time:** chrony for NTP synchronization
+- **LiteLLM:** Protected by master key, $150/mo budget cap

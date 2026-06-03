@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "UI-to-Code Bridge",
+  "version": "0.1.0",
+  "description": "Select UI elements and resolve them to source code locations via source maps",
+  "permissions": ["activeTab", "scripting", "debugger"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:*/*", "http://127.0.0.1:*/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
