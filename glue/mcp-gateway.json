@@ -1,0 +1,54 @@
+{
+  "mcpServers": {
+    "context-bridge": {
+      "command": "python3",
+      "args": ["/opt/workstation/glue/ui-bridge/mcp_server.py"],
+      "description": "Ambient context from browser, editor, and terminal. Tools: get_current_ui_focus, get_current_editor_focus, get_current_terminal_focus, get_full_context, get_recent_ui_events, resolve_ui_focus_to_source"
+    },
+    "serena": {
+      "command": "python3",
+      "args": ["/opt/workstation/glue/serena-mcp/server.py"],
+      "description": "Code intelligence: symbol definitions, references, call graphs, imports. Tools: find_symbol, find_references, get_file_symbols, get_call_graph, search_code, get_imports"
+    },
+    "playwright": {
+      "command": "python3",
+      "args": ["/opt/workstation/glue/playwright-mcp/server.py"],
+      "description": "Live browser automation and verification. Tools: navigate, click, fill, evaluate, get_page_state, get_react_tree, get_accessibility, assert_visible"
+    },
+    "knowledge": {
+      "command": "python3",
+      "args": ["/opt/workstation/glue/knowledge-system/engine.py"],
+      "description": "Project memory and postmortems. Tools: activate_knowledge, add_knowledge, list_knowledge, generate_postmortem, get_postmortem"
+    },
+    "pr-courtroom": {
+      "command": "python3",
+      "args": ["/opt/workstation/glue/pr-courtroom/courtroom.py"],
+      "description": "Multi-agent PR review with specialists. Tools: run_courtroom, run_specialist, list_specialists, get_review"
+    },
+    "ownership-map": {
+      "command": "python3",
+      "args": ["/opt/workstation/glue/ownership-map/mapper.py"],
+      "description": "Runtime ownership tracing: route→component→API→handler→DB. Tools: trace_route, trace_component, scan_routes, scan_api_endpoints, get_ownership_map"
+    },
+    "recorder": {
+      "command": "python3",
+      "args": ["/opt/workstation/glue/black-box-recorder/recorder.py"],
+      "description": "Session black box recorder. Tools: start_recording, stop_recording, record_event, get_recording, get_session_diff"
+    },
+    "timeline": {
+      "command": "python3",
+      "args": ["/opt/workstation/glue/timeline/checkpoints.py"],
+      "description": "Rewindable development timeline with git checkpoints. Tools: create_checkpoint, list_checkpoints, rewind_to, compare_checkpoints, get_timeline"
+    },
+    "service-leasing": {
+      "command": "python3",
+      "args": ["/opt/workstation/glue/service-leasing/leaser.py"],
+      "description": "Cross-session resource management. Tools: lease_port, release_port, lease_service, release_service, acquire_lock, release_lock, list_leases, check_conflicts"
+    },
+    "ask-app": {
+      "command": "python3",
+      "args": ["/opt/workstation/glue/ask-app/server.py"],
+      "description": "Query running app state via CDP. Tools: ask_route, ask_component, ask_network, ask_console, ask_storage, ask_props, ask_state, ask_dom, ask_performance, ask_cookies"
+    }
+  }
+}
