@@ -91,18 +91,72 @@ def log_event(event: dict):
     with open(EVENTS_LOG, "a") as f:
         f.write(json.dumps(event) + "\n")
 
-def write_session_context(session_id: str, event: dict):
-    """Write event to session-specific context files."""
-    session_dir = SESSIONS_DIR / session_id / "context"
-    session_dir.mkdir(parents=True, exist_ok=True)
+def resolve_session_id(event_session_id: str, url: str) -> str:
+    """Resolve the actual session from URL port, browser profile, or explicit ID."""
+    # If explicit and not auto-generated, use it
+    if event_session_id and not event_session_id.startswith("session-port-"):
+        return event_session_id
 
-    # Append to JSONL
-    events_file = session_dir / "ui-events.jsonl"
+    # Extract port from URL
+    target_port = None
+    if url:
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            target_port = parsed.port
+        except Exception:
+            pass
+
+    # Search sessions by port range
+    if target_port:
+        for session_dir in SESSIONS_DIR.iterdir():
+            meta_file = session_dir / "session.json"
+            if meta_file.exists():
+                try:
+                    meta = json.loads(meta_file.read_text())
+                    port_range = meta.get("port_range", "")
+                    if "-" in port_range:
+                        start, end = port_range.split("-")
+                        if int(start) <= target_port <= int(end):
+                            return session_dir.name
+                except (json.JSONDecodeError, OSError, ValueError):
+                    continue
+
+    # Fallback: use the most recently active session
+    latest = None
+    latest_time = 0
+    for session_dir in SESSIONS_DIR.iterdir():
+        if not session_dir.is_dir():
+            continue
+        meta_file = session_dir / "session.json"
+        if meta_file.exists():
+            mtime = meta_file.stat().st_mtime
+            if mtime > latest_time:
+                latest_time = mtime
+                latest = session_dir.name
+
+    if latest:
+        return latest
+
+    # Last resort: use the provided ID (creates session dir on write)
+    return event_session_id or "default"
+
+
+def write_session_context(session_id: str, event: dict):
+    """Write event to session-specific context and events files."""
+    base_dir = SESSIONS_DIR / session_id
+    context_dir = base_dir / "context"
+    events_dir = base_dir / "events"
+    context_dir.mkdir(parents=True, exist_ok=True)
+    events_dir.mkdir(parents=True, exist_ok=True)
+
+    # Append to JSONL in events/
+    events_file = events_dir / "ui-events.jsonl"
     with open(events_file, "a") as f:
         f.write(json.dumps(event) + "\n")
 
-    # Write human/agent-readable context
-    md_file = session_dir / "latest-ui-context.md"
+    # Write human/agent-readable context in context/
+    md_file = context_dir / "latest-ui-context.md"
     md_content = generate_context_md(event)
     with open(md_file, "w") as f:
         f.write(md_content)
@@ -190,26 +244,30 @@ def get_sessions() -> list[dict]:
 
 @app.post("/selection")
 async def handle_selection(event: UIEvent):
+    resolved_session = resolve_session_id(event.session_id, event.url)
     event_dict = event.model_dump(by_alias=True)
+    event_dict["session_id"] = resolved_session
     event_dict["timestamp"] = event_dict.get("timestamp") or datetime.now(timezone.utc).isoformat()
     event_dict["event_id"] = str(uuid.uuid4())
 
     log_event(event_dict)
-    write_session_context(event.session_id, event_dict)
+    write_session_context(resolved_session, event_dict)
 
-    return {"status": "ok", "event_id": event_dict["event_id"]}
+    return {"status": "ok", "event_id": event_dict["event_id"], "session_id": resolved_session}
 
 @app.post("/inspect")
 async def handle_inspect(event: UIEvent):
+    resolved_session = resolve_session_id(event.session_id, event.url)
     event_dict = event.model_dump(by_alias=True)
     event_dict["type"] = "inspect"
+    event_dict["session_id"] = resolved_session
     event_dict["timestamp"] = event_dict.get("timestamp") or datetime.now(timezone.utc).isoformat()
     event_dict["event_id"] = str(uuid.uuid4())
 
     log_event(event_dict)
-    write_session_context(event.session_id, event_dict)
+    write_session_context(resolved_session, event_dict)
 
-    return {"status": "ok", "event_id": event_dict["event_id"]}
+    return {"status": "ok", "event_id": event_dict["event_id"], "session_id": resolved_session}
 
 @app.get("/events")
 async def get_events(session_id: Optional[str] = Query(None), limit: int = Query(50)):
