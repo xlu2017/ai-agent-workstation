@@ -275,9 +275,134 @@ function LogsPage() {
   )
 }
 
+function TimelinePage() {
+  const { data: sessions } = useFetch<{ sessions: Session[] }>(`${API}/sessions`)
+  const [selected, setSelected] = useState('')
+  const [timeline, setTimeline] = useState<any>(null)
+
+  useEffect(() => {
+    if (selected) {
+      fetch(`${API}/sessions/${selected}/timeline`).then(r => r.json()).then(setTimeline)
+    }
+  }, [selected])
+
+  return (
+    <div>
+      <h2>Timeline</h2>
+      <select className="btn" style={{ marginBottom: 16 }} value={selected} onChange={e => setSelected(e.target.value)}>
+        <option value="">Select session...</option>
+        {sessions?.sessions.map(s => <option key={s.id} value={s.id}>{s.id}</option>)}
+      </select>
+      {timeline?.summary && (
+        <div className="grid">
+          <div className="card stat">
+            <div className="stat-value">${timeline.summary.cost_usd?.toFixed(4) || '0.00'}</div>
+            <div className="stat-label">Cost</div>
+          </div>
+          <div className="card stat">
+            <div className="stat-value">{timeline.summary.files_edited || 0}</div>
+            <div className="stat-label">Files Edited</div>
+          </div>
+          <div className="card stat">
+            <div className="stat-value">{timeline.summary.commands_run || 0}</div>
+            <div className="stat-label">Commands</div>
+          </div>
+          <div className="card stat">
+            <div className="stat-value">{timeline.summary.tests_passed || 0}/{(timeline.summary.tests_passed || 0) + (timeline.summary.tests_failed || 0)}</div>
+            <div className="stat-label">Tests Pass</div>
+          </div>
+        </div>
+      )}
+      {timeline?.events?.length > 0 && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card-title" style={{ marginBottom: 12 }}>Events</div>
+          <div className="log-output">
+            {timeline.events.map((ev: any, i: number) => {
+              const ts = (ev.timestamp || '').slice(11, 19)
+              const icon = ev.type === 'error' ? '✗' : ev.type === 'test_result' ? (ev.passed ? '✓' : '✗') : '·'
+              return <div key={i} style={{ color: ev.type === 'error' || (ev.type === 'test_result' && !ev.passed) ? 'var(--red)' : 'inherit' }}>
+                {ts} {icon} <strong>{ev.type}</strong> {ev.file || ev.command?.slice(0, 50) || ev.test || ev.model || ev.summary || ''}
+              </div>
+            })}
+          </div>
+        </div>
+      )}
+      {timeline && !timeline.events?.length && <div className="card"><p className="meta">No events recorded yet</p></div>}
+    </div>
+  )
+}
+
+function PostmortemPage() {
+  const { data: proposed } = useFetch<{ triggers: any[] }>(`${API}/knowledge/proposed`, 10000)
+  const { data: sessions } = useFetch<{ sessions: Session[] }>(`${API}/sessions`)
+  const [selected, setSelected] = useState('')
+  const [result, setResult] = useState<any>(null)
+
+  const generate = () => {
+    if (selected) {
+      fetch(`${API}/sessions/${selected}/postmortem`, { method: 'POST' })
+        .then(r => r.json()).then(setResult)
+    }
+  }
+
+  const approve = (id: string) => {
+    fetch(`${API}/knowledge/approve/${id}`, { method: 'POST' })
+      .then(r => r.json()).then(() => alert('Trigger approved!'))
+  }
+
+  return (
+    <div>
+      <h2>Postmortems & Learning</h2>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <select className="btn" value={selected} onChange={e => setSelected(e.target.value)}>
+          <option value="">Select session...</option>
+          {sessions?.sessions.map(s => <option key={s.id} value={s.id}>{s.id}</option>)}
+        </select>
+        <button className="btn" onClick={generate} disabled={!selected}>Generate Postmortem</button>
+      </div>
+
+      {result && (
+        <div className="card">
+          <div className="card-title" style={{ marginBottom: 8 }}>Postmortem: {result.session_id}</div>
+          <p><strong>Outcome:</strong> {result.outcome}</p>
+          <p><strong>Reason:</strong> {result.failure_reason}</p>
+          {result.root_causes?.map((c: string, i: number) => <p key={i} className="meta">Root cause: {c}</p>)}
+          {result.proposed_triggers?.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <strong>Proposed Knowledge Triggers:</strong>
+              {result.proposed_triggers.map((t: any) => (
+                <div key={t.id} style={{ marginTop: 8, padding: 8, border: '1px solid var(--border)' }}>
+                  <p>{t.description}</p>
+                  <p className="meta">{t.content}</p>
+                  <button className="btn" onClick={() => approve(t.id)} style={{ marginTop: 4 }}>Approve</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {proposed?.triggers?.length ? (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="card-title" style={{ marginBottom: 12 }}>Pending Triggers ({proposed.triggers.length})</div>
+          {proposed.triggers.map((t: any, i: number) => (
+            <div key={i} style={{ marginBottom: 8, padding: 8, border: '1px solid var(--border)' }}>
+              <p><strong>{t.id}</strong></p>
+              <p className="meta">{t.description}</p>
+              <button className="btn" onClick={() => approve(t.id)}>Approve</button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 const PAGES: Record<string, () => JSX.Element> = {
   Sessions: SessionsPage,
   Context: ContextPage,
+  Timeline: TimelinePage,
+  Postmortem: PostmortemPage,
   Models: ModelsPage,
   Knowledge: KnowledgePage,
   Health: HealthPage,
