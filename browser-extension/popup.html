@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { width: 280px; padding: 16px; font-family: system-ui; }
+    h2 { margin: 0 0 12px; font-size: 16px; }
+    button { width: 100%; padding: 10px; margin: 4px 0; cursor: pointer;
+             border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+    button:hover { background: #f0f0f0; }
+    .status { font-size: 12px; color: #666; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h2>UI-to-Code Bridge</h2>
+  <button id="activate">Select Element</button>
+  <button id="deactivate">Cancel</button>
+  <div class="status" id="status">Ready. Click "Select Element" to start.</div>
+  <script src="popup.js"></script>
+</body>
+</html>

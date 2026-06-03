@@ -81,8 +81,9 @@ general_settings:
   store_model_in_db: false
   json_logs: true
 
-# --- Budget/rate limiting (optional) ---
-# Uncomment to enforce spending limits
-# litellm_settings:
-#   max_budget: 150.0        # $150/month max across all models
-#   budget_duration: "monthly"
+# --- Logging ---
+litellm_settings:
+  success_callback: ["log_to_file"]
+  log_file: "/app/logs/litellm_requests.log"
+  max_budget: 150.0
+  budget_duration: "monthly"

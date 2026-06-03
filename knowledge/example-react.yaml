@@ -1,0 +1,48 @@
+id: react-patterns
+description: React development patterns and conventions for this workstation
+activation_keywords:
+  - react
+  - jsx
+  - tsx
+  - component
+  - useState
+  - useEffect
+  - hook
+activation_paths:
+  - "src/components/"
+  - "src/pages/"
+  - "app/"
+  - "*.tsx"
+  - "*.jsx"
+activation_packages:
+  - react
+  - react-dom
+  - next
+  - "@tanstack/react-query"
+content: |
+  ## React Development Patterns
+
+  ### Component Structure
+  - Use functional components with TypeScript
+  - Colocate tests with components: `Component.test.tsx`
+  - Colocate styles: `Component.module.css` or styled-components
+
+  ### State Management
+  - Local state: useState/useReducer
+  - Server state: TanStack Query (react-query)
+  - Global state: Zustand (preferred) or Context
+
+  ### File Naming
+  - Components: PascalCase (`UserProfile.tsx`)
+  - Utilities: camelCase (`formatDate.ts`)
+  - Constants: UPPER_SNAKE (`API_ENDPOINTS.ts`)
+
+  ### Testing
+  - Unit: Vitest + React Testing Library
+  - E2E: Playwright
+  - Run: `npm test` or `vitest`
+
+  ### Hot Reload
+  - Vite: `npm run dev` (port 5173)
+  - Next.js: `npm run dev` (port 3000)
+  - Ensure `--host 0.0.0.0` for remote access
