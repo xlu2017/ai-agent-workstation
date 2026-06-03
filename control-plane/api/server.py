@@ -333,6 +333,68 @@ def list_knowledge():
     return {"entries": entries}
 
 
+# --- Timeline ---
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "core"))
+
+
+@app.get("/api/sessions/{session_id}/timeline")
+def get_timeline(session_id: str, limit: int = 100):
+    from timeline import Timeline
+    tl = Timeline(session_id)
+    return {"events": tl.get_events(limit=limit), "summary": tl.get_summary()}
+
+
+@app.get("/api/sessions/{session_id}/timeline/summary")
+def get_timeline_summary(session_id: str):
+    from timeline import Timeline
+    tl = Timeline(session_id)
+    return tl.get_summary()
+
+
+# --- Context Validation ---
+
+@app.get("/api/sessions/{session_id}/context/health")
+def get_context_health_endpoint(session_id: str):
+    from context_validator import get_context_health
+    return get_context_health(session_id)
+
+
+# --- Postmortem ---
+
+@app.post("/api/sessions/{session_id}/postmortem")
+def generate_postmortem(session_id: str, reason: str = ""):
+    from postmortem import Postmortem
+    pm = Postmortem(session_id)
+    return pm.generate(reason)
+
+
+@app.get("/api/knowledge/proposed")
+def list_proposed_triggers():
+    proposed_dir = KNOWLEDGE_DIR / "proposed"
+    if not proposed_dir.exists():
+        return {"triggers": []}
+    triggers = []
+    for f in proposed_dir.glob("*"):
+        try:
+            import yaml
+            triggers.append(yaml.safe_load(f.read_text()))
+        except Exception:
+            try:
+                triggers.append(json.loads(f.read_text()))
+            except Exception:
+                continue
+    return {"triggers": triggers}
+
+
+@app.post("/api/knowledge/approve/{trigger_id}")
+def approve_knowledge_trigger(trigger_id: str):
+    from postmortem import approve_trigger
+    if approve_trigger(trigger_id):
+        return {"status": "approved", "trigger_id": trigger_id}
+    raise HTTPException(404, f"Trigger '{trigger_id}' not found")
+
+
 # --- Static files (web dashboard) ---
 
 STATIC_DIR = Path(__file__).parent.parent / "web" / "dist"

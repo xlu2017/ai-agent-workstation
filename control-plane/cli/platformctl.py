@@ -387,6 +387,115 @@ def cmd_knowledge_list(args):
             print(f"{e.get('id', '?'):<20} {e.get('confidence', '-'):<12} {e.get('description', '-')[:40]}")
 
 
+def cmd_doctor(args):
+    """Run system diagnostics."""
+    import urllib.request
+    print("=== platformctl doctor ===\n")
+    issues = []
+
+    # Check services
+    services = {
+        "LiteLLM": f"{LITELLM_URL}/health/liveliness",
+        "OpenHands": OPENHANDS_URL,
+        "UI Bridge": f"http://localhost:9876/sessions",
+        "Control Plane": "http://localhost:9877/api/health",
+    }
+    for name, url in services.items():
+        try:
+            urllib.request.urlopen(url, timeout=3)
+            print(f"  [OK] {name}")
+        except Exception as e:
+            print(f"  [!!] {name} — {str(e)[:60]}")
+            issues.append(f"{name} unreachable")
+
+    # Check directories
+    print()
+    dirs = [SESSIONS_DIR, KNOWLEDGE_DIR, Path("/opt/workstation/repos"), Path("/opt/workstation/backups")]
+    for d in dirs:
+        if d.exists():
+            print(f"  [OK] {d}")
+        else:
+            print(f"  [!!] {d} — MISSING")
+            issues.append(f"Directory {d} missing")
+
+    # Check Docker
+    print()
+    try:
+        result = subprocess.run(["docker", "ps", "--format", "{{.Names}}:{{.Status}}"], capture_output=True, text=True)
+        for line in result.stdout.strip().split("\n"):
+            if line:
+                print(f"  [OK] container: {line}")
+    except Exception:
+        print("  [!!] Docker not available")
+        issues.append("Docker unavailable")
+
+    # Check disk space
+    print()
+    try:
+        result = subprocess.run(["df", "-h", "/"], capture_output=True, text=True)
+        parts = result.stdout.strip().split("\n")[-1].split()
+        pct = int(parts[4].replace("%", ""))
+        if pct > 90:
+            print(f"  [!!] Disk: {parts[4]} used — LOW SPACE")
+            issues.append("Low disk space")
+        else:
+            print(f"  [OK] Disk: {parts[4]} used")
+    except Exception:
+        pass
+
+    print(f"\n{'='*40}")
+    if issues:
+        print(f"  {len(issues)} issue(s) found:")
+        for i in issues:
+            print(f"    - {i}")
+    else:
+        print("  All checks passed. System healthy.")
+
+
+def cmd_backup(args):
+    """Backup workstation state."""
+    backup_dir = Path("/opt/workstation/backups")
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    backup_path = backup_dir / f"backup-{timestamp}.tar.gz"
+
+    targets = [
+        "/opt/workstation/sessions",
+        "/opt/workstation/knowledge",
+        "/opt/workstation/config",
+    ]
+    existing = [t for t in targets if Path(t).exists()]
+
+    result = subprocess.run(
+        ["tar", "czf", str(backup_path)] + existing,
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        size = backup_path.stat().st_size
+        print(f"Backup created: {backup_path} ({size // 1024}KB)")
+    else:
+        print(f"Backup failed: {result.stderr}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_restore(args):
+    """Restore from backup."""
+    backup_file = args.file
+    if not Path(backup_file).exists():
+        print(f"Backup file not found: {backup_file}", file=sys.stderr)
+        sys.exit(1)
+
+    result = subprocess.run(
+        ["tar", "xzf", backup_file, "-C", "/"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        print(f"Restored from: {backup_file}")
+    else:
+        print(f"Restore failed: {result.stderr}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="platformctl", description="Workstation control plane CLI")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
@@ -443,6 +552,16 @@ def main():
     knowledge_sub = knowledge_parser.add_subparsers(dest="subcommand")
     knowledge_sub.add_parser("list", help="List entries").add_argument("--json", action="store_true")
 
+    # doctor
+    subparsers.add_parser("doctor", help="Run system diagnostics")
+
+    # backup
+    subparsers.add_parser("backup", help="Backup workstation state")
+
+    # restore
+    restore_parser = subparsers.add_parser("restore", help="Restore from backup")
+    restore_parser.add_argument("file", help="Backup file path")
+
     args = parser.parse_args()
 
     if args.command == "session":
@@ -475,6 +594,12 @@ def main():
             cmd_knowledge_list(args)
         else:
             knowledge_parser.print_help()
+    elif args.command == "doctor":
+        cmd_doctor(args)
+    elif args.command == "backup":
+        cmd_backup(args)
+    elif args.command == "restore":
+        cmd_restore(args)
     else:
         parser.print_help()
 
