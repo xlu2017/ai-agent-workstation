@@ -252,6 +252,64 @@ def tool_resolve_ui_focus_to_source(arguments):
     return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
 
 
+def tool_get_current_terminal_focus(arguments):
+    """Returns the latest terminal error/failure context."""
+    session_id = arguments.get("session_id")
+    sid, meta = find_active_session(session_id)
+    if not sid:
+        return {"content": [{"type": "text", "text": "No active session found."}]}
+
+    md_file = SESSIONS_DIR / sid / "context" / "latest-terminal-context.md"
+    if md_file.exists():
+        return {"content": [{"type": "text", "text": md_file.read_text()}]}
+
+    return {"content": [{"type": "text", "text": f"No terminal errors captured for session '{sid}' yet."}]}
+
+
+def tool_get_current_editor_focus(arguments):
+    """Returns the latest editor focus/selection context."""
+    session_id = arguments.get("session_id")
+    sid, meta = find_active_session(session_id)
+    if not sid:
+        return {"content": [{"type": "text", "text": "No active session found."}]}
+
+    md_file = SESSIONS_DIR / sid / "context" / "latest-editor-context.md"
+    if md_file.exists():
+        return {"content": [{"type": "text", "text": md_file.read_text()}]}
+
+    return {"content": [{"type": "text", "text": f"No editor context captured for session '{sid}' yet."}]}
+
+
+def tool_get_full_context(arguments):
+    """Returns all ambient context: UI + editor + terminal combined."""
+    session_id = arguments.get("session_id")
+    sid, meta = find_active_session(session_id)
+    if not sid:
+        return {"content": [{"type": "text", "text": "No active session found."}]}
+
+    parts = [f"# Full Ambient Context (session: {sid})\n"]
+
+    # UI context
+    ui_file = SESSIONS_DIR / sid / "context" / "latest-ui-context.md"
+    if ui_file.exists():
+        parts.append("---\n" + ui_file.read_text())
+
+    # Editor context
+    editor_file = SESSIONS_DIR / sid / "context" / "latest-editor-context.md"
+    if editor_file.exists():
+        parts.append("---\n" + editor_file.read_text())
+
+    # Terminal context
+    terminal_file = SESSIONS_DIR / sid / "context" / "latest-terminal-context.md"
+    if terminal_file.exists():
+        parts.append("---\n" + terminal_file.read_text())
+
+    if len(parts) == 1:
+        return {"content": [{"type": "text", "text": f"No context captured for session '{sid}' yet."}]}
+
+    return {"content": [{"type": "text", "text": "\n".join(parts)}]}
+
+
 # --- MCP Server Main Loop ---
 
 TOOLS = [
@@ -290,6 +348,36 @@ TOOLS = [
             },
         },
     },
+    {
+        "name": "get_current_terminal_focus",
+        "description": "Returns the latest terminal error or failure context. Use this when the user says 'fix this error', 'why did it fail', or refers to a test/build failure. Returns the failing command, exit code, stack trace, and file locations.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "Optional session ID."},
+            },
+        },
+    },
+    {
+        "name": "get_current_editor_focus",
+        "description": "Returns the current editor focus: active file, cursor position, selected text, visible range, and diagnostics. Use this when the user says 'make this safer', 'refactor this', or refers to code they're looking at in the editor.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "Optional session ID."},
+            },
+        },
+    },
+    {
+        "name": "get_full_context",
+        "description": "Returns ALL ambient context combined: browser UI focus + editor focus + terminal errors. Use this when the user gives a vague instruction like 'fix this' and you need to determine what 'this' refers to across all interfaces.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "Optional session ID."},
+            },
+        },
+    },
 ]
 
 
@@ -302,7 +390,7 @@ def handle_request(msg):
         return make_response(id, {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "ui-bridge-mcp", "version": "0.2.0"},
+            "serverInfo": {"name": "context-mcp-server", "version": "0.3.0"},
         })
 
     elif method == "notifications/initialized":
@@ -321,6 +409,12 @@ def handle_request(msg):
             result = tool_get_recent_ui_events(arguments)
         elif tool_name == "resolve_ui_focus_to_source":
             result = tool_resolve_ui_focus_to_source(arguments)
+        elif tool_name == "get_current_terminal_focus":
+            result = tool_get_current_terminal_focus(arguments)
+        elif tool_name == "get_current_editor_focus":
+            result = tool_get_current_editor_focus(arguments)
+        elif tool_name == "get_full_context":
+            result = tool_get_full_context(arguments)
         else:
             return make_error(id, -32601, f"Unknown tool: {tool_name}")
 

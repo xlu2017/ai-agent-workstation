@@ -1,0 +1,51 @@
+{
+  "name": "workstation-editor-bridge",
+  "displayName": "Workstation Editor Bridge",
+  "description": "Sends editor focus/selection context to the AI agent workstation bridge service",
+  "version": "0.1.0",
+  "publisher": "workstation",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "workstation.sendEditorContext",
+        "title": "Workstation: Send Editor Context to Agent"
+      }
+    ],
+    "configuration": {
+      "title": "Workstation Editor Bridge",
+      "properties": {
+        "workstation.bridgeUrl": {
+          "type": "string",
+          "default": "http://localhost:9876",
+          "description": "URL of the UI bridge service"
+        },
+        "workstation.sessionId": {
+          "type": "string",
+          "default": "",
+          "description": "Session ID (auto-detected from WORKSTATION_SESSION_ID env var if empty)"
+        },
+        "workstation.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable the editor bridge"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
