@@ -44,8 +44,13 @@ docker compose logs --tail=100 litellm
 ### Check health
 
 ```bash
-# LiteLLM
-curl -s http://localhost:4000/health | jq .
+# LiteLLM liveness (no auth required)
+curl -s http://localhost:4000/health/liveliness
+# Expected: "I'm alive!"
+
+# LiteLLM full health (requires auth)
+curl -s http://localhost:4000/health \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq .
 
 # OpenHands
 curl -s http://localhost:3000
@@ -61,12 +66,17 @@ docker compose ps
 ### Test a model via LiteLLM
 
 ```bash
-curl -s http://localhost:4000/chat/completions \
-  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" \
+# Load the master key
+export LITELLM_MASTER_KEY=$(grep LITELLM_MASTER_KEY ~/ai-workstation/.env | cut -d= -f2)
+
+# Make a test call
+curl -s http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "deepseek-v4-flash",
-    "messages": [{"role": "user", "content": "Hello, respond with one word."}]
+    "messages": [{"role": "user", "content": "Hello, respond with one word."}],
+    "max_tokens": 50
   }' | jq .choices[0].message.content
 ```
 

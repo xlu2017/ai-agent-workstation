@@ -75,11 +75,10 @@ router_settings:
     - qwen-turbo: ["deepseek-v4-flash", "claude-haiku"]
 
 # --- General settings ---
+# Note: master_key is passed via LITELLM_MASTER_KEY env var in docker-compose.yml.
+# Do NOT put it in this file — it causes LiteLLM to require a PostgreSQL database.
 general_settings:
-  master_key: "os.environ/LITELLM_MASTER_KEY"
-  # Cost tracking
   store_model_in_db: false
-  # Logging
   json_logs: true
 
 # --- Budget/rate limiting (optional) ---
