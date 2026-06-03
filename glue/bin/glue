@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""
+glue — Session registry and management CLI for the AI agent workstation.
+
+Commands:
+  glue session list       — List active sessions
+  glue session create     — Create a new session (wraps par)
+  glue session destroy    — Destroy a session
+  glue session inspect    — Show session details
+  glue bridge start       — Start UI bridge service
+  glue bridge status      — Check bridge health
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+SESSIONS_DIR = Path(os.environ.get("SESSIONS_DIR", "/opt/workstation/sessions"))
+GLUE_DIR = Path("/opt/workstation/glue")
+
+
+def ensure_sessions_dir():
+    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def session_list(args):
+    """List all active sessions."""
+    ensure_sessions_dir()
+    sessions = []
+    for session_dir in sorted(SESSIONS_DIR.iterdir()):
+        meta_file = session_dir / "session.json"
+        if meta_file.exists():
+            try:
+                meta = json.loads(meta_file.read_text())
+                # Check if tmux session is alive
+                tmux_name = meta.get("tmux_session", "")
+                alive = False
+                if tmux_name:
+                    result = subprocess.run(
+                        ["tmux", "has-session", "-t", tmux_name],
+                        capture_output=True
+                    )
+                    alive = result.returncode == 0
+                meta["status"] = "ACTIVE" if alive else "STOPPED"
+                sessions.append(meta)
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    if not sessions:
+        print("No active sessions.")
+        return
+
+    # Table output
+    print(f"{'ID':<25} {'STATUS':<10} {'BRANCH':<25} {'PORT':<8} {'REPO'}")
+    print("-" * 100)
+    for s in sessions:
+        print(f"{s.get('id', '?'):<25} {s.get('status', '?'):<10} {s.get('branch', '?'):<25} {s.get('port_range', '?'):<8} {s.get('repo_path', '?')}")
+
+
+def session_create(args):
+    """Create a new session using par (if in a git repo) or standalone."""
+    ensure_sessions_dir()
+
+    session_id = args.name or f"session-{int(time.time())}"
+    session_dir = SESSIONS_DIR / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    (session_dir / "context").mkdir(exist_ok=True)
+
+    repo_path = args.repo or os.getcwd()
+    branch = args.branch or session_id
+
+    # Try to use par for worktree creation
+    par_available = shutil.which("par") is not None
+    tmux_session = ""
+    worktree_path = ""
+    port_start = allocate_port()
+
+    if par_available and os.path.isdir(os.path.join(repo_path, ".git")):
+        result = subprocess.run(
+            ["par", "create", session_id, "--path", repo_path],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            tmux_session = session_id
+            worktree_path = f"{repo_path}-{session_id}"  # par convention
+            print(f"Created session via par: {session_id}")
+        else:
+            print(f"par failed: {result.stderr.strip()}")
+            tmux_session = f"agent-{session_id}"
+            subprocess.run(["tmux", "new-session", "-d", "-s", tmux_session], capture_output=True)
+    else:
+        tmux_session = f"agent-{session_id}"
+        subprocess.run(["tmux", "new-session", "-d", "-s", tmux_session], capture_output=True)
+
+    # Write session metadata
+    meta = {
+        "id": session_id,
+        "repo_path": repo_path,
+        "worktree_path": worktree_path,
+        "branch": branch,
+        "tmux_session": tmux_session,
+        "browser_profile": f"/opt/workstation/profiles/{session_id}",
+        "port_range": f"{port_start}-{port_start + 9}",
+        "openhands_workspace": f"/opt/workstation/sessions/{session_id}/workspace",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    (session_dir / "session.json").write_text(json.dumps(meta, indent=2))
+    print(f"Session created: {session_id}")
+    print(f"  tmux: {tmux_session}")
+    print(f"  ports: {port_start}-{port_start + 9}")
+    print(f"  context dir: {session_dir / 'context'}")
+
+
+def session_destroy(args):
+    """Destroy a session and clean up resources."""
+    ensure_sessions_dir()
+    session_id = args.name
+    session_dir = SESSIONS_DIR / session_id
+
+    if not session_dir.exists():
+        print(f"Session not found: {session_id}")
+        sys.exit(1)
+
+    meta_file = session_dir / "session.json"
+    if meta_file.exists():
+        meta = json.loads(meta_file.read_text())
+
+        # Kill tmux session
+        tmux = meta.get("tmux_session", "")
+        if tmux:
+            subprocess.run(["tmux", "kill-session", "-t", tmux], capture_output=True)
+
+        # Try par destroy
+        par_available = shutil.which("par") is not None
+        if par_available:
+            subprocess.run(["par", "destroy", session_id], capture_output=True)
+
+    # Remove session directory
+    shutil.rmtree(session_dir, ignore_errors=True)
+    print(f"Session destroyed: {session_id}")
+
+
+def session_inspect(args):
+    """Show detailed session information."""
+    ensure_sessions_dir()
+    session_id = args.name
+    session_dir = SESSIONS_DIR / session_id
+    meta_file = session_dir / "session.json"
+
+    if not meta_file.exists():
+        print(f"Session not found: {session_id}")
+        sys.exit(1)
+
+    meta = json.loads(meta_file.read_text())
+    print(json.dumps(meta, indent=2))
+
+    # Show context if available
+    context_file = session_dir / "context" / "latest-ui-context.md"
+    if context_file.exists():
+        print("\n--- Latest UI Context ---")
+        print(context_file.read_text())
+
+
+def bridge_start(args):
+    """Start the UI bridge service."""
+    server_path = GLUE_DIR / "ui-bridge" / "server.py"
+    port = args.port or 9876
+    print(f"Starting UI bridge on port {port}...")
+    os.execvp("uvicorn", ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", str(port), "--app-dir", str(server_path.parent)])
+
+
+def bridge_status(args):
+    """Check bridge service health."""
+    import urllib.request
+    try:
+        resp = urllib.request.urlopen("http://localhost:9876/health", timeout=3)
+        data = json.loads(resp.read())
+        print(f"Bridge service: {data.get('status', 'unknown')} (v{data.get('version', '?')})")
+    except Exception as e:
+        print(f"Bridge service not running: {e}")
+        sys.exit(1)
+
+
+def allocate_port():
+    """Allocate the next available port range."""
+    port_file = Path("/opt/workstation/.port-allocations")
+    if port_file.exists():
+        lines = port_file.read_text().strip().split("\n")
+        if lines:
+            last_port = max(int(l.split(":")[0]) for l in lines if ":" in l)
+            next_port = last_port + 10
+        else:
+            next_port = 5000
+    else:
+        next_port = 5000
+
+    port_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(port_file, "a") as f:
+        f.write(f"{next_port}:allocated:{datetime.now(timezone.utc).isoformat()}\n")
+
+    return next_port
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="glue", description="AI Agent Workstation Glue")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # Session commands
+    session_parser = subparsers.add_parser("session", help="Session management")
+    session_sub = session_parser.add_subparsers(dest="action")
+
+    list_p = session_sub.add_parser("list", help="List sessions")
+    list_p.set_defaults(func=session_list)
+
+    create_p = session_sub.add_parser("create", help="Create session")
+    create_p.add_argument("name", nargs="?", help="Session name/ID")
+    create_p.add_argument("--repo", help="Repository path")
+    create_p.add_argument("--branch", help="Branch name")
+    create_p.set_defaults(func=session_create)
+
+    destroy_p = session_sub.add_parser("destroy", help="Destroy session")
+    destroy_p.add_argument("name", help="Session ID")
+    destroy_p.set_defaults(func=session_destroy)
+
+    inspect_p = session_sub.add_parser("inspect", help="Inspect session")
+    inspect_p.add_argument("name", help="Session ID")
+    inspect_p.set_defaults(func=session_inspect)
+
+    # Bridge commands
+    bridge_parser = subparsers.add_parser("bridge", help="UI bridge management")
+    bridge_sub = bridge_parser.add_subparsers(dest="action")
+
+    start_p = bridge_sub.add_parser("start", help="Start bridge service")
+    start_p.add_argument("--port", type=int, help="Port (default 9876)")
+    start_p.set_defaults(func=bridge_start)
+
+    status_p = bridge_sub.add_parser("status", help="Bridge status")
+    status_p.set_defaults(func=bridge_status)
+
+    args = parser.parse_args()
+    if hasattr(args, "func"):
+        args.func(args)
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

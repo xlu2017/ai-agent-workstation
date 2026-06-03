@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "AI Agent UI Bridge",
+  "version": "0.2.0",
+  "description": "Select or inspect UI elements and send source-aware context to AI coding agents",
+  "permissions": ["activeTab", "scripting", "contextMenus"],
+  "host_permissions": ["http://localhost:*/*", "http://127.0.0.1:*/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AI Agent UI Bridge"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:*/*", "http://127.0.0.1:*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["element-source.global.js", "element-source-page.js"],
+      "matches": ["http://localhost:*/*", "http://127.0.0.1:*/*"]
+    }
+  ]
+}
