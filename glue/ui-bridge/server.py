@@ -303,9 +303,97 @@ async def push_context(session_id: str, event: UIEvent):
     write_session_context(session_id, event_dict)
     return {"status": "ok", "session_id": session_id}
 
+@app.post("/editor-context")
+async def handle_editor_context(request: dict):
+    """Receive editor focus/selection context from VS Code bridge extension."""
+    session_id = resolve_session_id(request.get("session_id", ""), request.get("url", ""))
+    request["session_id"] = session_id
+    request["timestamp"] = request.get("timestamp") or datetime.now(timezone.utc).isoformat()
+
+    # Write to session-specific files
+    base_dir = SESSIONS_DIR / session_id
+    context_dir = base_dir / "context"
+    events_dir = base_dir / "events"
+    context_dir.mkdir(parents=True, exist_ok=True)
+    events_dir.mkdir(parents=True, exist_ok=True)
+
+    # Append to editor events JSONL
+    jsonl_file = events_dir / "editor-events.jsonl"
+    with open(jsonl_file, "a") as f:
+        f.write(json.dumps(request) + "\n")
+
+    # Write latest editor context markdown
+    md_file = context_dir / "latest-editor-context.md"
+    md_content = generate_editor_md(request)
+    with open(md_file, "w") as f:
+        f.write(md_content)
+
+    return {"status": "ok", "session_id": session_id}
+
+
+def generate_editor_md(event: dict) -> str:
+    """Generate agent-readable markdown from an editor context event."""
+    selection = event.get("selection", {})
+    cursor = event.get("cursor", {})
+    visible = event.get("visibleRange", {})
+    diagnostics = event.get("diagnostics", [])
+
+    lines = [
+        "# Latest Editor Context",
+        "",
+        f"**File:** `{event.get('file', 'unknown')}`",
+        f"**Language:** {event.get('language', 'unknown')}",
+        f"**Branch:** {event.get('gitBranch', 'unknown')}",
+        f"**Timestamp:** {event.get('timestamp', 'unknown')}",
+        "",
+        "## Cursor Position",
+        f"Line {cursor.get('line', '?')}, Column {cursor.get('column', '?')}",
+        f"**Symbol at cursor:** `{event.get('symbolAtCursor', '')}`",
+        "",
+    ]
+
+    if selection.get("text"):
+        lines.extend([
+            "## Selected Text",
+            f"Lines {selection.get('startLine', '?')}–{selection.get('endLine', '?')}:",
+            "```",
+            selection["text"][:2000],
+            "```",
+            "",
+        ])
+
+    if diagnostics:
+        lines.extend(["## Diagnostics", ""])
+        for diag in diagnostics[:10]:
+            severity = diag.get("severity", "?")
+            lines.append(f"- **{severity}** (line {diag.get('line', '?')}): {diag.get('message', '')}")
+            if diag.get("source"):
+                lines[-1] += f" [{diag['source']}]"
+        lines.append("")
+
+    lines.extend([
+        "## Visible Range",
+        f"Lines {visible.get('startLine', '?')}–{visible.get('endLine', '?')}",
+        "",
+        "## Suggested Agent Action",
+        "",
+    ])
+
+    if selection.get("text"):
+        lines.append(f"The user selected code in `{event.get('file', '?')}` (lines {selection.get('startLine', '?')}–{selection.get('endLine', '?')}). Focus on this selection.")
+    elif diagnostics:
+        diag = diagnostics[0]
+        lines.append(f"There are diagnostics in `{event.get('file', '?')}`. Check line {diag.get('line', '?')}: {diag.get('message', '')}")
+    else:
+        lines.append(f"The user is viewing `{event.get('file', '?')}` at line {cursor.get('line', '?')}.")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "ui-bridge", "version": "0.2.0"}
+    return {"status": "ok", "service": "ui-bridge", "version": "0.3.0"}
 
 
 if __name__ == "__main__":
