@@ -1,0 +1,89 @@
+# LiteLLM Proxy Configuration
+# Docs: https://docs.litellm.ai/docs/proxy/configs
+#
+# This config defines model routing with automatic fallback.
+# DeepSeek V4-Flash is the primary model (cheapest, fast, good quality).
+# Fallback chain: DeepSeek → Qwen → Claude Haiku
+
+model_list:
+  # --- Primary: DeepSeek V4-Flash ---
+  # $0.14/M input, $0.28/M output (cache miss)
+  # Best value for agentic coding tasks
+  - model_name: "deepseek-v4-flash"
+    litellm_params:
+      model: "deepseek/deepseek-v4-flash"
+      api_base: "https://api.deepseek.com"
+      api_key: "os.environ/DEEPSEEK_API_KEY"
+      max_tokens: 8192
+      temperature: 0.0
+
+  # --- Complex reasoning: DeepSeek V4-Pro ---
+  # $0.435/M input, $0.87/M output
+  # Use for architecture decisions, complex debugging
+  - model_name: "deepseek-v4-pro"
+    litellm_params:
+      model: "deepseek/deepseek-v4-pro"
+      api_base: "https://api.deepseek.com"
+      api_key: "os.environ/DEEPSEEK_API_KEY"
+      max_tokens: 16384
+      temperature: 0.0
+
+  # --- Secondary fallback: Qwen-turbo ---
+  # $0.05/M input, $0.50/M output
+  # Good general-purpose model, very cheap
+  - model_name: "qwen-turbo"
+    litellm_params:
+      model: "openai/qwen-turbo-latest"
+      api_base: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      api_key: "os.environ/DASHSCOPE_API_KEY"
+      max_tokens: 8192
+
+  # --- Premium fallback: Claude Haiku 4.5 ---
+  # $1/M input, $5/M output
+  # Use only when DeepSeek and Qwen are both unavailable
+  - model_name: "claude-haiku"
+    litellm_params:
+      model: "claude-haiku-4.5-20250501"
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+      max_tokens: 4096
+
+  # --- OpenAI fallback (optional) ---
+  # $0.40/M input, $1.60/M output
+  - model_name: "gpt-4.1-mini"
+    litellm_params:
+      model: "gpt-4.1-mini"
+      api_key: "os.environ/OPENAI_API_KEY"
+      max_tokens: 4096
+
+  # --- Gemini fallback (optional, good for long context) ---
+  # $0.15/M input, $0.60/M output
+  - model_name: "gemini-flash"
+    litellm_params:
+      model: "gemini/gemini-2.5-flash"
+      api_key: "os.environ/GEMINI_API_KEY"
+      max_tokens: 8192
+
+# --- Router settings ---
+router_settings:
+  routing_strategy: "simple-shuffle"
+  num_retries: 3
+  timeout: 120
+  retry_after: 5
+  fallbacks:
+    - deepseek-v4-flash: ["qwen-turbo", "claude-haiku"]
+    - deepseek-v4-pro: ["deepseek-v4-flash", "claude-haiku"]
+    - qwen-turbo: ["deepseek-v4-flash", "claude-haiku"]
+
+# --- General settings ---
+general_settings:
+  master_key: "os.environ/LITELLM_MASTER_KEY"
+  # Cost tracking
+  store_model_in_db: false
+  # Logging
+  json_logs: true
+
+# --- Budget/rate limiting (optional) ---
+# Uncomment to enforce spending limits
+# litellm_settings:
+#   max_budget: 150.0        # $150/month max across all models
+#   budget_duration: "monthly"

@@ -18,26 +18,20 @@ Before provisioning, ensure you have:
 
 ## Phase 1: Infrastructure Provisioning
 
-### Step 1.1: Order Hetzner AX42-U
+### Step 1.1: Create Hetzner Cloud CCX33
 
-1. Navigate to https://www.hetzner.com/dedicated-rootserver/ax42-u
-2. Select location: **Finland (HEL1)** (recommended for lower latency to DeepSeek Asia endpoints)
-   - Alternative: Germany (FSN1) if EU data residency is preferred
-3. Configure:
-   - OS: Ubuntu 24.04 LTS (minimal, 64-bit)
-   - Storage: Default 2×512 GB NVMe, Software RAID 1
-   - No additional options needed
-4. Complete order (~$59/mo + ~$255 setup fee)
-5. **Expected delivery:** 1–5 business days (email notification when ready)
-
-**Alternative (instant): Hetzner Cloud CCX33**
 1. Navigate to https://console.hetzner.cloud
 2. Create project → Add server
-3. Location: Ashburn or Hillsboro (US) or Helsinki (EU)
+3. Location: **Helsinki (HEL1)** recommended (good connectivity to DeepSeek Asia + EU)
+   - Alternative: Ashburn (US) if lower latency to North American services preferred
 4. Image: Ubuntu 24.04
-5. Type: General Purpose → CCX33 (8 vCPU, 32 GB, 240 GB)
+5. Type: General Purpose → **CCX33** (8 dedicated vCPU, 32 GB RAM, 240 GB NVMe)
 6. SSH key: Add your public key
 7. Create ($73.99/mo, available in ~30 seconds)
+
+**Future upgrade path: Hetzner Dedicated AX42-U**
+- When you confirm always-on 24/7 usage, migrate to dedicated ($59/mo, saves $15/mo)
+- See `backup.md` for migration procedure
 
 ### Step 1.2: Initial Server Access
 

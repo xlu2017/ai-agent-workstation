@@ -1,0 +1,24 @@
+# Caddyfile — Optional reverse proxy configuration
+# Only needed if you want public HTTPS access (e.g., from mobile).
+# For most use cases, Tailscale provides secure access without this.
+#
+# Usage: Uncomment the caddy service in docker-compose.yml,
+# set DOMAIN in .env, replace {$DOMAIN} below.
+
+# {$DOMAIN} {
+#     # OpenHands UI
+#     handle / {
+#         reverse_proxy openhands:3000
+#     }
+#
+#     # LiteLLM Admin UI
+#     handle /litellm/* {
+#         uri strip_prefix /litellm
+#         reverse_proxy litellm:4000
+#     }
+#
+#     # Basic auth (change password!)
+#     basicauth {
+#         agent $2a$14$PLACEHOLDER_HASH
+#     }
+# }

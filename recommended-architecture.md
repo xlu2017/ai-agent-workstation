@@ -2,42 +2,50 @@
 
 ## Overview
 
-A persistent Ubuntu 24.04 LTS dedicated workstation running self-hosted OpenHands behind LiteLLM Proxy, with DeepSeek as primary model provider and Qwen as secondary. Multiple agent sessions via git worktrees and tmux. Future-ready for GPU burst workers and UI bridge.
+A persistent Ubuntu 24.04 LTS cloud workstation (Hetzner Cloud CCX33) running self-hosted OpenHands behind LiteLLM Proxy, with DeepSeek as primary model provider and Qwen as secondary. Multiple agent sessions via git worktrees and tmux. Designed to be portable to Hetzner Dedicated hardware when always-on use is confirmed. Future-ready for GPU burst workers and UI bridge.
 
 ---
 
 ## Infrastructure Recommendation
 
-### Primary: Hetzner Dedicated AX42-U
+### Primary: Hetzner Cloud CCX33
+
+| Spec | Value |
+|------|-------|
+| CPU | 8 dedicated AMD vCPUs (EPYC) |
+| RAM | 32 GB |
+| Storage | 240 GB NVMe SSD (expandable via volumes) |
+| Network | 1 Gbit/s, 20 TB included traffic |
+| Location | Ashburn (US), Helsinki (EU), or Falkenstein (EU) |
+| Monthly | $73.99 |
+| Setup fee | None |
+| Provisioning | Instant (~30 seconds) |
+
+**Why CCX33 as primary:**
+
+| Advantage | Detail |
+|-----------|--------|
+| Pause/resume | Delete server + keep snapshot ($0.012/GB/mo). Resume in 30s, no setup fee. |
+| Instant provisioning | Available in seconds vs 1–5 days for dedicated |
+| Easy scaling | Resize to CCX43 (16 vCPU/64GB) or CCX53 with one click |
+| Snapshots | Native snapshot support for backup/migration |
+| No upfront cost | No setup fee; pay only for time used |
+| Portable | All config in setup.sh + docker-compose.yml — works identically on dedicated |
+
+### Future upgrade path: Hetzner Dedicated AX42-U
+
+When you confirm always-on usage (running 24/7 for months), migrate to dedicated:
 
 | Spec | Value |
 |------|-------|
 | CPU | AMD Ryzen 7 PRO 8700GE (8c/16t, Zen 4) |
 | RAM | 64 GB DDR5 |
-| Storage | 2×512 GB NVMe (Software RAID 1) |
+| Storage | 2×512 GB NVMe (RAID 1) |
 | Network | 1 Gbit/s, unlimited traffic |
-| Location | Finland (HEL1) or Germany (FSN1) |
-| Monthly | ~$59 |
+| Monthly | ~$59 (saves $15/mo vs cloud) |
 | Setup fee | ~$255 (one-time) |
 
-**Why AX42-U over other options:**
-
-| vs. | Rationale |
-|-----|-----------|
-| AX41-NVMe | AX42-U has Zen 4 (50%+ IPC improvement), DDR5, Gen4 NVMe. Only $17/mo more. |
-| AX102-U | AX102-U is overkill for agent workloads (16c/128GB). $54+/mo more. Reserve budget for API. |
-| Hetzner Cloud CCX33 | Dedicated hardware = no noisy neighbors, unlimited traffic, bare-metal Docker perf. $15/mo cheaper. |
-| OVHcloud Rise-1 | Hetzner has better documentation, faster provisioning, better community. Similar price. |
-| DigitalOcean | 2× the cost for shared vCPUs. No bare-metal option. |
-| AWS EC2 | 3× the cost; egress charges; complexity. Not justified for dev workstation. |
-
-### Alternative: Hetzner Cloud CCX33 (if instant provisioning preferred)
-
-Choose this if:
-- You want instant provisioning (seconds vs days)
-- You want easy snapshots and scaling
-- You're okay with 32 GB RAM (sufficient for most agent workloads)
-- You want to easily resize up/down
+Migration process: snapshot cloud → rsync to dedicated → switch DNS/Tailscale. All software is infrastructure-agnostic.
 
 ---
 
@@ -45,7 +53,7 @@ Choose this if:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Hetzner AX42-U                            │
+│              Hetzner Cloud CCX33 (or Dedicated)              │
 │                   Ubuntu 24.04 LTS                           │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │

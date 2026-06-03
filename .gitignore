@@ -1,0 +1,20 @@
+# Secrets — NEVER commit
+.env
+*.gpg
+
+# Backups (stored locally, not in repo)
+backups/
+
+# Logs
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
