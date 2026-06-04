@@ -5,6 +5,9 @@
 #
 # This script is infrastructure-agnostic: works on Hetzner Cloud, Hetzner Dedicated,
 # OVHcloud, DigitalOcean, or any Ubuntu 24.04 machine with 8+ vCPUs and 16+ GB RAM.
+#
+# Network policy: this script deliberately does not install or manage ufw/fail2ban.
+# Restrict public ingress with the cloud/provider firewall and Tailscale ACLs/grants.
 
 set -euo pipefail
 
@@ -22,6 +25,10 @@ NC='\033[0m'
 log() { echo -e "${GREEN}[$(date '+%H:%M:%S')]${NC} $*"; }
 warn() { echo -e "${YELLOW}[$(date '+%H:%M:%S')] WARNING:${NC} $*"; }
 error() { echo -e "${RED}[$(date '+%H:%M:%S')] ERROR:${NC} $*" >&2; }
+
+restart_ssh() {
+    systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+}
 
 # --- Pre-flight checks ---
 if [[ $EUID -ne 0 ]]; then
@@ -56,7 +63,6 @@ apt-get install -y -qq \
     git tmux htop ncdu curl wget jq unzip \
     build-essential python3 python3-pip python3-venv \
     ca-certificates gnupg lsb-release \
-    fail2ban ufw \
     software-properties-common \
     apt-transport-https \
     chromium-browser \
@@ -99,44 +105,26 @@ else
     log "Tailscale installed. Run 'sudo tailscale up' to authenticate."
 fi
 
-# --- Step 7: Configure firewall ---
-log "Step 7/10: Configuring firewall (UFW)..."
-ufw --force reset
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow ssh
-# Allow Tailscale interface
-ufw allow in on tailscale0 2>/dev/null || true
-ufw --force enable
-log "Firewall enabled: SSH only (+ Tailscale when connected)"
+# --- Step 7: Network access policy ---
+log "Step 7/10: Recording network access policy..."
+warn "No host firewall or fail2ban policy is configured by this script."
+warn "Restrict public ingress with the provider firewall and Tailscale ACLs/grants."
+warn "Recommended public ingress: none, or temporary SSH only for break-glass recovery."
+warn "Run scripts/server/configure-tailscale-ssh-only.sh after Tailscale is authenticated to make tailnet port 22 Tailscale-only."
 
 # --- Step 8: Configure SSH hardening ---
-log "Step 8/10: Hardening SSH..."
+log "Step 8/10: Hardening OpenSSH..."
 sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-systemctl restart sshd
-
-# Configure fail2ban
-cat > /etc/fail2ban/jail.local << 'EOF'
-[sshd]
-enabled = true
-port = ssh
-filter = sshd
-logpath = /var/log/auth.log
-maxretry = 5
-bantime = 3600
-EOF
-systemctl enable fail2ban
-systemctl restart fail2ban
+restart_ssh
 
 # --- Step 9: Configure remote desktop ---
 log "Step 9/10: Configuring xrdp..."
 systemctl enable xrdp
 # Set xfce4 as default session
 su - "${AGENT_USER}" -c 'echo "xfce4-session" > ~/.xsession' 2>/dev/null || true
-# Allow xrdp through firewall only via Tailscale
-ufw allow in on tailscale0 to any port 3389 2>/dev/null || true
+warn "xRDP is not exposed by this script. Allow it only through Tailscale or the provider firewall when needed."
 
 # --- Step 10: Create workstation directory structure ---
 log "Step 10/10: Setting up workstation directory..."
@@ -248,7 +236,7 @@ echo ""
 echo "Services running. Access:"
 echo "  OpenHands UI: http://localhost:3000"
 echo "  LiteLLM Admin: http://localhost:4000/ui"
-echo "  (Use Tailscale hostname for remote access)"
+echo "  Use SSH port forwarding or Tailscale; do not expose admin ports publicly."
 SCRIPT
 chmod +x "${WORKSTATION_DIR}/scripts/start-services.sh"
 chown -R "${AGENT_USER}:${AGENT_USER}" "${WORKSTATION_DIR}/scripts"
@@ -260,11 +248,13 @@ log "AI Workstation setup complete!"
 echo "============================================"
 echo ""
 echo "Next steps:"
-echo "  1. Copy your SSH public key to /home/${AGENT_USER}/.ssh/authorized_keys"
+echo "  1. Copy your SSH public key to /home/${AGENT_USER}/.ssh/authorized_keys before relying on public SSH"
 echo "  2. Run: sudo tailscale up"
-echo "  3. Edit ${WORKSTATION_DIR}/.env with your API keys"
-echo "  4. Run: su - ${AGENT_USER} -c '${WORKSTATION_DIR}/scripts/start-services.sh'"
-echo "  5. Access OpenHands at http://<tailscale-hostname>:3000"
+echo "  3. Configure Tailscale ACLs/grants and the provider firewall; this script does not manage ufw/fail2ban"
+echo "  4. Run: sudo ${SCRIPT_DIR}/scripts/server/configure-tailscale-ssh-only.sh after confirming Tailscale access"
+echo "  5. Edit ${WORKSTATION_DIR}/.env with your API keys"
+echo "  6. Run: su - ${AGENT_USER} -c '${WORKSTATION_DIR}/scripts/start-services.sh'"
+echo "  7. Access OpenHands through SSH forwarding or the Tailscale hostname"
 echo ""
 echo "System info:"
 echo "  CPU: $(nproc) cores"
