@@ -1,5 +1,5 @@
 # docker-compose.yml — AI Coding Agent Workstation
-# Services: LiteLLM Proxy, OpenHands, Caddy (optional reverse proxy)
+# Services: LiteLLM Proxy, OpenHands (optional)
 #
 # Usage:
 #   cp .env.example .env  # then fill in API keys
@@ -34,43 +34,27 @@ services:
     networks:
       - workstation
 
-  # --- OpenHands: AI Coding Agent ---
-  openhands:
-    image: ghcr.io/all-hands-ai/openhands:latest
-    container_name: openhands
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      - SANDBOX_RUNTIME_CONTAINER_IMAGE=ghcr.io/all-hands-ai/runtime:latest
-      - LLM_BASE_URL=http://litellm:4000
-      - LLM_API_KEY=${LITELLM_MASTER_KEY}
-      - LLM_MODEL=deepseek-v4-flash
-      - WORKSPACE_MOUNT_PATH=${WORKSPACE_PATH:-/home/agent/projects}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ${WORKSPACE_PATH:-/home/agent/projects}:/opt/workspace_base
-    depends_on:
-      litellm:
-        condition: service_healthy
-    networks:
-      - workstation
-
-  # --- Caddy: Reverse Proxy (optional, for HTTPS) ---
-  # Uncomment if you want public HTTPS access with a domain.
-  # Otherwise, use Tailscale for private access.
+  # --- OpenHands: Optional AI Coding Agent (not primary executor) ---
+  # Uncomment if you want OpenHands as an alternative executor.
+  # Primary execution uses the Direct Executor via LiteLLM.
   #
-  # caddy:
-  #   image: caddy:2-alpine
-  #   container_name: caddy
+  # openhands:
+  #   image: ghcr.io/all-hands-ai/openhands:latest
+  #   container_name: openhands
   #   restart: unless-stopped
   #   ports:
-  #     - "80:80"
-  #     - "443:443"
+  #     - "${OPENHANDS_PORT:-3010}:3000"
+  #   environment:
+  #     - LLM_BASE_URL=http://litellm:4000
+  #     - LLM_API_KEY=${LITELLM_MASTER_KEY}
+  #     - LLM_MODEL=deepseek-v4-flash
+  #     - WORKSPACE_MOUNT_PATH=${WORKSPACE_PATH:-/home/agent/projects}
   #   volumes:
-  #     - ./config/Caddyfile:/etc/caddy/Caddyfile:ro
-  #     - caddy_data:/data
-  #     - caddy_config:/config
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #     - ${WORKSPACE_PATH:-/home/agent/projects}:/opt/workspace_base
+  #   depends_on:
+  #     litellm:
+  #       condition: service_healthy
   #   networks:
   #     - workstation
 
@@ -80,6 +64,3 @@ networks:
 
 volumes:
   litellm_logs:
-  # Uncomment if using Caddy
-  # caddy_data:
-  # caddy_config:

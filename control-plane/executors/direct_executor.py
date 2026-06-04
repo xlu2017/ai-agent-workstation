@@ -35,10 +35,10 @@ from executors.base import ExecutorAdapter, TaskPacket, TaskResult, SESSIONS_DIR
 LITELLM_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
 LITELLM_KEY = os.environ.get(
     "LITELLM_MASTER_KEY",
-    "sk-b79d4f2e502e773f5e010bb6edbfa11ecbf8d601138956b4d8596aab03effacd",
+    "fdfe750a587cddaedd90f39afb861f67377b155b7fdbe5d39d53437b29a700ed",
 )
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-v4-flash")
-MAX_ITERATIONS = int(os.environ.get("DIRECT_EXECUTOR_MAX_ITERATIONS", "15"))
+MAX_ITERATIONS = int(os.environ.get("DIRECT_EXECUTOR_MAX_ITERATIONS", "30"))
 
 FORBIDDEN_PATHS = ["/etc", "/root", "/var", "/usr", "/boot", "/proc", "/sys"]
 FORBIDDEN_COMMANDS = ["rm -rf /", "sudo rm", "mkfs", "dd if=", "> /dev/", "shutdown", "reboot"]
@@ -387,22 +387,28 @@ class DirectExecutor(ExecutorAdapter):
 
     def _build_initial_messages(self, packet: TaskPacket, worktree: str) -> list:
         """Build the initial system + user messages for the LLM."""
-        system_prompt = f"""You are an autonomous coding agent executing a task in a session worktree.
+        system_prompt = f"""You are an autonomous coding agent. Your job is to EDIT CODE to fix the described issue.
+
+IMPORTANT: Act decisively. Do not over-explore. Follow this pattern:
+1. Read only the files directly relevant to the task (1-3 files max).
+2. Make the edit using write_file or apply_patch.
+3. Run validation (tests/lint) if available.
+4. If validation passes, commit with git_commit.
+5. Call task_complete.
 
 Working directory: {worktree}
 Branch: {packet.branch}
 Session: {packet.session_id}
 
-Rules:
+Constraints:
 - Only modify files inside the worktree.
-- Do not modify files in node_modules, .git, or generated directories.
-- Run tests/lint after making changes if available.
-- Commit your changes when done.
-- Call task_complete when finished.
-- Be precise and minimal in your edits.
-- If the task is ambiguous, make the most reasonable interpretation.
+- Do not touch node_modules, .git, or generated directories.
+- Do not spend more than 3 iterations reading before you start editing.
+- Make minimal, focused changes. Prefer apply_patch over write_file for targeted edits.
+- Commit after successful validation. If no test runner is configured, commit after the edit.
+- Always call task_complete as your final action with a summary of what you did.
 
-You have access to tools for file operations, commands, and git. Use them to complete the task."""
+Available tools: read_file, write_file, apply_patch, list_files, grep, run_command, git_status, git_diff, git_commit, run_validation, get_latest_context, task_complete"""
 
         user_parts = [f"## Task\n{packet.instruction}"]
         if packet.ui_context:
