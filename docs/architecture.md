@@ -35,8 +35,8 @@
 │  └────────────┘  └───────────┘  └────────────────────────┘    │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │  Ubuntu 24.04 LTS · fail2ban · ufw · chrony             │   │
-│  │  unattended-upgrades · SSH key-only                      │   │
+│  │  Ubuntu 24.04 LTS · Tailscale · chrony                  │   │
+│  │  unattended-upgrades · SSH key-only fallback            │   │
 │  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -45,8 +45,9 @@
 
 | Component | Purpose | Port | Container |
 |-----------|---------|------|-----------|
-| OpenHands | AI agent runtime | 3000 | Yes |
+| OpenHands | AI agent runtime | 3000 / allocated 3010+ | Yes |
 | LiteLLM Proxy | Model routing, budget, logging | 4000 | Yes |
+| Control Plane | API + dashboard | 9877 | No |
 | Chrome | Browser for agents, DevTools | 9222 (debug) | No |
 | xRDP | Remote desktop access | 3389 | No |
 | UI-Bridge | Source map resolution | 9876 | No |
@@ -87,16 +88,30 @@ Agent 3:  worktree/new-ui        →  tmux: agent-new-ui        →  ports 5020-
 
 ## Network Security
 
+The workstation does not manage `ufw` or `fail2ban`. Ingress control is split between the provider firewall and Tailscale:
+
 ```
-Internet → ufw (allow 22, 3389) → fail2ban → services
-                                              ├── :3000 OpenHands (localhost)
-                                              ├── :4000 LiteLLM (localhost)
-                                              ├── :9100 Node Exporter (localhost)
-                                              └── :9876 UI-Bridge (localhost)
+Public Internet → Provider firewall → no public admin ingress by default
+
+Tailnet admin device → Tailscale ACLs/grants → workstation tailnet IP
+                                                ├── :22   Tailscale SSH
+                                                ├── :3389 xRDP, if enabled by policy
+                                                ├── :9877 Control Plane, if enabled by policy
+                                                ├── :4000 LiteLLM, if enabled by policy
+                                                └── :3000/3010+ OpenHands, if enabled by policy
+
+Local-only / SSH-forwarded access               ├── :4000 LiteLLM
+                                                ├── :9100 Node Exporter
+                                                └── :9876 UI-Bridge
 ```
 
-Only SSH (22) and RDP (3389) are exposed publicly.
-Services are accessed via SSH port forwarding or Tailscale.
+Target posture:
+
+1. Block ordinary public SSH on TCP/22 at the provider firewall.
+2. Enable Tailscale SSH for tailnet access to port 22.
+3. Move ordinary OpenSSH to `127.0.0.1:2222` as a local console fallback using `scripts/server/configure-tailscale-ssh-only.sh`.
+4. Expose xRDP, Control Plane, LiteLLM, and OpenHands only through Tailscale ACLs/grants or SSH port forwarding.
+5. Keep a provider-console or temporary provider-firewall break-glass path for recovery.
 
 ## Future: Dedicated Hardware Migration
 
