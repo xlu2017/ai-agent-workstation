@@ -28,12 +28,33 @@ docker compose down
 
 ## Access Methods
 
+Preferred access is Tailscale-first. The workstation does not rely on `ufw` or `fail2ban`; public ingress is controlled by the provider firewall and tailnet access is controlled by Tailscale ACLs/grants.
+
 | Method | Command | Use Case |
 |--------|---------|----------|
-| SSH | `ssh -i ~/.ssh/hetzner_workstation agent@<server-ip>` | Terminal |
-| SSH + ports | `ssh -L 3000:localhost:3000 -L 4000:localhost:4000 agent@<server-ip>` | Web UIs |
-| RDP | Connect to `<server-ip>:3389` (user: agent) | GUI/Browser |
-| VS Code | Remote-SSH extension | Development |
+| Tailscale SSH | `ssh agent@<tailscale-hostname>` | Primary terminal access on tailnet port 22 |
+| SSH + ports over Tailscale | `ssh -L 9877:localhost:9877 -L 4000:localhost:4000 agent@<tailscale-hostname>` | Control plane and LiteLLM UI without public exposure |
+| RDP over Tailscale | Connect to `<tailscale-hostname>:3389` | GUI/browser access when enabled by Tailscale policy |
+| VS Code | Remote-SSH to `<tailscale-hostname>` | Development |
+| Local OpenSSH fallback | Provider console, then `ssh -p 2222 agent@127.0.0.1` | Local-only recovery after Tailscale-only SSH configuration |
+
+### Configure Tailscale-only SSH
+
+After confirming the server is authenticated to Tailscale and reachable from an admin device:
+
+```bash
+sudo /opt/workstation/scripts/configure-tailscale-ssh-only.sh
+```
+
+This script enables Tailscale SSH, moves ordinary OpenSSH to `127.0.0.1:2222`, and leaves public TCP/22 blocking to the provider firewall.
+
+Provider firewall target:
+
+```text
+Public inbound: deny by default
+Temporary break-glass: allow TCP/22 only when needed
+Intentional public web: allow TCP/80 and TCP/443 only if serving a public app
+```
 
 ## Worktree Management
 
@@ -77,8 +98,8 @@ tmux new -s dev
 # Launch Chrome with debugging port
 google-chrome --remote-debugging-port=9222 --no-first-run --user-data-dir=/tmp/chrome-debug
 
-# Access DevTools from local machine (after SSH port forward)
-# Forward: ssh -L 9222:localhost:9222 agent@<server-ip>
+# Access DevTools from local machine over Tailscale SSH forwarding
+# Forward: ssh -L 9222:localhost:9222 agent@<tailscale-hostname>
 # Open: http://localhost:9222
 ```
 
@@ -115,7 +136,7 @@ cp /opt/workstation/knowledge/example-react.yaml /opt/workstation/knowledge/my-p
 ## Monitoring
 
 ```bash
-# System metrics
+# System metrics; keep exporter private and access through SSH forwarding/Tailscale only
 curl -s http://localhost:9100/metrics | grep -E "^node_(cpu|memory|disk)"
 
 # Docker resource usage
