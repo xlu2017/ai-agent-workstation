@@ -1026,19 +1026,25 @@ def run_benchmark_task(body: BenchmarkRunRequest):
 
 STATIC_DIR = Path(__file__).parent.parent / "web" / "dist"
 
-if STATIC_DIR.exists():
+if STATIC_DIR.exists() and (STATIC_DIR / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
 
-    @app.get("/")
-    @app.get("/{path:path}")
-    def serve_spa(path: str = ""):
-        # API routes handled above
-        if path.startswith("api/"):
-            raise HTTPException(404)
-        index = STATIC_DIR / "index.html"
-        if index.exists():
-            return FileResponse(str(index))
-        return {"message": "Dashboard not built yet. Run: cd web && npm run build"}
+
+@app.get("/")
+@app.get("/{path:path}")
+def serve_spa(path: str = ""):
+    """Serve dashboard SPA or show status when not built."""
+    if path.startswith("api/"):
+        raise HTTPException(404)
+    index = STATIC_DIR / "index.html"
+    if index.exists():
+        return FileResponse(str(index))
+    return {
+        "status": "dashboard_not_built",
+        "message": "Dashboard not built yet. Run: cd /opt/workstation/control-plane/web && npm install && npm run build",
+        "api": "http://localhost:9877/api/health",
+        "benchmark_tasks": "http://localhost:9877/api/benchmark/tasks",
+    }
 
 
 if __name__ == "__main__":
