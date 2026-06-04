@@ -105,7 +105,18 @@ def list_sessions():
 @app.post("/api/sessions")
 def create_session(body: SessionCreate):
     session_id = body.name or f"session-{int(time.time())}"
-    repo_path = body.repo or str(REPOS_DIR / "example-react-app")
+    raw_repo = body.repo or "example-react-app"
+    # Resolve repo path: check known locations
+    repo_path = None
+    for search_dir in [REPOS_DIR, Path("/opt/workstation/bench-apps"), Path("/opt/workstation/repos")]:
+        candidate = search_dir / raw_repo
+        if candidate.exists() and (candidate / ".git").exists():
+            repo_path = str(candidate)
+            break
+    if not repo_path and Path(raw_repo).is_absolute() and Path(raw_repo).exists():
+        repo_path = raw_repo
+    if not repo_path:
+        repo_path = str(REPOS_DIR / raw_repo)
     branch = body.branch or f"{session_id}-branch"
 
     session_dir = SESSIONS_DIR / session_id
@@ -569,7 +580,7 @@ def send_chat(session_id: str, body: ChatMessage):
             # Write completion message
             done_msg = {
                 "role": "assistant",
-                "content": f"Task {result.status}: edited {len(result.files_edited)} files. Commit: {result.commit_sha or 'none'}",
+                "content": f"Task {result.status}: {result.error or ('edited ' + str(len(result.files_edited)) + ' files')}. Commit: {result.commit_sha or 'none'}",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "status": result.status,
                 "task_id": task_id,
@@ -579,9 +590,11 @@ def send_chat(session_id: str, body: ChatMessage):
             with open(messages_file, "a") as f:
                 f.write(json.dumps(done_msg) + "\n")
         except Exception as e:
+            import traceback
+            tb_str = traceback.format_exc()
             err_msg = {
                 "role": "assistant",
-                "content": f"Task failed: {e}",
+                "content": f"Task failed: {e}\nDetails: {tb_str[-400:]}",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "status": "failed",
                 "task_id": task_id,
