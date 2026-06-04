@@ -168,6 +168,13 @@ function CreateSessionForm({ onCreated }: { onCreated: () => void }) {
   const [branch, setBranch] = useState('')
   const [task, setTask] = useState('')
   const [creating, setCreating] = useState(false)
+  const [repos, setRepos] = useState<{ name: string; path: string; source: string }[]>([])
+
+  useEffect(() => {
+    if (open && repos.length === 0) {
+      fetch(`${API}/repos`).then(r => r.json()).then(d => setRepos(d.repos || []))
+    }
+  }, [open])
 
   const create = () => {
     setCreating(true)
@@ -193,11 +200,21 @@ function CreateSessionForm({ onCreated }: { onCreated: () => void }) {
       <div className="card-title" style={{ marginBottom: 12 }}>New Session</div>
       <div style={{ display: 'grid', gap: 8 }}>
         <input className="chat-input" placeholder="Session name (auto-generated if empty)" value={name} onChange={e => setName(e.target.value)} />
-        <input className="chat-input" placeholder="Repo path (e.g. /opt/workstation/repos/my-app)" value={repo} onChange={e => setRepo(e.target.value)} />
+        <select
+          className="chat-input"
+          value={repo}
+          onChange={e => setRepo(e.target.value)}
+          style={{ padding: '8px 12px', background: '#1a1a2e', color: '#e0e0e0', border: '1px solid #333', borderRadius: 6 }}
+        >
+          <option value="">-- Select a repository --</option>
+          {repos.map(r => (
+            <option key={r.path} value={r.name}>{r.name} ({r.source})</option>
+          ))}
+        </select>
         <input className="chat-input" placeholder="Branch name (auto-generated if empty)" value={branch} onChange={e => setBranch(e.target.value)} />
         <input className="chat-input" placeholder="Task description (what the agent should do)" value={task} onChange={e => setTask(e.target.value)} />
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary" onClick={create} disabled={creating}>{creating ? 'Creating...' : 'Create'}</button>
+          <button className="btn btn-primary" onClick={create} disabled={creating || !repo}>{creating ? 'Creating...' : 'Create'}</button>
           <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
         </div>
       </div>
@@ -815,6 +832,126 @@ function ForkAndProvePage() {
   )
 }
 
+// --- Benchmark Page ---
+
+interface BenchTask {
+  id: string
+  repo: string
+  title: string
+  difficulty: string
+  category: string
+  context_source: string
+}
+
+interface BenchRun {
+  run_id: string
+  total_tasks?: number
+  passed?: number
+  failed?: number
+  needs_review?: number
+  total_runtime?: number
+  total_cost?: number
+}
+
+function BenchmarkPage() {
+  const { data: tasksData, loading: tasksLoading } = useFetch<{ tasks: BenchTask[] }>(`${API}/benchmark/tasks`, 10000)
+  const { data: resultsData, loading: resultsLoading, refetch: refetchResults } = useFetch<{ runs: BenchRun[] }>(`${API}/benchmark/results`, 10000)
+  const [running, setRunning] = useState(false)
+
+  const runTask = (repo: string, taskId: string) => {
+    setRunning(true)
+    fetch(`${API}/benchmark/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, task_id: taskId }),
+    })
+      .then(() => { setTimeout(refetchResults, 3000) })
+      .finally(() => setRunning(false))
+  }
+
+  const runSuite = (repo: string) => {
+    setRunning(true)
+    fetch(`${API}/benchmark/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo }),
+    })
+      .then(() => { setTimeout(refetchResults, 5000) })
+      .finally(() => setRunning(false))
+  }
+
+  return (
+    <div>
+      <h2>Benchmark</h2>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title">Available Tasks</div>
+        {tasksLoading && <div>Loading...</div>}
+        {tasksData?.tasks && tasksData.tasks.length === 0 && <div className="meta">No tasks found. Deploy bench-tasks to /opt/workstation/bench-tasks/</div>}
+        {tasksData?.tasks && tasksData.tasks.length > 0 && (
+          <table style={{ width: '100%', fontSize: 13 }}>
+            <thead>
+              <tr style={{ textAlign: 'left' }}>
+                <th>ID</th><th>Category</th><th>Difficulty</th><th>Context</th><th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasksData.tasks.map(t => (
+                <tr key={t.id}>
+                  <td>{t.id}</td>
+                  <td><span className="badge">{t.category}</span></td>
+                  <td>{t.difficulty}</td>
+                  <td>{t.context_source}</td>
+                  <td>
+                    <button className="btn" disabled={running} onClick={() => runTask(t.repo, t.id)} style={{ fontSize: 11 }}>
+                      Run
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {tasksData?.tasks && tasksData.tasks.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <button className="btn btn-primary" disabled={running} onClick={() => runSuite('cypress-realworld-app')}>
+              {running ? 'Running...' : 'Run Full Suite'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="card-title">Results</div>
+        {resultsLoading && <div>Loading...</div>}
+        {resultsData?.runs && resultsData.runs.length === 0 && <div className="meta">No results yet. Run a benchmark task first.</div>}
+        {resultsData?.runs && resultsData.runs.length > 0 && (
+          <table style={{ width: '100%', fontSize: 13 }}>
+            <thead>
+              <tr style={{ textAlign: 'left' }}>
+                <th>Run ID</th><th>Tasks</th><th>Passed</th><th>Failed</th><th>Review</th><th>Cost</th><th>Runtime</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resultsData.runs.map(r => (
+                <tr key={r.run_id}>
+                  <td>{r.run_id}</td>
+                  <td>{r.total_tasks ?? '?'}</td>
+                  <td style={{ color: '#4ade80' }}>{r.passed ?? '-'}</td>
+                  <td style={{ color: '#f87171' }}>{r.failed ?? '-'}</td>
+                  <td style={{ color: '#fbbf24' }}>{r.needs_review ?? '-'}</td>
+                  <td>${(r.total_cost ?? 0).toFixed(4)}</td>
+                  <td>{(r.total_runtime ?? 0).toFixed(1)}s</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const PAGES: Record<string, () => JSX.Element> = {
   Sessions: SessionsPage,
   Context: ContextPage,
@@ -823,6 +960,7 @@ const PAGES: Record<string, () => JSX.Element> = {
   Postmortem: PostmortemPage,
   Models: ModelsPage,
   Knowledge: KnowledgePage,
+  Benchmark: BenchmarkPage,
   Health: HealthPage,
   Logs: LogsPage,
 }

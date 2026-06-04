@@ -709,6 +709,23 @@ def main():
     policy_show_p = policy_sub.add_parser("show", help="Show a policy")
     policy_show_p.add_argument("name", help="Policy name (e.g. full-autonomy-branch)")
 
+    # benchmark
+    bench_parser = subparsers.add_parser("benchmark", help="Benchmark management")
+    bench_sub = bench_parser.add_subparsers(dest="subcommand")
+    bench_list_p = bench_sub.add_parser("list", help="List benchmark tasks")
+    bench_list_p.add_argument("--repo", help="Filter by repo")
+    bench_list_p.add_argument("--json", action="store_true")
+    bench_run_p = bench_sub.add_parser("run", help="Run a single task")
+    bench_run_p.add_argument("task_id", help="Task ID")
+    bench_run_p.add_argument("--repo", help="Repository name")
+    bench_suite_p = bench_sub.add_parser("run-suite", help="Run all tasks for a repo")
+    bench_suite_p.add_argument("repo", help="Repository name")
+    bench_suite_p.add_argument("--max-parallel", type=int, default=1)
+    bench_results_p = bench_sub.add_parser("results", help="Show latest results")
+    bench_results_p.add_argument("--json", action="store_true")
+    bench_summarize_p = bench_sub.add_parser("summarize", help="Summarize a run")
+    bench_summarize_p.add_argument("run_id", nargs="?", help="Run ID (default: latest)")
+
     # doctor
     subparsers.add_parser("doctor", help="Run system diagnostics")
 
@@ -757,6 +774,9 @@ def main():
         cmd_fork(args)
     elif args.command == "policy":
         cmd_policy(args)
+    elif args.command == "benchmark":
+        from benchmark_commands import cmd_benchmark
+        cmd_benchmark(args)
     elif args.command == "doctor":
         cmd_doctor(args)
     elif args.command == "backup":
