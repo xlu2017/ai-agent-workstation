@@ -1,0 +1,25 @@
+id: broken-form-validation
+repo: cypress-realworld-app
+title: "Fix broken amount validation on new transaction form"
+difficulty: medium
+category: frontend-state
+instruction: |
+  The "Pay" / "Request" transaction form allows submitting negative or zero
+  amounts. The submit button should be disabled and an error message shown
+  when the amount field is <= 0 or not a valid number. Currently, the
+  validation logic was accidentally removed. Restore client-side validation
+  that prevents invalid amounts from being submitted.
+seed_patch: seed.patch
+expected_files:
+  - src/components/TransactionCreateStepTwo.tsx
+validation_commands:
+  - "yarn test --watchAll=false --testPathPattern=TransactionCreateStepTwo"
+  - "yarn cypress:run --spec cypress/tests/ui/new-transaction.spec.ts"
+context_source: browser
+risk_level: low
+success_criteria: |
+  - Amount <= 0 shows inline error and disables submit
+  - Non-numeric input shows inline error
+  - Valid positive amounts allow submission
+  - Existing e2e tests pass
+notes: "Form validation is a common autonomous-agent task."

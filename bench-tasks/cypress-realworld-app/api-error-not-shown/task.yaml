@@ -1,0 +1,24 @@
+id: api-error-not-shown
+repo: cypress-realworld-app
+title: "Display API error messages to user on failed transactions"
+difficulty: medium
+category: api-contract
+instruction: |
+  When the backend returns a 4xx or 5xx error on transaction creation, the
+  UI silently fails — no error message is shown to the user. The catch block
+  in the transaction submission handler was removed. Restore error handling
+  so that API errors are displayed as a Snackbar/Alert to the user with the
+  server's error message.
+seed_patch: seed.patch
+expected_files:
+  - src/containers/TransactionCreateContainer.tsx
+validation_commands:
+  - "yarn test --watchAll=false --testPathPattern=TransactionCreate"
+  - "yarn cypress:run --spec cypress/tests/ui/new-transaction.spec.ts"
+context_source: browser
+risk_level: low
+success_criteria: |
+  - API error response message is displayed in a visible alert/snackbar
+  - Success case still works (redirect to transactions list)
+  - Error state clears on retry
+notes: "Tests the agent's ability to handle async error flows."

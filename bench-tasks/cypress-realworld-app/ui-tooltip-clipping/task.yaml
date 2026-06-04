@@ -1,0 +1,26 @@
+id: ui-tooltip-clipping
+repo: cypress-realworld-app
+title: "Fix tooltip clipping on transaction amount"
+difficulty: easy
+category: ui-fix
+instruction: |
+  The tooltip that appears when hovering over a transaction amount in the
+  transactions list is clipped by the parent container's overflow:hidden.
+  Fix the tooltip so it renders fully visible above the row without being
+  cut off. Do not change the tooltip content or remove overflow:hidden from
+  the list container (it's needed for scroll behavior). Use a portal or
+  z-index/position strategy instead.
+seed_patch: seed.patch
+expected_files:
+  - src/components/TransactionItem.tsx
+  - src/components/TransactionItem.module.css
+validation_commands:
+  - "yarn test --watchAll=false --testPathPattern=TransactionItem"
+  - "yarn cypress:run --spec cypress/tests/ui/transaction-feeds.spec.ts"
+context_source: browser
+risk_level: low
+success_criteria: |
+  - Tooltip is fully visible when hovering over clipped transaction amounts
+  - No visual regression in transaction list scroll behavior
+  - Existing tests pass
+notes: "Requires browser context to observe the clipping behavior."

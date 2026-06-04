@@ -1,0 +1,19 @@
+diff --git a/src/containers/NotificationsContainer.tsx b/src/containers/NotificationsContainer.tsx
+index abcdef1..1234567 100644
+--- a/src/containers/NotificationsContainer.tsx
++++ b/src/containers/NotificationsContainer.tsx
+@@ -28,14 +28,10 @@ const NotificationsContainer: React.FC = () => {
+   const markAsRead = async (notificationId: string) => {
+     await api.patch(`/notifications/${notificationId}`, { isRead: true });
+-    // Update local state immediately for responsive UI
+-    setNotifications(prev =>
+-      prev.map(n => n.id === notificationId ? { ...n, isRead: true } : n)
+-    );
+-    // Decrement badge count
+-    setUnreadCount(prev => Math.max(0, prev - 1));
++    // TODO: update state after marking as read
+   };
+ 
+   return (
+     <NotificationList
+       notifications={notifications}

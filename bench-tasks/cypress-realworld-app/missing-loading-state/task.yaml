@@ -1,0 +1,24 @@
+id: missing-loading-state
+repo: cypress-realworld-app
+title: "Add loading spinner while transactions list fetches"
+difficulty: easy
+category: ui-fix
+instruction: |
+  The transactions list page shows a blank white area while data is being
+  fetched from the API. The loading indicator (CircularProgress spinner)
+  was removed. Restore it so users see a centered spinner while the
+  transactions query is in-flight. The spinner should disappear once data
+  loads or an error occurs.
+seed_patch: seed.patch
+expected_files:
+  - src/components/TransactionList.tsx
+validation_commands:
+  - "yarn test --watchAll=false --testPathPattern=TransactionList"
+context_source: browser
+risk_level: low
+success_criteria: |
+  - Spinner visible during network fetch
+  - Spinner disappears when data arrives
+  - Spinner disappears on error (error state shown instead)
+  - No layout shift when spinner transitions to content
+notes: "Loading state is fundamental UX; common regression target."

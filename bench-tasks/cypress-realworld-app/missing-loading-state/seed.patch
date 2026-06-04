@@ -1,0 +1,16 @@
+diff --git a/src/components/TransactionList.tsx b/src/components/TransactionList.tsx
+index abcdef1..1234567 100644
+--- a/src/components/TransactionList.tsx
++++ b/src/components/TransactionList.tsx
+@@ -18,10 +18,6 @@ const TransactionList: React.FC<Props> = ({ transactions, isLoading, error }) =>
+-  if (isLoading) {
+-    return (
+-      <Box display="flex" justifyContent="center" p={4}>
+-        <CircularProgress data-test="transaction-loading" />
+-      </Box>
+-    );
+-  }
+-
+   if (error) {
+     return <Alert severity="error">{error}</Alert>;
+   }

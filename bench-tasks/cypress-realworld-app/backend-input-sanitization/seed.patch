@@ -1,0 +1,21 @@
+diff --git a/backend/transaction-routes.ts b/backend/transaction-routes.ts
+index abcdef1..1234567 100644
+--- a/backend/transaction-routes.ts
++++ b/backend/transaction-routes.ts
+@@ -45,9 +45,6 @@ router.post("/transactions", authMiddleware, async (req, res) => {
+   const { amount, note, senderId, receiverId, transactionType } = req.body;
+ 
+-  // Sanitize note input — strip HTML to prevent stored XSS
+-  const sanitizedNote = note ? note.replace(/<[^>]*>/g, "").trim() : "";
+-
+   try {
+     const transaction = await TransactionService.create({
+       source: senderId,
+@@ -55,7 +52,7 @@ router.post("/transactions", authMiddleware, async (req, res) => {
+       amount,
+       transactionType,
+-      description: sanitizedNote,
++      description: note,
+     });
+ 
+     res.status(201).json({ transaction });
