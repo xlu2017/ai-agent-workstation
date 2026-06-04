@@ -402,6 +402,7 @@ def approve_knowledge_trigger(trigger_id: str):
 class ChatMessage(BaseModel):
     instruction: str
     model: Optional[str] = None
+    executor: Optional[str] = None  # "openhands" or "aider"
 
 
 @app.post("/api/sessions/{session_id}/chat")
@@ -488,19 +489,62 @@ def send_chat(session_id: str, body: ChatMessage):
     with open(messages_file, "a") as f:
         f.write(json.dumps(user_message) + "\n")
 
-    # --- Route to OpenHands ---
-    openhands_response = route_to_openhands(instruction_packet)
+    # --- Create Task Packet and Enqueue ---
+    task_id = f"chat-{int(time.time())}-{session_id[:8]}"
+    executor_choice = body.executor or "openhands"
 
-    # --- Save assistant response ---
-    assistant_message = {
-        "role": "assistant",
-        "content": openhands_response.get("response", "Task submitted to agent."),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "status": openhands_response.get("status", "submitted"),
-        "task_id": openhands_response.get("task_id"),
-    }
-    with open(messages_file, "a") as f:
-        f.write(json.dumps(assistant_message) + "\n")
+    try:
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from executors.base import TaskPacket
+        from tasks.queue import TaskQueue
+
+        packet = TaskPacket(
+            task_id=task_id,
+            session_id=session_id,
+            instruction=body.instruction,
+            worktree_path=meta.get("worktree_path", ""),
+            branch=meta.get("branch", ""),
+            ui_context=assembled_context.get("ui"),
+            editor_context=assembled_context.get("editor"),
+            terminal_context=assembled_context.get("terminal"),
+            activated_knowledge=activated_knowledge,
+            staleness_warnings=[w.get("message", str(w)) if isinstance(w, dict) else str(w) for w in staleness_warnings],
+            model=body.model or DEFAULT_MODEL,
+        )
+
+        queue = TaskQueue()
+        queue.enqueue(packet, executor=executor_choice)
+
+        # Save acknowledgment message
+        assistant_message = {
+            "role": "assistant",
+            "content": f"Task enqueued → executor: {executor_choice}. Agent is working on: {body.instruction[:100]}",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "status": "running",
+            "task_id": task_id,
+        }
+        with open(messages_file, "a") as f:
+            f.write(json.dumps(assistant_message) + "\n")
+
+        response_status = "running"
+        response_message = assistant_message["content"]
+
+    except Exception as executor_error:
+        # Fallback: direct LiteLLM call if executor system fails to import
+        openhands_response = route_to_openhands(instruction_packet)
+        task_id = openhands_response.get("task_id", task_id)
+        response_status = openhands_response.get("status", "completed")
+        response_message = openhands_response.get("response", "Task processed.")
+
+        assistant_message = {
+            "role": "assistant",
+            "content": response_message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "status": response_status,
+            "task_id": task_id,
+        }
+        with open(messages_file, "a") as f:
+            f.write(json.dumps(assistant_message) + "\n")
 
     # --- Record in timeline ---
     try:
@@ -509,20 +553,22 @@ def send_chat(session_id: str, body: ChatMessage):
         tl.record_event("chat_instruction", {
             "instruction": body.instruction,
             "context_types": list(assembled_context.keys()),
-            "model": body.model,
+            "executor": executor_choice,
+            "task_id": task_id,
             "staleness": staleness_status,
         })
     except Exception:
         pass
 
     return {
-        "status": openhands_response.get("status", "submitted"),
-        "message": assistant_message["content"],
-        "task_id": openhands_response.get("task_id"),
+        "status": response_status,
+        "message": response_message,
+        "task_id": task_id,
         "context_attached": list(assembled_context.keys()),
         "staleness": staleness_status,
         "warnings": staleness_warnings,
         "knowledge_activated": len(activated_knowledge),
+        "executor": executor_choice,
     }
 
 
@@ -631,6 +677,70 @@ def route_to_openhands(packet: dict) -> dict:
             "response": f"Task queued for session {packet['session_id']}. Context attached: {', '.join(packet.get('latest_ui_context', '') and ['ui'] or []) + ', '.join(packet.get('latest_editor_context', '') and ['editor'] or []) + ', '.join(packet.get('latest_terminal_context', '') and ['terminal'] or [])}. Agent will process when available.",
             "task_id": f"queued-{int(time.time())}",
         }
+
+
+# --- Task Queue API ---
+
+@app.get("/api/tasks")
+def list_tasks(limit: int = 50):
+    """List recent tasks from the queue."""
+    tasks_dir = Path("/opt/workstation/tasks")
+    if not tasks_dir.exists():
+        return {"tasks": []}
+    tasks = []
+    for d in sorted(tasks_dir.iterdir(), reverse=True)[:limit]:
+        meta_file = d / "meta.json"
+        if meta_file.exists():
+            try:
+                tasks.append(json.loads(meta_file.read_text()))
+            except Exception:
+                continue
+    return {"tasks": tasks}
+
+
+@app.get("/api/tasks/{task_id}")
+def get_task(task_id: str):
+    """Get task status and result."""
+    task_dir = Path("/opt/workstation/tasks") / task_id
+    if not task_dir.exists():
+        raise HTTPException(404, f"Task '{task_id}' not found")
+    meta = json.loads((task_dir / "meta.json").read_text())
+    result_file = task_dir / "result.json"
+    if result_file.exists():
+        meta["result"] = json.loads(result_file.read_text())
+    return meta
+
+
+@app.get("/api/autonomy/proposals")
+def list_autonomy_proposals():
+    """List proposals from the autonomy daemon."""
+    tasks_dir = Path("/opt/workstation/tasks")
+    if not tasks_dir.exists():
+        return {"proposals": []}
+    proposals = []
+    for d in sorted(tasks_dir.iterdir(), reverse=True)[:100]:
+        meta_file = d / "meta.json"
+        if meta_file.exists():
+            try:
+                meta = json.loads(meta_file.read_text())
+                if meta.get("source") == "autonomyd":
+                    proposals.append(meta)
+            except Exception:
+                continue
+    return {"proposals": proposals}
+
+
+@app.post("/api/autonomy/scan")
+def trigger_autonomy_scan():
+    """Manually trigger an autonomy daemon scan."""
+    try:
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from tasks.autonomyd import AutonomyDaemon
+        daemon = AutonomyDaemon()
+        proposals = daemon.run_once()
+        return {"discovered": len(proposals), "proposals": proposals}
+    except Exception as e:
+        return {"error": str(e), "discovered": 0}
 
 
 # --- Static files (web dashboard) ---
