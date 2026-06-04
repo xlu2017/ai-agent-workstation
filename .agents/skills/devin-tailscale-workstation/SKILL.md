@@ -5,12 +5,14 @@ description: Use this skill whenever Devin needs to connect to, administer, depl
 
 # Devin ↔ Tailscale Workstation Access
 
-This repository's intended access model is Tailscale-first:
+This repository's intended access model is Tailscale-only for SSH:
 
-- Do **not** use the server's public IP for routine SSH.
+- Do **not** use the server's public IP for SSH.
+- Treat successful public-IP SSH as a security defect to report and fix.
 - Do **not** open public admin ports from scripts.
 - Use Tailscale SSH for tailnet port `22` on Linux servers.
-- Use provider/cloud firewall rules to block ordinary public SSH and other public admin ports.
+- Block ordinary non-Tailscale SSH at the host by moving OpenSSH to `127.0.0.1:2222`.
+- Block ordinary public SSH at the provider/cloud firewall.
 - Use SSH port forwarding over Tailscale for private admin UIs.
 - Use `sudo` for full server permissions only after verifying the session is on the expected tailnet host.
 
@@ -26,7 +28,16 @@ There are three separate access paths:
 | OpenSSH localhost fallback | Recovery from provider console only | `ssh -p 2222 agent@127.0.0.1` |
 | SSH forwarding over Tailscale | Private web/admin UIs | `ssh -L local:localhost:remote agent@<tailscale-hostname>` |
 
-Never infer that a public port is safe just because Tailscale is installed. Public exposure is controlled by the provider firewall, not by this repo.
+Forbidden routine paths:
+
+| Path | Expected result |
+|---|---|
+| `ssh agent@<server-public-ip>` | must fail |
+| `ssh -p 22 agent@<server-public-ip>` | must fail |
+| `ssh -p 2222 agent@<server-public-ip>` | must fail |
+| OpenSSH listening on `0.0.0.0:22`, `[::]:22`, public IP `:22`, or LAN IP `:22` | configuration defect |
+
+Never infer that a public port is safe just because Tailscale is installed. Public exposure is controlled by the provider firewall, and ordinary OpenSSH must not listen on any non-loopback interface.
 
 ## Required operator setup
 
@@ -107,16 +118,19 @@ Expected result:
 
 - Tailscale SSH handles tailnet port `22`.
 - Ordinary OpenSSH listens only on `127.0.0.1:2222`.
+- OpenSSH does not listen on public, LAN, wildcard, or Tailscale network addresses.
 - Public TCP `22` is blocked by the provider firewall.
 
 Verify:
 
 ```bash
 ssh agent@<tailscale-hostname> 'hostname; whoami; sudo -n true && echo sudo-ok'
+ssh agent@<tailscale-hostname> 'sudo -n ss -tlnp | grep sshd || true'
 ssh agent@<server-public-ip> 'echo should-not-connect'
+ssh -p 2222 agent@<server-public-ip> 'echo should-not-connect'
 ```
 
-The second command should fail after provider firewall policy is applied.
+The public-IP commands must fail. The only expected `sshd` listener is `127.0.0.1:2222` or `[::1]:2222`; Tailscale SSH is handled by `tailscaled`, not network-facing OpenSSH.
 
 ## Routine server operations
 
@@ -164,11 +178,12 @@ ssh agent@<tailscale-hostname> 'cd /home/agent/ai-workstation && docker compose 
 
 ## Provider firewall expectations
 
-Provider firewall is the public edge gate. It should normally deny inbound public admin traffic:
+Provider firewall is the public edge gate. It should deny inbound public admin traffic:
 
 ```text
 Public inbound deny by default:
   tcp/22      ordinary public SSH
+  tcp/2222    OpenSSH localhost fallback must not be public
   tcp/3389    RDP
   tcp/4000    LiteLLM
   tcp/9877    Control Plane
@@ -267,6 +282,7 @@ sudo systemctl restart ssh || sudo systemctl restart sshd
 - Never ask the user to paste private keys, Tailscale auth keys, API keys, or passwords into the repo.
 - Never commit real tailnet policy containing private emails unless the user explicitly asks and the repository is private.
 - Never switch to public IP SSH merely because Tailscale fails; diagnose Tailscale/provider policy first.
+- Treat any successful SSH to the server public IP as a misconfiguration to report and fix.
 - Never open public admin ports from scripts.
 - Before destructive operations, record the hostname, current user, git branch, service name, and rollback command.
 - Prefer idempotent commands and `sudo -n` to avoid hanging on password prompts.
