@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 interface Session {
   id: string
@@ -14,6 +14,15 @@ interface Session {
   has_terminal_context: boolean
   created_at: string
   context?: { ui: string | null; editor: string | null; terminal: string | null }
+}
+
+interface ChatMsg {
+  role: string
+  content: string
+  timestamp: string
+  context_attached?: string[]
+  staleness?: string
+  status?: string
 }
 
 interface Health {
@@ -54,15 +63,114 @@ function useFetch<T>(url: string, interval = 5000) {
   return { data, loading, refetch }
 }
 
+const SessionChat = ({ sessionId }: { sessionId: string }) => {
+  const [messages, setMessages] = useState<ChatMsg[]>([])
+  const [input, setInput] = useState('')
+  const [sending, setSending] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    fetch(`${API}/sessions/${sessionId}/messages`)
+      .then(response => response.json())
+      .then(data => setMessages(data.messages || []))
+      .catch(() => {})
+  }, [sessionId])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const sendMessage = () => {
+    if (!input.trim() || sending) return
+    setSending(true)
+    const instruction = input.trim()
+    setInput('')
+    setMessages(previous => [...previous, { role: 'user', content: instruction, timestamp: new Date().toISOString() }])
+
+    fetch(`${API}/sessions/${sessionId}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instruction }),
+    })
+      .then(response => response.json())
+      .then(data => {
+        setMessages(previous => [...previous, {
+          role: 'assistant',
+          content: data.message || 'Task submitted.',
+          timestamp: new Date().toISOString(),
+          status: data.status,
+          context_attached: data.context_attached,
+          staleness: data.staleness,
+        }])
+      })
+      .catch(error => {
+        setMessages(previous => [...previous, {
+          role: 'assistant',
+          content: `Error: ${error.message}`,
+          timestamp: new Date().toISOString(),
+          status: 'error',
+        }])
+      })
+      .finally(() => setSending(false))
+  }
+
+  return (
+    <div className="chat-container">
+      <div className="chat-messages">
+        {messages.length === 0 && (
+          <div className="chat-hint">Type an instruction. Ambient context (UI/editor/terminal) will be attached automatically.</div>
+        )}
+        {messages.map((message, index) => (
+          <div key={index} className={`chat-msg chat-msg-${message.role}`}>
+            <div className="chat-msg-header">
+              <span className="chat-msg-role">{message.role === 'user' ? 'You' : 'Agent'}</span>
+              <span className="chat-msg-time">{(message.timestamp || '').slice(11, 19)}</span>
+            </div>
+            <div className="chat-msg-content">{message.content}</div>
+            {message.context_attached && message.context_attached.length > 0 && (
+              <div className="chat-msg-meta">
+                context: {message.context_attached.join(', ')}
+                {message.staleness && message.staleness !== 'fresh' && (
+                  <span className="badge badge-yellow" style={{ marginLeft: 6 }}>{message.staleness}</span>
+                )}
+              </div>
+            )}
+            {message.status && message.role === 'assistant' && (
+              <div className="chat-msg-meta">
+                status: <span className={`badge ${message.status === 'running' ? 'badge-blue' : message.status === 'completed' ? 'badge-green' : 'badge-yellow'}`}>{message.status}</span>
+              </div>
+            )}
+          </div>
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
+      <div className="chat-input-row">
+        <input
+          className="chat-input"
+          value={input}
+          onChange={event => setInput(event.target.value)}
+          onKeyDown={event => event.key === 'Enter' && sendMessage()}
+          placeholder="Type instruction... (e.g. 'fix this', 'add tests', 'refactor')"
+          disabled={sending}
+        />
+        <button className="btn btn-primary" onClick={sendMessage} disabled={sending || !input.trim()}>
+          {sending ? '...' : 'Send'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function SessionsPage() {
   const { data, refetch } = useFetch<{ sessions: Session[] }>(`${API}/sessions`)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [chatOpen, setChatOpen] = useState<string | null>(null)
   const [context, setContext] = useState<Record<string, any>>({})
 
   const loadContext = (id: string) => {
     if (expanded === id) { setExpanded(null); return }
     setExpanded(id)
-    fetch(`${API}/sessions/${id}/context`).then(r => r.json()).then(d => setContext(prev => ({ ...prev, [id]: d })))
+    fetch(`${API}/sessions/${id}/context`).then(response => response.json()).then(data => setContext(previous => ({ ...previous, [id]: data })))
   }
 
   const destroySession = (id: string) => {
@@ -74,35 +182,39 @@ function SessionsPage() {
   return (
     <div>
       <h2>Sessions</h2>
-      {data?.sessions.map(s => (
-        <div key={s.id} className="card">
+      {data?.sessions.map(session => (
+        <div key={session.id} className="card">
           <div className="card-header">
-            <span className="card-title">{s.id}</span>
-            <span className={`badge ${s.status === 'active' ? 'badge-green' : 'badge-yellow'}`}>{s.status}</span>
+            <span className="card-title">{session.id}</span>
+            <span className={`badge ${session.status === 'active' ? 'badge-green' : 'badge-yellow'}`}>{session.status}</span>
           </div>
           <div className="meta">
-            <span>branch: {s.branch || '-'}</span>
-            <span>ports: {s.port_range || '-'}</span>
-            <span>profile: {s.browser_profile || '-'}</span>
+            <span>branch: {session.branch || '-'}</span>
+            <span>ports: {session.port_range || '-'}</span>
+            <span>profile: {session.browser_profile || '-'}</span>
           </div>
-          {s.task && <div className="meta" style={{ marginTop: 4 }}>task: {s.task}</div>}
+          {session.task && <div className="meta" style={{ marginTop: 4 }}>task: {session.task}</div>}
           <div className="meta" style={{ marginTop: 6 }}>
-            {s.has_ui_context && <span className="badge badge-blue">UI</span>}
-            {s.has_editor_context && <span className="badge badge-blue">Editor</span>}
-            {s.has_terminal_context && <span className="badge badge-blue">Terminal</span>}
+            {session.has_ui_context && <span className="badge badge-blue">UI</span>}
+            {session.has_editor_context && <span className="badge badge-blue">Editor</span>}
+            {session.has_terminal_context && <span className="badge badge-blue">Terminal</span>}
           </div>
           <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={() => loadContext(s.id)}>
-              {expanded === s.id ? 'Hide Context' : 'Show Context'}
+            <button className="btn btn-primary" onClick={() => setChatOpen(chatOpen === session.id ? null : session.id)}>
+              {chatOpen === session.id ? 'Close Chat' : 'Chat'}
             </button>
-            <button className="btn btn-danger" onClick={() => destroySession(s.id)}>Destroy</button>
+            <button className="btn" onClick={() => loadContext(session.id)}>
+              {expanded === session.id ? 'Hide Context' : 'Context'}
+            </button>
+            <button className="btn btn-danger" onClick={() => destroySession(session.id)}>Destroy</button>
           </div>
-          {expanded === s.id && context[s.id] && (
+          {chatOpen === session.id && <SessionChat sessionId={session.id} />}
+          {expanded === session.id && context[session.id] && (
             <div style={{ marginTop: 12 }}>
-              {Object.entries(context[s.id].context || {}).map(([k, v]) => v && (
-                <div key={k}>
-                  <div className="meta" style={{ marginBottom: 4 }}>{k}:</div>
-                  <div className="context-preview">{String(v).slice(0, 500)}</div>
+              {Object.entries(context[session.id].context || {}).map(([key, value]) => value && (
+                <div key={key}>
+                  <div className="meta" style={{ marginBottom: 4 }}>{key}:</div>
+                  <div className="context-preview">{String(value).slice(0, 500)}</div>
                 </div>
               ))}
             </div>

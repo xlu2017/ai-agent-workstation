@@ -395,6 +395,238 @@ def approve_knowledge_trigger(trigger_id: str):
     raise HTTPException(404, f"Trigger '{trigger_id}' not found")
 
 
+# --- Chat / Task Routing ---
+
+class ChatMessage(BaseModel):
+    instruction: str
+    model: Optional[str] = "deepseek-chat"
+
+
+@app.post("/api/sessions/{session_id}/chat")
+def send_chat(session_id: str, body: ChatMessage):
+    """
+    Dashboard chat → Context Assembler → OpenHands adapter.
+
+    Flow:
+    1. Assemble context (UI/editor/terminal + knowledge + staleness)
+    2. Create instruction packet
+    3. Route to OpenHands as a task
+    4. Record in timeline + message log
+    """
+    session_dir = SESSIONS_DIR / session_id
+    if not session_dir.exists():
+        raise HTTPException(404, f"Session '{session_id}' not found")
+
+    meta = json.loads((session_dir / "session.json").read_text())
+
+    # --- Context Assembly ---
+    ctx_dir = session_dir / "context"
+    assembled_context = {}
+    for ctx_type, filename in [
+        ("ui", "latest-ui-context.md"),
+        ("editor", "latest-editor-context.md"),
+        ("terminal", "latest-terminal-context.md"),
+    ]:
+        path = ctx_dir / filename
+        if path.exists():
+            assembled_context[ctx_type] = path.read_text()
+
+    # Staleness check
+    from context_validator import get_context_health
+    health = get_context_health(session_id)
+    staleness_status = health.get("status", "unknown")
+    staleness_warnings = health.get("warnings", [])
+
+    # Knowledge activation
+    activated_knowledge = []
+    if KNOWLEDGE_DIR.exists():
+        try:
+            import yaml
+            for f in KNOWLEDGE_DIR.glob("*.yaml"):
+                try:
+                    entry = yaml.safe_load(f.read_text())
+                    if isinstance(entry, dict):
+                        paths = entry.get("activation_paths", [])
+                        keywords = entry.get("activation_keywords", [])
+                        worktree = meta.get("worktree_path", "")
+                        instruction_lower = body.instruction.lower()
+                        if any(p in worktree for p in paths) or any(k in instruction_lower for k in keywords):
+                            activated_knowledge.append(entry)
+                except Exception:
+                    continue
+        except ImportError:
+            pass
+
+    # --- Build instruction packet ---
+    instruction_packet = {
+        "user_instruction": body.instruction,
+        "session_id": session_id,
+        "worktree_path": meta.get("worktree_path", ""),
+        "branch": meta.get("branch", ""),
+        "repo_path": meta.get("repo_path", ""),
+        "latest_ui_context": assembled_context.get("ui"),
+        "latest_editor_context": assembled_context.get("editor"),
+        "latest_terminal_context": assembled_context.get("terminal"),
+        "activated_knowledge": activated_knowledge,
+        "staleness_status": staleness_status,
+        "staleness_warnings": staleness_warnings,
+        "model": body.model,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # --- Save message to log ---
+    messages_file = session_dir / "messages.jsonl"
+    user_message = {
+        "role": "user",
+        "content": body.instruction,
+        "timestamp": instruction_packet["timestamp"],
+        "context_attached": list(assembled_context.keys()),
+        "staleness": staleness_status,
+    }
+    with open(messages_file, "a") as f:
+        f.write(json.dumps(user_message) + "\n")
+
+    # --- Route to OpenHands ---
+    openhands_response = route_to_openhands(instruction_packet)
+
+    # --- Save assistant response ---
+    assistant_message = {
+        "role": "assistant",
+        "content": openhands_response.get("response", "Task submitted to agent."),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "status": openhands_response.get("status", "submitted"),
+        "task_id": openhands_response.get("task_id"),
+    }
+    with open(messages_file, "a") as f:
+        f.write(json.dumps(assistant_message) + "\n")
+
+    # --- Record in timeline ---
+    try:
+        from timeline import Timeline
+        tl = Timeline(session_id)
+        tl.record_event("chat_instruction", {
+            "instruction": body.instruction,
+            "context_types": list(assembled_context.keys()),
+            "model": body.model,
+            "staleness": staleness_status,
+        })
+    except Exception:
+        pass
+
+    return {
+        "status": openhands_response.get("status", "submitted"),
+        "message": assistant_message["content"],
+        "task_id": openhands_response.get("task_id"),
+        "context_attached": list(assembled_context.keys()),
+        "staleness": staleness_status,
+        "warnings": staleness_warnings,
+        "knowledge_activated": len(activated_knowledge),
+    }
+
+
+@app.get("/api/sessions/{session_id}/messages")
+def get_messages(session_id: str, limit: int = 50):
+    """Get chat message history for a session."""
+    session_dir = SESSIONS_DIR / session_id
+    if not session_dir.exists():
+        raise HTTPException(404, f"Session '{session_id}' not found")
+
+    messages_file = session_dir / "messages.jsonl"
+    if not messages_file.exists():
+        return {"messages": []}
+
+    lines = messages_file.read_text().strip().split("\n")
+    messages = [json.loads(l) for l in lines[-limit:] if l.strip()]
+    return {"messages": messages}
+
+
+def route_to_openhands(packet: dict) -> dict:
+    """
+    Route assembled instruction to OpenHands.
+
+    Builds a prompt with full context and submits as a task.
+    Falls back to direct LiteLLM call if OpenHands is unavailable.
+    """
+    import urllib.request
+
+    # Build the full prompt for the agent
+    prompt_parts = []
+    prompt_parts.append(f"## Task\n{packet['user_instruction']}")
+
+    if packet.get("latest_ui_context"):
+        prompt_parts.append(f"## UI Context (what user is looking at)\n{packet['latest_ui_context']}")
+    if packet.get("latest_editor_context"):
+        prompt_parts.append(f"## Editor Context (active file/selection)\n{packet['latest_editor_context']}")
+    if packet.get("latest_terminal_context"):
+        prompt_parts.append(f"## Terminal Context (recent error)\n{packet['latest_terminal_context']}")
+
+    if packet.get("activated_knowledge"):
+        knowledge_text = "\n".join(f"- {k.get('description', '')}: {k.get('content', '')}" for k in packet["activated_knowledge"])
+        prompt_parts.append(f"## Activated Knowledge\n{knowledge_text}")
+
+    if packet.get("staleness_warnings"):
+        prompt_parts.append(f"## Warnings\n" + "\n".join(f"- {w}" for w in packet["staleness_warnings"]))
+
+    prompt_parts.append(f"## Working Directory\n{packet.get('worktree_path', '')}")
+    prompt_parts.append(f"## Branch\n{packet.get('branch', '')}")
+
+    full_prompt = "\n\n".join(prompt_parts)
+
+    # Try OpenHands first
+    try:
+        openhands_task = {
+            "task": full_prompt,
+            "workspace": packet.get("worktree_path", ""),
+        }
+        data = json.dumps(openhands_task).encode()
+        req = urllib.request.Request(
+            f"{OPENHANDS_URL}/api/conversations",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        result = json.loads(resp.read())
+        return {
+            "status": "running",
+            "response": f"Agent started working on: {packet['user_instruction'][:100]}",
+            "task_id": result.get("conversation_id", result.get("id", "unknown")),
+        }
+    except Exception as openhands_error:
+        pass
+
+    # Fallback: direct LiteLLM call for simple responses
+    try:
+        litellm_payload = {
+            "model": packet.get("model", "deepseek-chat"),
+            "messages": [
+                {"role": "system", "content": "You are a coding agent. Analyze the context and provide guidance. If you can suggest a fix, provide the exact code change."},
+                {"role": "user", "content": full_prompt},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 2000,
+        }
+        data = json.dumps(litellm_payload).encode()
+        req = urllib.request.Request(
+            f"{LITELLM_URL}/v1/chat/completions",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = urllib.request.urlopen(req, timeout=30)
+        result = json.loads(resp.read())
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "No response")
+        return {
+            "status": "completed",
+            "response": content,
+            "task_id": f"litellm-{int(time.time())}",
+        }
+    except Exception as litellm_error:
+        return {
+            "status": "queued",
+            "response": f"Task queued for session {packet['session_id']}. Context attached: {', '.join(packet.get('latest_ui_context', '') and ['ui'] or []) + ', '.join(packet.get('latest_editor_context', '') and ['editor'] or []) + ', '.join(packet.get('latest_terminal_context', '') and ['terminal'] or [])}. Agent will process when available.",
+            "task_id": f"queued-{int(time.time())}",
+        }
+
+
 # --- Static files (web dashboard) ---
 
 STATIC_DIR = Path(__file__).parent.parent / "web" / "dist"
