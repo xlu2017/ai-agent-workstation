@@ -28,6 +28,18 @@ SESSIONS_DIR = Path(os.environ.get("SESSIONS_DIR", "/opt/workstation/sessions"))
 REPOS_DIR = Path(os.environ.get("REPOS_DIR", "/opt/workstation/repos"))
 CONTROL_PLANE_URL = os.environ.get("CONTROL_PLANE_URL", "http://localhost:9877")
 
+# OpenHands port is auto-allocated — read from file if available
+def get_openhands_port() -> int:
+    port_file = Path("/opt/workstation/logs/openhands-port")
+    if port_file.exists():
+        try:
+            return int(port_file.read_text().strip())
+        except (ValueError, OSError):
+            pass
+    return 3010  # fallback default
+
+OPENHANDS_URL = os.environ.get("OPENHANDS_URL", f"http://localhost:{get_openhands_port()}")
+
 # Dev server configurations per repo
 DEV_SERVER_CONFIG = {
     "cypress-realworld-app": {
