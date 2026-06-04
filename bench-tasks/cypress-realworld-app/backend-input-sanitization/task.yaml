@@ -1,0 +1,25 @@
+id: backend-input-sanitization
+repo: cypress-realworld-app
+title: "Sanitize transaction note input to prevent stored XSS"
+difficulty: medium
+category: security-defensive
+instruction: |
+  The transaction note field accepts arbitrary HTML/script content and stores
+  it directly in the database. When rendered, this could execute injected
+  scripts (stored XSS). Add server-side input sanitization to the transaction
+  creation endpoint that strips HTML tags from the note field before storing.
+  Use a whitelist approach: allow only plain text. Do NOT modify the frontend
+  rendering — fix at the API layer.
+seed_patch: seed.patch
+expected_files:
+  - backend/transaction-routes.ts
+validation_commands:
+  - "yarn test:backend --testPathPattern=transaction"
+context_source: terminal
+risk_level: low
+success_criteria: |
+  - HTML tags stripped from note before DB insert
+  - Plain text notes stored and displayed correctly
+  - Script injection in note field produces sanitized output
+  - No existing tests broken
+notes: "Defensive security only. Do not create exploit payloads."

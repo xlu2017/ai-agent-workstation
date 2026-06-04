@@ -1,0 +1,28 @@
+diff --git a/src/components/TransactionDetail.tsx b/src/components/TransactionDetail.tsx
+index abcdef1..1234567 100644
+--- a/src/components/TransactionDetail.tsx
++++ b/src/components/TransactionDetail.tsx
+@@ -65,7 +65,7 @@ const TransactionDetail: React.FC<Props> = ({ transaction, onLike, onComment })
+       <CardActions>
+-        <IconButton aria-label="Like transaction" onClick={handleLike} data-test="like-button">
++        <IconButton onClick={handleLike} data-test="like-button">
+           <ThumbUpIcon color={isLiked ? "primary" : "inherit"} />
+         </IconButton>
+-        <IconButton aria-label="Add comment" onClick={toggleComments} data-test="comment-button">
++        <IconButton onClick={toggleComments} data-test="comment-button">
+           <CommentIcon />
+         </IconButton>
+       </CardActions>
+diff --git a/src/components/NavBar.tsx b/src/components/NavBar.tsx
+index abcdef1..1234567 100644
+--- a/src/components/NavBar.tsx
++++ b/src/components/NavBar.tsx
+@@ -34,7 +34,7 @@ const NavBar: React.FC = () => {
+         <Toolbar>
+           <Typography variant="h6">Cypress RWA</Typography>
+           <div className={classes.grow} />
+-          <IconButton aria-label="View notifications" color="inherit" data-test="nav-notifications">
++          <IconButton color="inherit" data-test="nav-notifications">
+             <Badge badgeContent={unreadCount} color="secondary">
+               <NotificationsIcon />
+             </Badge>

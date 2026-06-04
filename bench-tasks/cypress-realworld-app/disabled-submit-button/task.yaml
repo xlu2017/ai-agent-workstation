@@ -1,0 +1,24 @@
+id: disabled-submit-button
+repo: cypress-realworld-app
+title: "Submit button stays disabled after filling all required fields"
+difficulty: easy
+category: frontend-state
+instruction: |
+  On the sign-up page, the submit button remains disabled even after all
+  required fields (first name, last name, username, password, confirm
+  password) are filled in correctly. The issue is that the form's
+  `isValid` check was accidentally inverted. Fix the conditional so the
+  button enables when all fields pass validation.
+seed_patch: seed.patch
+expected_files:
+  - src/components/SignUpForm.tsx
+validation_commands:
+  - "yarn test --watchAll=false --testPathPattern=SignUpForm"
+  - "yarn cypress:run --spec cypress/tests/ui/auth.spec.ts"
+context_source: browser
+risk_level: low
+success_criteria: |
+  - Submit button enables when all fields are valid
+  - Submit button stays disabled when any field is empty or invalid
+  - Sign-up e2e test passes
+notes: "Simple boolean logic fix — good baseline task."

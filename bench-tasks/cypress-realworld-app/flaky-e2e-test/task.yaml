@@ -1,0 +1,31 @@
+id: flaky-e2e-test
+repo: cypress-realworld-app
+title: "Fix flaky Cypress test that depends on animation timing"
+difficulty: hard
+category: flaky-test
+instruction: |
+  The Cypress e2e test `cypress/tests/ui/notifications.spec.ts` is flaky.
+  It fails intermittently because it clicks the notification bell icon before
+  the badge count animation completes, causing a race condition. The test
+  currently uses a hardcoded `cy.wait(500)` which is insufficient on slower
+  CI machines.
+  
+  Fix the test to use proper Cypress waiting strategies:
+  - Wait for the badge element to be visible and contain expected content
+  - Use cy.intercept() to wait for the notifications API response
+  - Remove the hardcoded cy.wait()
+  
+  Do NOT change application code — only fix the test.
+seed_patch: seed.patch
+expected_files:
+  - cypress/tests/ui/notifications.spec.ts
+validation_commands:
+  - "yarn cypress:run --spec cypress/tests/ui/notifications.spec.ts"
+context_source: terminal
+risk_level: low
+success_criteria: |
+  - Test passes reliably (run 3 times with no flakes)
+  - No hardcoded cy.wait() calls
+  - Uses cy.intercept() for API synchronization
+  - Uses proper Cypress assertions for element readiness
+notes: "Flaky test repair is a high-value autonomous agent skill."

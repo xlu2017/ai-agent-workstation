@@ -1,0 +1,26 @@
+id: stale-notification-badge
+repo: cypress-realworld-app
+title: "Fix stale notification badge count after reading notifications"
+difficulty: medium
+category: frontend-state
+instruction: |
+  After a user views their notifications, the badge count in the navbar does
+  not update — it still shows the old unread count until the page is
+  refreshed. The issue is that the notification read action does not
+  invalidate/refetch the notifications count query. Fix the state management
+  so that marking a notification as read decrements the badge count
+  immediately without requiring a page refresh.
+seed_patch: seed.patch
+expected_files:
+  - src/containers/NotificationsContainer.tsx
+validation_commands:
+  - "yarn test --watchAll=false --testPathPattern=Notification"
+  - "yarn cypress:run --spec cypress/tests/ui/notifications.spec.ts"
+context_source: browser
+risk_level: low
+success_criteria: |
+  - Badge count decrements immediately when notification is read
+  - Badge disappears when all notifications are read (count = 0)
+  - No full page refresh needed
+  - Existing tests pass
+notes: "State synchronization between components — medium difficulty."
