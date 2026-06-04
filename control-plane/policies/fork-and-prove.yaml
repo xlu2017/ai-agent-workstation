@@ -1,0 +1,33 @@
+clarification_policy: never_ask
+
+candidate_threshold: 0.72
+near_tie_delta: 0.08
+max_candidates: 3
+max_parallel_sessions: 3
+max_runtime_minutes_per_candidate: 90
+max_total_token_cost_usd: 15
+allowed_risk_level: medium
+
+blocked_operations:
+  - push_to_main
+  - auto_merge
+  - modify_secrets
+  - deploy_production
+  - destructive_migration
+  - write_outside_worktree
+
+final_status: needs_review
+
+scoring_weights:
+  user_intent_fit: 0.25
+  expected_value: 0.20
+  implementability: 0.20
+  validation_confidence: 0.15
+  risk_penalty: 0.10
+  cost_penalty: 0.05
+  scope_bloat_penalty: 0.05
+
+branch_naming: "{parent_branch}/candidate-{letter}-{slug}"
+
+comparison_report_path: "fork-and-prove/comparison.md"
+candidates_path: "fork-and-prove/candidates.json"

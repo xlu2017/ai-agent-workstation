@@ -496,6 +496,129 @@ def cmd_restore(args):
         sys.exit(1)
 
 
+def cmd_task(args):
+    """Create a task with specified execution mode."""
+    if args.subcommand != "create":
+        print("Usage: platformctl task create --session <id> --mode <mode> --instruction <text>")
+        return
+
+    session_id = args.session
+    mode = args.mode
+    instruction = args.instruction
+
+    session_dir = SESSIONS_DIR / session_id
+    if not session_dir.exists():
+        print(f"Session not found: {session_id}", file=sys.stderr)
+        sys.exit(1)
+
+    config_file = session_dir / "config.json"
+    if not config_file.exists():
+        print(f"Session has no config: {session_id}", file=sys.stderr)
+        sys.exit(1)
+
+    config = json.loads(config_file.read_text())
+
+    if mode == "fork-and-prove":
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from executors.fork_and_prove import ForkAndProveOrchestrator
+        orchestrator = ForkAndProveOrchestrator(session_id)
+        result = orchestrator.run(instruction, config.get("worktree", ""), config.get("branch", ""))
+        if hasattr(args, "json") and args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(f"Fork-and-prove completed:")
+            print(f"  Candidates generated: {result.get('candidates_generated', 0)}")
+            print(f"  Candidates implemented: {result.get('candidates_implemented', 0)}")
+            print(f"  Duration: {result.get('duration_seconds', 0):.1f}s")
+            print(f"  Report: {result.get('comparison_report', '')}")
+    else:
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from executors.direct_executor import DirectExecutor
+        from executors.base import TaskPacket
+        import uuid
+        executor = DirectExecutor()
+        packet = TaskPacket(
+            task_id=f"task-{uuid.uuid4().hex[:8]}",
+            session_id=session_id,
+            instruction=instruction,
+            worktree_path=config.get("worktree", ""),
+            branch=config.get("branch", ""),
+        )
+        result = executor.run_task(session_id, packet)
+        if hasattr(args, "json") and args.json:
+            print(json.dumps({"status": result.status, "commit": result.commit_sha, "files": result.files_edited}, indent=2))
+        else:
+            print(f"Task {result.status}: {result.commit_sha or 'no commit'}")
+            if result.files_edited:
+                for f in result.files_edited:
+                    print(f"  edited: {f}")
+
+
+def cmd_fork(args):
+    """Fork-and-prove management commands."""
+    if not hasattr(args, "subcommand") or not args.subcommand:
+        print("Usage: platformctl fork [list|compare|approve|reject]")
+        return
+
+    if args.subcommand == "list":
+        session_id = args.session
+        candidates_path = SESSIONS_DIR / session_id / "fork-and-prove" / "candidates.json"
+        if not candidates_path.exists():
+            print("No fork-and-prove candidates found.")
+            return
+        candidates = json.loads(candidates_path.read_text())
+        if hasattr(args, "json") and args.json:
+            print(json.dumps(candidates, indent=2))
+        else:
+            for c in candidates:
+                selected = "[SELECTED]" if c.get("selected_for_implementation") else ""
+                review = c.get("review_status", "")
+                print(f"  {c['candidate_id']}: {c['title']} (score={c['score']:.3f}) {selected} {review}")
+
+    elif args.subcommand == "compare":
+        session_id = args.session
+        report_path = SESSIONS_DIR / session_id / "fork-and-prove" / "comparison.md"
+        if not report_path.exists():
+            print("No comparison report found.")
+            return
+        print(report_path.read_text())
+
+    elif args.subcommand in ("approve", "reject"):
+        session_id = args.session
+        candidate_id = args.candidate_id
+        candidates_path = SESSIONS_DIR / session_id / "fork-and-prove" / "candidates.json"
+        if not candidates_path.exists():
+            print("No candidates found.", file=sys.stderr)
+            sys.exit(1)
+        candidates = json.loads(candidates_path.read_text())
+        found = False
+        for c in candidates:
+            if c["candidate_id"] == candidate_id:
+                c["review_status"] = "approved" if args.subcommand == "approve" else "rejected"
+                c["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+                found = True
+                break
+        if not found:
+            print(f"Candidate not found: {candidate_id}", file=sys.stderr)
+            sys.exit(1)
+        candidates_path.write_text(json.dumps(candidates, indent=2))
+        print(f"Candidate {candidate_id}: {args.subcommand}d")
+
+
+def cmd_policy(args):
+    """Policy management commands."""
+    if not hasattr(args, "subcommand") or args.subcommand != "show":
+        print("Usage: platformctl policy show <name>")
+        return
+
+    name = args.name
+    policy_path = Path(__file__).parent.parent / "policies" / f"{name}.yaml"
+    if not policy_path.exists():
+        print(f"Policy not found: {name}", file=sys.stderr)
+        sys.exit(1)
+    print(policy_path.read_text())
+
+
 def main():
     parser = argparse.ArgumentParser(prog="platformctl", description="Workstation control plane CLI")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
@@ -552,6 +675,40 @@ def main():
     knowledge_sub = knowledge_parser.add_subparsers(dest="subcommand")
     knowledge_sub.add_parser("list", help="List entries").add_argument("--json", action="store_true")
 
+    # task
+    task_parser = subparsers.add_parser("task", help="Task management")
+    task_sub = task_parser.add_subparsers(dest="subcommand")
+    task_create_p = task_sub.add_parser("create", help="Create task")
+    task_create_p.add_argument("--session", required=True, help="Session ID")
+    task_create_p.add_argument("--mode", choices=["safe", "review-required", "full-autonomy-branch", "fork-and-prove"], default="safe")
+    task_create_p.add_argument("--instruction", required=True, help="Task instruction")
+    task_create_p.add_argument("--json", action="store_true")
+
+    # fork
+    fork_parser = subparsers.add_parser("fork", help="Fork-and-prove management")
+    fork_sub = fork_parser.add_subparsers(dest="subcommand")
+
+    fork_list_p = fork_sub.add_parser("list", help="List fork candidates")
+    fork_list_p.add_argument("session", help="Parent session ID")
+    fork_list_p.add_argument("--json", action="store_true")
+
+    fork_compare_p = fork_sub.add_parser("compare", help="Show comparison report")
+    fork_compare_p.add_argument("session", help="Parent session ID")
+
+    fork_approve_p = fork_sub.add_parser("approve", help="Approve candidate")
+    fork_approve_p.add_argument("candidate_id", help="Candidate ID (e.g. candidate-a)")
+    fork_approve_p.add_argument("--session", required=True, help="Parent session ID")
+
+    fork_reject_p = fork_sub.add_parser("reject", help="Reject candidate")
+    fork_reject_p.add_argument("candidate_id", help="Candidate ID (e.g. candidate-a)")
+    fork_reject_p.add_argument("--session", required=True, help="Parent session ID")
+
+    # policy
+    policy_parser = subparsers.add_parser("policy", help="Policy management")
+    policy_sub = policy_parser.add_subparsers(dest="subcommand")
+    policy_show_p = policy_sub.add_parser("show", help="Show a policy")
+    policy_show_p.add_argument("name", help="Policy name (e.g. full-autonomy-branch)")
+
     # doctor
     subparsers.add_parser("doctor", help="Run system diagnostics")
 
@@ -594,6 +751,12 @@ def main():
             cmd_knowledge_list(args)
         else:
             knowledge_parser.print_help()
+    elif args.command == "task":
+        cmd_task(args)
+    elif args.command == "fork":
+        cmd_fork(args)
+    elif args.command == "policy":
+        cmd_policy(args)
     elif args.command == "doctor":
         cmd_doctor(args)
     elif args.command == "backup":

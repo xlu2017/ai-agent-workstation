@@ -1,0 +1,83 @@
+mode: full-autonomy-branch
+
+allowed_operations:
+  - edit_files
+  - create_files
+  - delete_files_in_worktree
+  - run_tests
+  - run_builds
+  - install_dependencies
+  - run_dev_servers
+  - commit_changes
+  - spawn_helper_sessions
+  - iterate_after_failures
+  - produce_pr_branches
+
+blocked_operations:
+  - push_to_main
+  - force_push_protected_branches
+  - modify_secrets
+  - read_or_print_api_keys
+  - write_outside_worktree
+  - delete_outside_worktree
+  - production_deploy
+  - create_cloud_resources
+  - destructive_database_operations
+  - modify_global_system_config
+
+protected_branches:
+  - main
+  - master
+  - develop
+  - production
+
+allowed_worktree_roots:
+  - /opt/workstation/repos
+  - /opt/workstation/sessions
+
+secret_patterns:
+  - "*.env"
+  - "*.env.*"
+  - credentials.*
+  - secrets.*
+  - "*.pem"
+  - "*.key"
+  - id_rsa*
+
+destructive_commands:
+  - "rm -rf /"
+  - "sudo rm"
+  - mkfs
+  - "dd if="
+  - "> /dev/"
+  - shutdown
+  - reboot
+  - "DROP DATABASE"
+  - "DROP TABLE"
+  - "TRUNCATE"
+  - "DELETE FROM"
+
+cloud_commands:
+  - "aws .* create"
+  - "aws .* delete"
+  - "gcloud .* create"
+  - "gcloud .* delete"
+  - "az .* create"
+  - "az .* delete"
+  - "terraform apply"
+  - "terraform destroy"
+
+approval_required: false
+auto_commit_on_validation_pass: true
+checkpoint_before_start: true
+final_status: needs_review
+auto_merge: false
+
+validation_steps:
+  - build
+  - test
+  - lint
+
+max_iterations: 50
+max_runtime_minutes: 120
+max_token_cost_usd: 10

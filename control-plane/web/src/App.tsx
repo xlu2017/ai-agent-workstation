@@ -244,7 +244,7 @@ function SessionsPage() {
             {session.has_editor_context && <span className="badge badge-blue">Editor</span>}
             {session.has_terminal_context && <span className="badge badge-blue">Terminal</span>}
           </div>
-          <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+          <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
             <button className="btn btn-primary" onClick={() => setChatOpen(chatOpen === session.id ? null : session.id)}>
               {chatOpen === session.id ? 'Close Chat' : 'Chat'}
             </button>
@@ -254,6 +254,7 @@ function SessionsPage() {
             <button className="btn btn-detach" onClick={() => window.open(`/#/session/${session.id}`, `session-${session.id}`, 'width=700,height=800,menubar=no,toolbar=no')}>
               Detach
             </button>
+            <ModeSelector sessionId={session.id} />
             <button className="btn btn-danger" onClick={() => destroySession(session.id)}>Destroy</button>
           </div>
           {chatOpen === session.id && <SessionChat sessionId={session.id} />}
@@ -634,10 +635,191 @@ function PostmortemPage() {
   )
 }
 
+const ModeSelector = ({ sessionId }: { sessionId: string }) => {
+  const [mode, setMode] = useState('safe')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(`${API}/sessions/${sessionId}/mode`)
+      .then(response => response.json())
+      .then(data => { setMode(data.mode || 'safe'); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [sessionId])
+
+  const changeMode = (newMode: string) => {
+    setMode(newMode)
+    fetch(`${API}/sessions/${sessionId}/mode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: newMode }),
+    })
+  }
+
+  if (loading) return null
+
+  return (
+    <select
+      className="mode-selector"
+      value={mode}
+      onChange={event => changeMode(event.target.value)}
+    >
+      <option value="safe">Safe</option>
+      <option value="review-required">Review Required</option>
+      <option value="full-autonomy-branch">Full Autonomy Branch</option>
+      <option value="fork-and-prove">Fork-and-Prove</option>
+    </select>
+  )
+}
+
+interface ForkCandidate {
+  candidate_id: string
+  title: string
+  interpretation: string
+  planned_changes: string[]
+  validation_plan: string[]
+  risk_level: string
+  score: number
+  score_breakdown: Record<string, number>
+  selected_for_implementation: boolean
+  review_status?: string
+}
+
+function ForkAndProvePage() {
+  const { data: sessionsData } = useFetch<{ sessions: Session[] }>(`${API}/sessions`)
+  const [selectedSession, setSelectedSession] = useState('')
+  const [candidates, setCandidates] = useState<ForkCandidate[]>([])
+  const [comparison, setComparison] = useState('')
+  const [instruction, setInstruction] = useState('')
+  const [running, setRunning] = useState(false)
+
+  useEffect(() => {
+    if (!selectedSession) return
+    fetch(`${API}/sessions/${selectedSession}/fork-and-prove/candidates`)
+      .then(response => response.json())
+      .then(data => setCandidates(data.candidates || []))
+      .catch(() => {})
+    fetch(`${API}/sessions/${selectedSession}/fork-and-prove/comparison`)
+      .then(response => response.json())
+      .then(data => setComparison(data.report || ''))
+      .catch(() => setComparison(''))
+  }, [selectedSession])
+
+  const startFork = () => {
+    if (!selectedSession || !instruction.trim()) return
+    setRunning(true)
+    fetch(`${API}/sessions/${selectedSession}/fork-and-prove`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instruction }),
+    })
+      .then(response => response.json())
+      .then(() => {
+        fetch(`${API}/sessions/${selectedSession}/fork-and-prove/candidates`)
+          .then(response => response.json())
+          .then(data => setCandidates(data.candidates || []))
+        fetch(`${API}/sessions/${selectedSession}/fork-and-prove/comparison`)
+          .then(response => response.json())
+          .then(data => setComparison(data.report || ''))
+      })
+      .finally(() => setRunning(false))
+  }
+
+  const actionCandidate = (candidateId: string, action: string) => {
+    fetch(`${API}/sessions/${selectedSession}/fork-and-prove/${candidateId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    }).then(() => {
+      fetch(`${API}/sessions/${selectedSession}/fork-and-prove/candidates`)
+        .then(response => response.json())
+        .then(data => setCandidates(data.candidates || []))
+    })
+  }
+
+  return (
+    <div>
+      <h2>Fork-and-Prove</h2>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title" style={{ marginBottom: 8 }}>Run Fork-and-Prove</div>
+        <select
+          className="mode-selector"
+          style={{ width: '100%', marginBottom: 8 }}
+          value={selectedSession}
+          onChange={event => setSelectedSession(event.target.value)}
+        >
+          <option value="">Select session...</option>
+          {sessionsData?.sessions.map(session => (
+            <option key={session.id} value={session.id}>{session.id} ({session.branch})</option>
+          ))}
+        </select>
+        <input
+          className="chat-input"
+          placeholder="Ambiguous task instruction..."
+          value={instruction}
+          onChange={event => setInstruction(event.target.value)}
+          onKeyDown={event => event.key === 'Enter' && startFork()}
+          disabled={running}
+          style={{ marginBottom: 8 }}
+        />
+        <button className="btn btn-primary" onClick={startFork} disabled={running || !selectedSession || !instruction.trim()}>
+          {running ? 'Running...' : 'Start Fork-and-Prove'}
+        </button>
+      </div>
+
+      {candidates.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-title" style={{ marginBottom: 12 }}>Candidates ({candidates.length})</div>
+          {candidates.map(candidate => (
+            <div key={candidate.candidate_id} className="fork-candidate">
+              <div className="fork-candidate-header">
+                <strong>{candidate.candidate_id}: {candidate.title}</strong>
+                <span className="fork-score">Score: {candidate.score.toFixed(3)}</span>
+                {candidate.selected_for_implementation && <span className="badge badge-green">SELECTED</span>}
+                {candidate.review_status === 'approved' && <span className="badge badge-green">Approved</span>}
+                {candidate.review_status === 'rejected' && <span className="badge badge-red">Rejected</span>}
+              </div>
+              <div className="meta">{candidate.interpretation}</div>
+              <div className="meta" style={{ marginTop: 4 }}>
+                Risk: <span className={`badge ${candidate.risk_level === 'low' ? 'badge-green' : candidate.risk_level === 'high' ? 'badge-red' : 'badge-yellow'}`}>{candidate.risk_level}</span>
+              </div>
+              {candidate.score_breakdown && (
+                <div className="fork-scores">
+                  {Object.entries(candidate.score_breakdown).map(([dimension, value]) => (
+                    <span key={dimension} className="fork-score-dim">{dimension}: {Number(value).toFixed(2)}</span>
+                  ))}
+                </div>
+              )}
+              {candidate.planned_changes && (
+                <div className="meta" style={{ marginTop: 4 }}>
+                  Changes: {candidate.planned_changes.join(', ')}
+                </div>
+              )}
+              {candidate.selected_for_implementation && !candidate.review_status && (
+                <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                  <button className="btn btn-primary" onClick={() => actionCandidate(candidate.candidate_id, 'approved')}>Approve</button>
+                  <button className="btn btn-danger" onClick={() => actionCandidate(candidate.candidate_id, 'rejected')}>Reject</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {comparison && (
+        <div className="card">
+          <div className="card-title" style={{ marginBottom: 12 }}>Comparison Report</div>
+          <pre className="log-output" style={{ whiteSpace: 'pre-wrap', maxHeight: 400 }}>{comparison}</pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const PAGES: Record<string, () => JSX.Element> = {
   Sessions: SessionsPage,
   Context: ContextPage,
   Timeline: TimelinePage,
+  'Fork-Prove': ForkAndProvePage,
   Postmortem: PostmortemPage,
   Models: ModelsPage,
   Knowledge: KnowledgePage,

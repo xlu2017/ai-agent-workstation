@@ -779,6 +779,147 @@ def trigger_autonomy_scan():
         return {"error": str(e), "discovered": 0}
 
 
+# --- Modes and Policies ---
+
+EXECUTION_MODES = ["safe", "review-required", "full-autonomy-branch", "fork-and-prove"]
+
+
+class ModeRequest(BaseModel):
+    mode: str
+
+
+@app.get("/api/policies")
+def list_policies():
+    """List available execution mode policies."""
+    policies_dir = Path(__file__).parent.parent / "policies"
+    policies = []
+    if policies_dir.exists():
+        for f in policies_dir.glob("*.yaml"):
+            try:
+                import yaml
+                content = yaml.safe_load(f.read_text())
+                policies.append({"name": f.stem, "file": f.name, "config": content})
+            except Exception:
+                policies.append({"name": f.stem, "file": f.name, "config": {}})
+    return {"policies": policies, "available_modes": EXECUTION_MODES}
+
+
+@app.get("/api/policies/{name}")
+def get_policy(name: str):
+    """Get a specific policy by name."""
+    import yaml
+    policy_path = Path(__file__).parent.parent / "policies" / f"{name}.yaml"
+    if not policy_path.exists():
+        raise HTTPException(404, f"Policy '{name}' not found")
+    return yaml.safe_load(policy_path.read_text())
+
+
+@app.post("/api/sessions/{session_id}/mode")
+def set_session_mode(session_id: str, request: ModeRequest):
+    """Set execution mode for a session."""
+    if request.mode not in EXECUTION_MODES:
+        raise HTTPException(400, f"Invalid mode: {request.mode}. Valid: {EXECUTION_MODES}")
+    session_dir = SESSIONS_DIR / session_id
+    if not session_dir.exists():
+        raise HTTPException(404, f"Session '{session_id}' not found")
+    mode_file = session_dir / "mode.json"
+    mode_data = {"mode": request.mode, "set_at": datetime.now(timezone.utc).isoformat()}
+    mode_file.write_text(json.dumps(mode_data, indent=2))
+    return {"session_id": session_id, "mode": request.mode}
+
+
+@app.get("/api/sessions/{session_id}/mode")
+def get_session_mode(session_id: str):
+    """Get execution mode for a session."""
+    session_dir = SESSIONS_DIR / session_id
+    if not session_dir.exists():
+        raise HTTPException(404, f"Session '{session_id}' not found")
+    mode_file = session_dir / "mode.json"
+    if mode_file.exists():
+        return json.loads(mode_file.read_text())
+    return {"mode": "safe", "set_at": None}
+
+
+# --- Fork-and-Prove ---
+
+class ForkRequest(BaseModel):
+    instruction: str
+    context: Optional[dict] = None
+
+
+@app.post("/api/sessions/{session_id}/fork-and-prove")
+def start_fork_and_prove(session_id: str, request: ForkRequest):
+    """Start a fork-and-prove execution for an ambiguous task."""
+    session_dir = SESSIONS_DIR / session_id
+    if not session_dir.exists():
+        raise HTTPException(404, f"Session '{session_id}' not found")
+
+    config_file = session_dir / "config.json"
+    if not config_file.exists():
+        raise HTTPException(400, "Session has no config (worktree/branch unknown)")
+
+    config = json.loads(config_file.read_text())
+    worktree = config.get("worktree", "")
+    branch = config.get("branch", "")
+
+    if not worktree or not Path(worktree).exists():
+        raise HTTPException(400, f"Session worktree not found: {worktree}")
+
+    try:
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from executors.fork_and_prove import ForkAndProveOrchestrator
+        orchestrator = ForkAndProveOrchestrator(session_id)
+        result = orchestrator.run(request.instruction, worktree, branch, request.context or {})
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Fork-and-prove execution failed: {str(e)}")
+
+
+@app.get("/api/sessions/{session_id}/fork-and-prove/candidates")
+def get_fork_candidates(session_id: str):
+    """Get fork-and-prove candidates for a session."""
+    candidates_path = SESSIONS_DIR / session_id / "fork-and-prove" / "candidates.json"
+    if not candidates_path.exists():
+        return {"candidates": [], "session_id": session_id}
+    return {"candidates": json.loads(candidates_path.read_text()), "session_id": session_id}
+
+
+@app.get("/api/sessions/{session_id}/fork-and-prove/comparison")
+def get_fork_comparison(session_id: str):
+    """Get fork-and-prove comparison report."""
+    report_path = SESSIONS_DIR / session_id / "fork-and-prove" / "comparison.md"
+    if not report_path.exists():
+        raise HTTPException(404, "No comparison report found")
+    return {"report": report_path.read_text(), "session_id": session_id}
+
+
+class CandidateAction(BaseModel):
+    action: str  # approve or reject
+
+
+@app.post("/api/sessions/{session_id}/fork-and-prove/{candidate_id}")
+def action_fork_candidate(session_id: str, candidate_id: str, request: CandidateAction):
+    """Approve or reject a fork-and-prove candidate."""
+    candidates_path = SESSIONS_DIR / session_id / "fork-and-prove" / "candidates.json"
+    if not candidates_path.exists():
+        raise HTTPException(404, "No candidates found")
+
+    candidates = json.loads(candidates_path.read_text())
+    found = False
+    for candidate in candidates:
+        if candidate["candidate_id"] == candidate_id:
+            candidate["review_status"] = request.action
+            candidate["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+            found = True
+            break
+
+    if not found:
+        raise HTTPException(404, f"Candidate '{candidate_id}' not found")
+
+    candidates_path.write_text(json.dumps(candidates, indent=2))
+    return {"candidate_id": candidate_id, "action": request.action}
+
+
 # --- Static files (web dashboard) ---
 
 STATIC_DIR = Path(__file__).parent.parent / "web" / "dist"
