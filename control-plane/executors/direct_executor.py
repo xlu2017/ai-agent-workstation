@@ -39,6 +39,9 @@ LITELLM_KEY = os.environ.get(
 )
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-v4-flash")
 MAX_ITERATIONS = int(os.environ.get("DIRECT_EXECUTOR_MAX_ITERATIONS", "30"))
+MAX_OBSERVATION_CHARS = 8000
+MAX_CONTEXT_MESSAGES = 60
+STUCK_THRESHOLD = 3
 
 FORBIDDEN_PATHS = ["/etc", "/root", "/var", "/usr", "/boot", "/proc", "/sys"]
 FORBIDDEN_COMMANDS = ["rm -rf /", "sudo rm", "mkfs", "dd if=", "> /dev/", "shutdown", "reboot"]
@@ -215,6 +218,20 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "think",
+            "description": "Use this to reason about the problem without taking action. Good for planning your approach before editing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "thought": {"type": "string", "description": "Your reasoning or plan"},
+                },
+                "required": ["thought"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "task_complete",
             "description": "Signal that you are done with the task. Call this when you have finished all edits and validation.",
             "parameters": {
@@ -230,7 +247,49 @@ TOOL_DEFINITIONS = [
 
 
 class DirectExecutor(ExecutorAdapter):
-    """Structured tool-calling executor with worktree enforcement."""
+    """Structured tool-calling executor with worktree enforcement.
+
+    Incorporates patterns from OpenHands software-agent-sdk:
+    - Stuck detection (repeated tool calls break the loop)
+    - Observation truncation (large outputs trimmed to fit context)
+    - Context window management (old messages dropped when too many)
+    - Think tool for reasoning without action
+    - Phase-based system prompt guiding explore->edit->validate->commit
+    """
+
+    @staticmethod
+    def _truncate_observation(obs: dict) -> dict:
+        """Truncate large observation content to fit context window."""
+        for key in ("content", "output", "stdout"):
+            if key in obs and isinstance(obs[key], str) and len(obs[key]) > MAX_OBSERVATION_CHARS:
+                half = MAX_OBSERVATION_CHARS // 2
+                obs[key] = (
+                    obs[key][:half]
+                    + "\n\n... [" + str(len(obs[key]) - MAX_OBSERVATION_CHARS) + " chars truncated] ...\n\n"
+                    + obs[key][-half:]
+                )
+        return obs
+
+    @staticmethod
+    def _detect_stuck(recent_calls: list) -> bool:
+        """Detect if the agent is stuck repeating the same tool call."""
+        if len(recent_calls) < STUCK_THRESHOLD:
+            return False
+        last_n = recent_calls[-STUCK_THRESHOLD:]
+        return all(c == last_n[0] for c in last_n)
+
+    @staticmethod
+    def _trim_context(messages: list) -> list:
+        """Trim old tool responses when message list grows too long."""
+        if len(messages) <= MAX_CONTEXT_MESSAGES:
+            return messages
+        keep_tail = MAX_CONTEXT_MESSAGES - 2
+        trimmed = messages[:2] + messages[-keep_tail:]
+        trimmed.insert(2, {
+            "role": "user",
+            "content": "[Context trimmed: earlier tool exchanges removed to fit context window. Focus on current task.]"
+        })
+        return trimmed
 
     def run_task(self, session_id: str, packet: TaskPacket) -> TaskResult:
         start_time = time.time()
@@ -260,6 +319,7 @@ class DirectExecutor(ExecutorAdapter):
         messages = self._build_initial_messages(packet, worktree)
 
         files_edited = []
+        self._recent_calls = []
         commands_run = []
         tool_calls_count = 0
         task_done = False
@@ -269,6 +329,9 @@ class DirectExecutor(ExecutorAdapter):
         for iteration in range(MAX_ITERATIONS):
             if task_done:
                 break
+
+            # Trim context if growing too large
+            messages = self._trim_context(messages)
 
             # Ask model for next tool call
             try:
@@ -298,10 +361,40 @@ class DirectExecutor(ExecutorAdapter):
                 except json.JSONDecodeError:
                     args = {}
 
+                # Handle think tool (no execution needed)
+                if func_name == "think":
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps({"ok": True}),
+                    })
+                    self._record_timeline_event(session_id, "think", {
+                        "thought": str(args.get("thought", ""))[:500],
+                        "iteration": iteration,
+                    })
+                    continue
+
+                # Stuck detection
+                call_sig = json.dumps({"t": func_name, "a": args}, sort_keys=True)
+                self._recent_calls.append(call_sig)
+                if self._detect_stuck(self._recent_calls):
+                    self._record_timeline_event(session_id, "stuck_detected", {
+                        "tool": func_name, "iteration": iteration,
+                    })
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps({"success": False, "error": "STUCK: Identical tool call repeated. Change your approach or call task_complete."}),
+                    })
+                    continue
+
                 # Execute tool
                 observation = self._execute_tool(
                     func_name, args, worktree, session_id, branch
                 )
+
+                # Truncate large observations
+                observation = self._truncate_observation(observation)
 
                 # Track edits
                 if func_name == "write_file" and observation.get("success"):
@@ -387,28 +480,47 @@ class DirectExecutor(ExecutorAdapter):
 
     def _build_initial_messages(self, packet: TaskPacket, worktree: str) -> list:
         """Build the initial system + user messages for the LLM."""
-        system_prompt = f"""You are an autonomous coding agent. Your job is to EDIT CODE to fix the described issue.
+        system_prompt = f"""You are a precise autonomous coding agent. You receive a task and MUST produce a working code change.
 
-IMPORTANT: Act decisively. Do not over-explore. Follow this pattern:
-1. Read only the files directly relevant to the task (1-3 files max).
-2. Make the edit using write_file or apply_patch.
-3. Run validation (tests/lint) if available.
-4. If validation passes, commit with git_commit.
-5. Call task_complete.
+## Execution Protocol
 
+Phase 1 - LOCATE (max 3 tool calls):
+  Use grep or list_files to find the relevant file(s). Do NOT read entire files yet.
+
+Phase 2 - UNDERSTAND (max 2 tool calls):
+  Use read_file on the specific section you need to change. Use start_line/end_line to read only what matters.
+
+Phase 3 - EDIT (1-3 tool calls):
+  Use apply_patch for surgical edits (preferred) or write_file for new files.
+  If apply_patch fails with "old_text not found", re-read the file to get exact current content, then retry.
+
+Phase 4 - VALIDATE (1 tool call):
+  Use run_validation or run_command to verify your change works.
+
+Phase 5 - COMMIT (1-2 tool calls):
+  Use git_commit with a descriptive message, then call task_complete.
+
+## Self-Correction Rules (from OpenHands patterns)
+- If a tool returns an error, fix it immediately. Do not repeat the same failing call.
+- If read_file shows the file is large, use start_line/end_line to narrow scope.
+- If apply_patch fails, the file content may have changed. Re-read and retry with correct old_text.
+- If you are unsure what to do, use the think tool to reason before acting.
+- NEVER call the same tool with identical arguments twice in a row.
+
+## Environment
 Working directory: {worktree}
 Branch: {packet.branch}
 Session: {packet.session_id}
 
-Constraints:
+## Constraints
 - Only modify files inside the worktree.
 - Do not touch node_modules, .git, or generated directories.
-- Do not spend more than 3 iterations reading before you start editing.
-- Make minimal, focused changes. Prefer apply_patch over write_file for targeted edits.
-- Commit after successful validation. If no test runner is configured, commit after the edit.
-- Always call task_complete as your final action with a summary of what you did.
+- Make minimal, focused changes.
+- Always call task_complete as your final action.
 
-Available tools: read_file, write_file, apply_patch, list_files, grep, run_command, git_status, git_diff, git_commit, run_validation, get_latest_context, task_complete"""
+## Tools
+read_file, write_file, apply_patch, list_files, grep, run_command,
+git_status, git_diff, git_commit, run_validation, get_latest_context, think, task_complete"""
 
         user_parts = [f"## Task\n{packet.instruction}"]
         if packet.ui_context:
