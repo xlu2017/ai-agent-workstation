@@ -23,6 +23,9 @@ interface ChatMsg {
   context_attached?: string[]
   staleness?: string
   status?: string
+  files_edited?: string[]
+  commit?: string
+  task_id?: string
 }
 
 interface Health {
@@ -137,7 +140,28 @@ const SessionChat = ({ sessionId }: { sessionId: string }) => {
             )}
             {message.status && message.role === 'assistant' && (
               <div className="chat-msg-meta">
-                status: <span className={`badge ${message.status === 'running' ? 'badge-blue' : message.status === 'completed' ? 'badge-green' : 'badge-yellow'}`}>{message.status}</span>
+                status: <span className={`badge ${message.status === 'committed' ? 'badge-green' : message.status === 'claimed' ? 'badge-blue' : message.status === 'failed' ? 'badge-yellow' : 'badge-yellow'}`}>{message.status}</span>
+                {message.commit && <span style={{ marginLeft: 8, fontFamily: 'monospace', fontSize: 11 }}>commit: {message.commit.slice(0, 8)}</span>}
+              </div>
+            )}
+            {message.files_edited && message.files_edited.length > 0 && (
+              <div className="chat-msg-meta" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+                <span style={{ fontWeight: 600, fontSize: 11 }}>Edited files:</span>
+                {message.files_edited.map((file, i) => {
+                  const shortPath = file.replace(/.*\/worktree-[^/]+\//, '')
+                  const devServerUrl = shortPath.match(/\.(tsx?|jsx?|css|html)$/)
+                    ? `http://localhost:3000/${shortPath.replace(/^src\//, '').replace(/\.(tsx?|jsx?)$/, '')}`
+                    : null
+                  return (
+                    <span key={i} style={{ fontSize: 11, fontFamily: 'monospace' }}>
+                      {devServerUrl ? (
+                        <a href={devServerUrl} target="_blank" rel="noopener" style={{ color: '#6ec6ff', textDecoration: 'underline' }}>{shortPath}</a>
+                      ) : (
+                        <span style={{ color: '#aaa' }}>{shortPath}</span>
+                      )}
+                    </span>
+                  )
+                })}
               </div>
             )}
           </div>
