@@ -1,0 +1,46 @@
+diff --git a/src/components/NotificationPreferences.test.tsx b/src/components/NotificationPreferences.test.tsx
+deleted file mode 100644
+index abcdef1..0000000
+--- a/src/components/NotificationPreferences.test.tsx
++++ /dev/null
+@@ -1,45 +0,0 @@
+-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+-import NotificationPreferences from "./NotificationPreferences";
+-
+-const mockPrefs = {
+-  transactionReceived: true,
+-  transactionRequested: false,
+-  liked: true,
+-  commented: true,
+-};
+-
+-describe("NotificationPreferences", () => {
+-  it("renders all toggle switches", () => {
+-    render(<NotificationPreferences preferences={mockPrefs} onUpdate={jest.fn()} />);
+-    expect(screen.getAllByRole("checkbox")).toHaveLength(4);
+-  });
+-
+-  it("calls onUpdate when toggle is clicked", () => {
+-    const onUpdate = jest.fn();
+-    render(<NotificationPreferences preferences={mockPrefs} onUpdate={onUpdate} />);
+-    fireEvent.click(screen.getAllByRole("checkbox")[1]);
+-    expect(onUpdate).toHaveBeenCalledWith({ ...mockPrefs, transactionRequested: true });
+-  });
+-
+-  it("displays current preferences", () => {
+-    render(<NotificationPreferences preferences={mockPrefs} onUpdate={jest.fn()} />);
+-    const checkboxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+-    expect(checkboxes[0].checked).toBe(true);
+-    expect(checkboxes[1].checked).toBe(false);
+-  });
+-
+-  it("shows loading state while saving", () => {
+-    render(<NotificationPreferences preferences={mockPrefs} onUpdate={jest.fn()} isSaving={true} />);
+-    expect(screen.getByTestId("saving-indicator")).toBeInTheDocument();
+-  });
+-
+-  it("shows error on save failure", () => {
+-    render(<NotificationPreferences preferences={mockPrefs} onUpdate={jest.fn()} error="Save failed" />);
+-    expect(screen.getByText("Save failed")).toBeInTheDocument();
+-  });
+-});

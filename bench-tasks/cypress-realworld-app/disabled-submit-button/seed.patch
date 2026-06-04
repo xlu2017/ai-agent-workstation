@@ -1,0 +1,13 @@
+diff --git a/src/components/SignUpForm.tsx b/src/components/SignUpForm.tsx
+index abcdef1..1234567 100644
+--- a/src/components/SignUpForm.tsx
++++ b/src/components/SignUpForm.tsx
+@@ -78,7 +78,7 @@ const SignUpForm: React.FC<Props> = ({ onSubmit }) => {
+         variant="contained"
+         color="primary"
+         type="submit"
+-        disabled={!isValid || isSubmitting}
++        disabled={isValid || isSubmitting}
+         data-test="signup-submit"
+       >
+         Sign Up

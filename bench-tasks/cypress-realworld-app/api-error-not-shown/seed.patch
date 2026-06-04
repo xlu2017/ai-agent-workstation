@@ -1,0 +1,28 @@
+diff --git a/src/containers/TransactionCreateContainer.tsx b/src/containers/TransactionCreateContainer.tsx
+index abcdef1..1234567 100644
+--- a/src/containers/TransactionCreateContainer.tsx
++++ b/src/containers/TransactionCreateContainer.tsx
+@@ -42,12 +42,7 @@ const TransactionCreateContainer: React.FC = () => {
+   const handleSubmit = async (payload: TransactionPayload) => {
+     try {
+       await createTransaction(payload);
+       history.push("/transactions");
+-    } catch (err: any) {
+-      const message = err?.response?.data?.message || "Transaction failed. Please try again.";
+-      setError(message);
+-    }
++    } catch {}
+   };
+ 
+-  const [error, setError] = useState<string | null>(null);
+-
+   return (
+@@ -55,7 +50,6 @@ const TransactionCreateContainer: React.FC = () => {
+       <TransactionCreateStepTwo
+         onSubmit={handleSubmit}
+         ...
+       />
+-      {error && <Alert severity="error" data-test="transaction-error">{error}</Alert>}
+     </>
+   );
+ };
