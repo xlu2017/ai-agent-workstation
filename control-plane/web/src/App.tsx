@@ -441,16 +441,16 @@ function ToolCallEvent({ event }: { event: any }) {
   const success = event.success
 
   const getIcon = () => {
-    if (tool === 'read_file') return '📖'
-    if (tool === 'write_file' || tool === 'apply_patch') return '✏️'
-    if (tool === 'run_command') return '⚡'
-    if (tool === 'git_commit') return '💾'
-    if (tool === 'git_status' || tool === 'git_diff') return '🔍'
-    if (tool === 'list_files' || tool === 'grep') return '🔎'
-    if (tool === 'run_validation') return '🧪'
-    if (tool === 'task_complete') return '✅'
-    if (tool === 'get_latest_context') return '🧠'
-    return '🔧'
+    if (tool === 'read_file') return 'R'
+    if (tool === 'write_file' || tool === 'apply_patch') return 'W'
+    if (tool === 'run_command') return '$'
+    if (tool === 'git_commit') return 'G'
+    if (tool === 'git_status' || tool === 'git_diff') return 'D'
+    if (tool === 'list_files' || tool === 'grep') return '?'
+    if (tool === 'run_validation') return 'T'
+    if (tool === 'task_complete') return '*'
+    if (tool === 'get_latest_context') return 'C'
+    return '>'
   }
 
   const getDetail = () => {
@@ -530,7 +530,7 @@ function TimelinePage() {
               if (ev.type === 'task_start') {
                 return <div key={i} className="timeline-row timeline-task-start">
                   <span className="timeline-ts">{ts}</span>
-                  <span className="timeline-icon">🚀</span>
+                  <span className="timeline-icon">&gt;</span>
                   <strong>TASK START</strong>
                   <span className="timeline-detail">{ev.executor} — {(ev.instruction || '').slice(0, 60)}</span>
                 </div>
@@ -539,7 +539,7 @@ function TimelinePage() {
                 const statusColor = ev.status === 'committed' ? 'badge-green' : ev.status === 'failed' ? 'badge-red' : 'badge-yellow'
                 return <div key={i} className="timeline-row timeline-task-done">
                   <span className="timeline-ts">{ts}</span>
-                  <span className="timeline-icon">🏁</span>
+                  <span className="timeline-icon">*</span>
                   <strong>TASK DONE</strong>
                   <span className={`badge ${statusColor}`}>{ev.status}</span>
                   {ev.commit && <code className="timeline-sha">{String(ev.commit).slice(0, 8)}</code>}
@@ -549,13 +549,13 @@ function TimelinePage() {
               if (ev.type === 'agent_message') {
                 return <div key={i} className="timeline-row">
                   <span className="timeline-ts">{ts}</span>
-                  <span className="timeline-icon">💬</span>
+                  <span className="timeline-icon">#</span>
                   <span className="timeline-detail">{(ev.text || '').slice(0, 80)}</span>
                 </div>
               }
               return <div key={i} className="timeline-row">
                 <span className="timeline-ts">{ts}</span>
-                <span className="timeline-icon">·</span>
+                <span className="timeline-icon">.</span>
                 <strong>{ev.type}</strong>
                 <span className="timeline-detail">{ev.file || ev.command?.slice(0, 50) || ev.instruction?.slice(0, 50) || ''}</span>
               </div>
