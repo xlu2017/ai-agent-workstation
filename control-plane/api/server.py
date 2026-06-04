@@ -42,6 +42,8 @@ from typing import Optional
 SESSIONS_DIR = Path(os.environ.get("SESSIONS_DIR", "/opt/workstation/sessions"))
 KNOWLEDGE_DIR = Path(os.environ.get("KNOWLEDGE_DIR", "/opt/workstation/knowledge"))
 LITELLM_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
+LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", "<litellm-key>")
+DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-v4-flash")
 OPENHANDS_URL = os.environ.get("OPENHANDS_URL", "http://localhost:3000")
 BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://localhost:9876")
 REPOS_DIR = Path("/opt/workstation/repos")
@@ -399,7 +401,7 @@ def approve_knowledge_trigger(trigger_id: str):
 
 class ChatMessage(BaseModel):
     instruction: str
-    model: Optional[str] = "deepseek-chat"
+    model: Optional[str] = None
 
 
 @app.post("/api/sessions/{session_id}/chat")
@@ -596,10 +598,11 @@ def route_to_openhands(packet: dict) -> dict:
 
     # Fallback: direct LiteLLM call for simple responses
     try:
+        model = packet.get("model") or DEFAULT_MODEL
         litellm_payload = {
-            "model": packet.get("model", "deepseek-chat"),
+            "model": model,
             "messages": [
-                {"role": "system", "content": "You are a coding agent. Analyze the context and provide guidance. If you can suggest a fix, provide the exact code change."},
+                {"role": "system", "content": "You are a coding agent working in a developer workstation. Analyze the context and provide guidance. If you can suggest a fix, provide the exact code change."},
                 {"role": "user", "content": full_prompt},
             ],
             "temperature": 0.3,
@@ -609,9 +612,12 @@ def route_to_openhands(packet: dict) -> dict:
         req = urllib.request.Request(
             f"{LITELLM_URL}/v1/chat/completions",
             data=data,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {LITELLM_KEY}",
+            },
         )
-        resp = urllib.request.urlopen(req, timeout=30)
+        resp = urllib.request.urlopen(req, timeout=60)
         result = json.loads(resp.read())
         content = result.get("choices", [{}])[0].get("message", {}).get("content", "No response")
         return {
