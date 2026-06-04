@@ -342,9 +342,45 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "core"))
 
 @app.get("/api/sessions/{session_id}/timeline")
 def get_timeline(session_id: str, limit: int = 100):
-    from timeline import Timeline
-    tl = Timeline(session_id)
-    return {"events": tl.get_events(limit=limit), "summary": tl.get_summary()}
+    """Get session timeline with tool call details from events.jsonl."""
+    session_dir = SESSIONS_DIR / session_id
+    events_file = session_dir / "events" / "events.jsonl"
+
+    events = []
+    if events_file.exists():
+        for line in events_file.read_text().strip().split("\n"):
+            if line.strip():
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+
+    # Build summary from events
+    summary = {
+        "total_events": len(events),
+        "tool_calls": sum(1 for e in events if e.get("type") == "tool_call"),
+        "files_edited": len(set(
+            e.get("args", {}).get("path", "")
+            for e in events
+            if e.get("type") == "tool_call" and e.get("tool") in ("write_file", "apply_patch") and e.get("success")
+        )),
+        "commands_run": sum(1 for e in events if e.get("type") == "tool_call" and e.get("tool") == "run_command"),
+        "commits": sum(1 for e in events if e.get("type") == "tool_call" and e.get("tool") == "git_commit" and e.get("success")),
+        "tasks_completed": sum(1 for e in events if e.get("type") == "task_complete"),
+        "cost_usd": 0.0,
+    }
+
+    # Also try the old Timeline class for legacy data
+    try:
+        from timeline import Timeline
+        tl = Timeline(session_id)
+        old_summary = tl.get_summary()
+        if old_summary.get("cost_usd"):
+            summary["cost_usd"] = old_summary["cost_usd"]
+    except Exception:
+        pass
+
+    return {"events": events[-limit:], "summary": summary}
 
 
 @app.get("/api/sessions/{session_id}/timeline/summary")
