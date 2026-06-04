@@ -999,6 +999,30 @@ def list_benchmark_tasks(repo: str = None):
     return {"tasks": tasks}
 
 
+
+@app.get("/api/repos")
+def list_available_repos():
+    """List all available repos for session creation."""
+    repos = []
+    search_dirs = [
+        Path("/opt/workstation/bench-apps"),
+        Path("/opt/workstation/repos"),
+        REPOS_DIR,
+    ]
+    seen = set()
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for d in sorted(search_dir.iterdir()):
+            if d.is_dir() and (d / ".git").is_dir() and d.name not in seen:
+                seen.add(d.name)
+                repos.append({
+                    "name": d.name,
+                    "path": str(d),
+                    "source": search_dir.name,
+                })
+    return {"repos": repos}
+
 @app.get("/api/benchmark/repos")
 def list_benchmark_repos():
     """List benchmark repos."""
