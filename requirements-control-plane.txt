@@ -1,0 +1,4 @@
+# Python dependencies for the platform control-plane worker.
+# Install into a host venv because the worker needs direct access to /opt/workstation worktrees.
+hatchet-sdk>=1.18.0
+pydantic>=2.0
