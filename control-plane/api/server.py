@@ -465,6 +465,56 @@ class ChatMessage(BaseModel):
     executor: Optional[str] = None  # "openhands" or "aider"
 
 
+
+
+def _map_files_to_pages(files_edited: list, session_meta: dict) -> list:
+    """Map edited files to their corresponding frontend page URLs.
+    
+    Uses component filename patterns to determine which page/route they render on.
+    Falls back to the app root if no mapping is found.
+    """
+    # Common mappings for cypress-realworld-app and similar React apps
+    ROUTE_MAP = {
+        "SignIn": "/signin",
+        "SignUp": "/signup",
+        "Home": "/",
+        "Transaction": "/transactions",
+        "BankAccount": "/bankaccounts",
+        "Notification": "/notifications",
+        "UserSettings": "/user/settings",
+        "Contact": "/contacts",
+    }
+    
+    port = session_meta.get("port_range", "").split("-")[0] if session_meta.get("port_range") else "3000"
+    base_url = f"http://localhost:{port}"
+    
+    pages = []
+    seen_routes = set()
+    for f in files_edited:
+        # Strip worktree prefix to get relative path
+        short = f.split("/worktree-")[-1] if "/worktree-" in f else f
+        if "/" in short:
+            short = "/".join(short.split("/")[1:])  # remove worktree name
+        
+        # Try to match component name to route
+        matched = False
+        for component, route in ROUTE_MAP.items():
+            if component.lower() in short.lower():
+                if route not in seen_routes:
+                    pages.append({"file": short, "url": f"{base_url}{route}", "route": route})
+                    seen_routes.add(route)
+                matched = True
+                break
+        
+        if not matched:
+            # For non-component files, just link to root
+            if "/" not in seen_routes:
+                pages.append({"file": short, "url": base_url, "route": "/"})
+                seen_routes.add("/")
+    
+    return pages
+
+
 @app.post("/api/sessions/{session_id}/chat")
 def send_chat(session_id: str, body: ChatMessage):
     """
@@ -573,11 +623,13 @@ def send_chat(session_id: str, body: ChatMessage):
     # Run in background thread so API responds immediately with "claimed"
     import threading
 
+    
     def _run_executor():
         try:
             executor = DirectExecutor()
             result = executor.run_task(session_id, packet)
             # Write completion message
+            page_urls = _map_files_to_pages(result.files_edited, meta)
             done_msg = {
                 "role": "assistant",
                 "content": f"Task {result.status}: {result.error or ('edited ' + str(len(result.files_edited)) + ' files')}. Commit: {result.commit_sha or 'none'}",
@@ -586,6 +638,7 @@ def send_chat(session_id: str, body: ChatMessage):
                 "task_id": task_id,
                 "files_edited": result.files_edited,
                 "commit": result.commit_sha,
+                "page_urls": page_urls,
             }
             with open(messages_file, "a") as f:
                 f.write(json.dumps(done_msg) + "\n")
@@ -658,6 +711,68 @@ def get_messages(session_id: str, limit: int = 50):
     lines = messages_file.read_text().strip().split("\n")
     messages = [json.loads(l) for l in lines[-limit:] if l.strip()]
     return {"messages": messages}
+
+@app.get("/api/sessions/{session_id}/file/{file_path:path}")
+def get_session_file(session_id: str, file_path: str):
+    """Serve a file from the session worktree."""
+    from fastapi.responses import PlainTextResponse
+    session_dir = SESSIONS_DIR / session_id
+    if not session_dir.exists():
+        raise HTTPException(404, f"Session '{session_id}' not found")
+    meta = json.loads((session_dir / "session.json").read_text())
+    worktree = meta.get("worktree_path", "")
+    if not worktree or not Path(worktree).exists():
+        raise HTTPException(404, "Session worktree not found")
+    full_path = Path(worktree) / file_path
+    if not full_path.exists():
+        raise HTTPException(404, f"File not found: {file_path}")
+    # Security: ensure path is within worktree
+    try:
+        full_path.resolve().relative_to(Path(worktree).resolve())
+    except ValueError:
+        raise HTTPException(403, "Access denied: path outside worktree")
+    return PlainTextResponse(full_path.read_text(errors="replace"))
+
+
+@app.get("/api/sessions/{session_id}/diff")
+def get_session_diff(session_id: str, commits: int = 1):
+    """Get git diff rendered as color-coded HTML page with diff2html."""
+    from fastapi.responses import HTMLResponse
+    import html as html_mod
+    session_dir = SESSIONS_DIR / session_id
+    if not session_dir.exists():
+        raise HTTPException(404, f"Session '{session_id}' not found")
+    meta = json.loads((session_dir / "session.json").read_text())
+    worktree = meta.get("worktree_path", "")
+    if not worktree or not Path(worktree).exists():
+        raise HTTPException(404, "Session worktree not found")
+    result = subprocess.run(
+        ["git", "diff", f"HEAD~{commits}", "HEAD"],
+        cwd=worktree, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        result = subprocess.run(
+            ["git", "log", "--oneline", "-5"],
+            cwd=worktree, capture_output=True, text=True,
+        )
+    diff_text = html_mod.escape(result.stdout or "No diff available")
+    page = f"""<!DOCTYPE html>
+<html><head>
+<title>Diff - {session_id}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
+<style>body {{ margin: 0; padding: 16px; background: #ffffff; }} .d2h-wrapper {{ border-radius: 8px; }}</style>
+</head><body>
+<div id="diff"></div>
+<script>
+const raw = document.createElement("textarea");
+raw.innerHTML = `{diff_text}`;
+const el = document.getElementById("diff");
+const ui = new Diff2HtmlUI(el, raw.value, {{ drawFileList: true, matching: "lines", outputFormat: "side-by-side" }});
+ui.draw();
+</script>
+</body></html>"""
+    return HTMLResponse(page)
 
 
 def route_to_openhands(packet: dict) -> dict:
