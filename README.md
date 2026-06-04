@@ -9,39 +9,41 @@ A production-quality, self-hosted development workstation for AI coding agents. 
 | Server | `ubuntu-32gb-fsn1-1` — CCX33, 8 vCPU, 32GB RAM, Falkenstein |
 | IP | `167.233.31.65` |
 | LiteLLM Proxy | Running on port 4000 (healthy), budget: $150/mo cap |
-| OpenHands | Running on port 3000 |
+| OpenHands | Running on port 3000 / allocated 3010+ |
+| Control Plane | Running on port 9877 |
 | DeepSeek API | Active (V4-Flash primary) |
 | Remote Desktop | xRDP on port 3389 (XFCE 4) |
 | Node Exporter | Active on port 9100 |
-| Chrome | v149, installed with remote debugging support |
+| Chrome | Installed with remote debugging support |
 | BorgBackup | Configured, daily 3AM cron |
-| Knowledge System | 2 knowledge files loaded |
+| Knowledge System | YAML knowledge files loaded |
 | Worktree Scripts | Installed at /opt/workstation/scripts/ |
 
 ## Quick Start
 
 ```bash
-# SSH into the server
-ssh -i ~/.ssh/hetzner_workstation agent@167.233.31.65
+# SSH into the server over Tailscale
+ssh agent@<tailscale-hostname>
 
 # Check status
 cd ~/ai-workstation && docker compose ps
 
-# Access web UIs via SSH port forward:
-ssh -L 3000:localhost:3000 -L 4000:localhost:4000 -i ~/.ssh/hetzner_workstation agent@167.233.31.65
-# Then open http://localhost:3000 in your local browser
+# Access private web UIs via SSH port forward over Tailscale:
+ssh -L 9877:localhost:9877 -L 4000:localhost:4000 agent@<tailscale-hostname>
+# Then open http://localhost:9877 or http://localhost:4000/ui locally
 
-# RDP for graphical desktop:
-# Host: 167.233.31.65, Port: 3389, User: agent
+# RDP for graphical desktop, only when allowed by Tailscale/provider policy:
+# Host: <tailscale-hostname>, Port: 3389, User: agent
 ```
 
 ## Architecture
 
 ```
 Hetzner Cloud CCX33 ($74/mo)
-├── OpenHands (AI agent runtime, port 3000)
+├── OpenHands (AI agent runtime, port 3000 / allocated 3010+)
 ├── LiteLLM Proxy (model gateway, port 4000)
 │   └── DeepSeek V4-Flash → Qwen → Claude (fallback chain)
+├── Control Plane (API + dashboard, port 9877)
 ├── Docker Engine (agent sandboxes)
 ├── /opt/workstation/
 │   ├── repos/          (git bare repos + worktrees)
@@ -53,7 +55,7 @@ Hetzner Cloud CCX33 ($74/mo)
 ├── Chrome (remote debugging :9222)
 ├── xRDP + XFCE4 (remote desktop :3389)
 ├── UI-Bridge Service (source map resolution :9876)
-└── Security (ufw, fail2ban, chrony, SSH key-only)
+└── Security (Tailscale SSH, provider firewall, chrony, SSH key-only fallback)
 ```
 
 See [docs/architecture.md](docs/architecture.md) for full details.
@@ -72,7 +74,10 @@ See [docs/architecture.md](docs/architecture.md) for full details.
 │   ├── destroy-worktree.sh         # Clean up worktree + resources
 │   ├── list-worktrees.sh           # Show active worktrees
 │   ├── backup-now.sh               # Manual BorgBackup
-│   └── knowledge-loader.py         # Context-aware knowledge activation
+│   ├── knowledge-loader.py         # Context-aware knowledge activation
+│   └── server/
+│       ├── workstation-startup.sh
+│       └── configure-tailscale-ssh-only.sh
 ├── knowledge/
 │   ├── example-react.yaml          # React patterns knowledge
 │   └── example-python.yaml         # Python patterns knowledge
@@ -122,6 +127,23 @@ git clone --bare https://github.com/user/repo.git /opt/workstation/repos/repo.gi
 /opt/workstation/scripts/destroy-worktree.sh repo-feature-new-api
 ```
 
+## Network Access Model
+
+This repository no longer installs or manages `ufw` or `fail2ban`.
+
+Target posture:
+
+- **Public internet:** denied by the provider firewall by default. Allow public TCP/22 only temporarily for break-glass recovery.
+- **Tailscale:** primary admin path. Tailscale SSH handles tailnet port 22.
+- **OpenSSH fallback:** ordinary OpenSSH is moved to `127.0.0.1:2222` by `scripts/server/configure-tailscale-ssh-only.sh`.
+- **Admin services:** Control Plane, LiteLLM, OpenHands, xRDP, metrics, and UI-Bridge are private; access them through Tailscale policy or SSH forwarding.
+
+After Tailscale is authenticated and reachable from an admin device:
+
+```bash
+sudo /opt/workstation/scripts/configure-tailscale-ssh-only.sh
+```
+
 ## Knowledge System
 
 YAML-based knowledge files activate based on task context:
@@ -137,15 +159,15 @@ python3 /opt/workstation/scripts/knowledge-loader.py \
 
 | Category | Tools |
 |----------|-------|
-| Languages | Node.js 22, Python 3.14, zsh |
+| Languages | Node.js, Python, zsh |
 | Package Mgmt | npm, uv, pipx |
 | Containers | Docker Engine, Docker Compose |
 | Dev Tools | git, tmux, ripgrep, fd, jq, htop, ncdu |
 | Build | build-essential, curl, wget, unzip |
-| Browser | Google Chrome 149 |
-| Backup | BorgBackup 1.4.4 |
+| Browser | Google Chrome / Chromium |
+| Backup | BorgBackup |
 | Monitoring | prometheus-node-exporter |
-| Security | ufw, fail2ban, chrony, unattended-upgrades |
+| Security | Tailscale, provider firewall, chrony, unattended-upgrades |
 
 ## Cost Summary
 
@@ -172,8 +194,8 @@ For future Android emulator use (RFC-005), upgrade to Sunshine when GPU hardware
 
 ## Security
 
-- **Network:** ufw restricts to SSH (22) + RDP (3389) only
-- **SSH:** Key-only authentication (Ed25519), fail2ban enabled
+- **Network:** provider firewall blocks public admin ingress; Tailscale ACLs/grants control tailnet access
+- **SSH:** Tailscale SSH for tailnet port 22; OpenSSH key-only fallback on `127.0.0.1:2222`
 - **Secrets:** `.env` file (600 permissions, never committed)
 - **Docker:** Agent sandboxes isolated from host
 - **Updates:** unattended-upgrades for automatic security patches
