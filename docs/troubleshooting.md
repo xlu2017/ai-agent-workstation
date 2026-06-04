@@ -51,18 +51,51 @@ docker compose down && docker compose up -d
 
 ### RDP Connection Refused
 
-**Symptoms:** Can't connect to port 3389
+**Symptoms:** Can't connect to port 3389 over Tailscale
 
 **Diagnosis:**
 ```bash
 sudo systemctl status xrdp
 sudo ss -tlnp | grep 3389
+tailscale status
+tailscale ip -4
 ```
 
 **Common causes:**
 1. **xrdp not running** — `sudo systemctl start xrdp`
-2. **ufw blocking** — `sudo ufw allow 3389/tcp`
-3. **Wrong credentials** — user: agent, password set via `sudo passwd agent`
+2. **Tailscale unavailable** — authenticate with `sudo tailscale up` and verify tailnet policy
+3. **Provider firewall policy** — public RDP should normally be blocked; use Tailscale or SSH forwarding instead
+4. **Wrong credentials** — user: agent, password set via `sudo passwd agent`
+
+### Tailscale SSH Not Working
+
+**Symptoms:** `ssh agent@<tailscale-hostname>` fails after configuring Tailscale-only SSH.
+
+**Diagnosis:**
+```bash
+tailscale status
+tailscale ip -4
+sudo tailscale debug prefs | grep -i ssh || true
+sudo ss -tlnp | grep -E ':22|:2222'
+sudo journalctl -u tailscaled -n 100 --no-pager
+```
+
+**Common causes:**
+1. **Tailscale SSH not enabled** — run `sudo tailscale set --ssh=true` or `sudo tailscale up --ssh`
+2. **ACL/grants deny access** — allow your admin identity to reach the workstation on port 22
+3. **Server not authenticated** — run `sudo tailscale up` from the provider console
+4. **Using public IP instead of tailnet name/IP** — connect to the Tailscale hostname or `100.x.y.z` address
+
+**Recovery:**
+```bash
+# From provider console only; ordinary OpenSSH is moved to localhost:2222
+ssh -p 2222 agent@127.0.0.1
+
+# Restore the last pre-Tailscale-SSH sshd_config backup if needed
+ls -1 /etc/ssh/sshd_config.pre-tailscale-ssh-only.*
+sudo cp /etc/ssh/sshd_config.pre-tailscale-ssh-only.<timestamp> /etc/ssh/sshd_config
+sudo systemctl restart ssh || sudo systemctl restart sshd
+```
 
 ### High CPU Usage
 
@@ -162,7 +195,7 @@ borg extract /opt/workstation/backups/main::ARCHIVE_NAME
 | LiteLLM | `docker compose logs litellm` |
 | OpenHands | `docker compose logs openhands` |
 | xRDP | `/var/log/xrdp.log` |
+| Tailscale | `journalctl -u tailscaled` |
 | System | `journalctl -xe` |
 | Worktrees | `/opt/workstation/logs/worktrees.log` |
 | Backups | `/opt/workstation/logs/backup.log` |
-| fail2ban | `/var/log/fail2ban.log` |
