@@ -9,6 +9,10 @@
 #
 # Manual run:
 #   sudo /opt/workstation/scripts/workstation-startup.sh
+#
+# Network policy:
+#   This script deliberately does not manage ufw/fail2ban or provider firewall rules.
+#   Public ingress must be controlled by the cloud/provider firewall and Tailscale ACLs/grants.
 
 set +e
 
@@ -258,7 +262,7 @@ else
 fi
 
 # ============================================================
-# STEP 8: Verify xRDP + Firewall
+# STEP 8: Verify xRDP + network policy
 # ============================================================
 log ""
 log "[7/8] Verifying xRDP..."
@@ -274,17 +278,14 @@ else
 fi
 
 log ""
-log "[8/8] Verifying firewall..."
-if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
-    ufw allow 22/tcp >/dev/null 2>&1
-    ufw allow 3389/tcp >/dev/null 2>&1
-    ufw allow $API_PORT/tcp >/dev/null 2>&1
-    ufw allow $LITELLM_PORT/tcp >/dev/null 2>&1
-    ufw allow $OPENHANDS_PORT/tcp >/dev/null 2>&1
-    log "  Firewall active — ports 22, 3389, $API_PORT, $LITELLM_PORT, $OPENHANDS_PORT open"
+log "[8/8] Verifying network access policy..."
+if command -v tailscale >/dev/null 2>&1 && tailscale status >/dev/null 2>&1; then
+    TS_IP=$(tailscale ip -4 2>/dev/null | head -n1)
+    log "  Tailscale active: ${TS_IP:-unknown-ip}"
 else
-    log "  Firewall not active or not installed"
+    log_error "  Tailscale is not authenticated; admin access may depend on provider firewall break-glass rules"
 fi
+log "  No ufw/fail2ban changes are made by startup. Provider firewall + Tailscale ACLs/grants control ingress."
 
 # ============================================================
 # SUMMARY
@@ -293,23 +294,23 @@ log ""
 log "==== Startup Complete ===="
 log ""
 log "Services:"
-log "  xRDP Desktop:     port 3389  (agent / <rdp-password>)"
-log "  Control Plane:    port $API_PORT  (http://$(hostname -I | awk '{print $1}'):$API_PORT)"
+log "  xRDP Desktop:     port 3389  (access through Tailscale/provider policy only)"
+log "  Control Plane:    port $API_PORT  (use SSH forwarding or Tailscale/provider policy)"
 
 if ss -tlnp | grep -q ":${LITELLM_PORT} "; then
-    log "  LiteLLM:          port $LITELLM_PORT  (running)"
+    log "  LiteLLM:          port $LITELLM_PORT  (running; keep private)"
 else
     log "  LiteLLM:          port $LITELLM_PORT  (not started — configure .env)"
 fi
 
 if ss -tlnp | grep -q ":${OPENHANDS_PORT} "; then
-    log "  OpenHands:        port $OPENHANDS_PORT  (running)"
+    log "  OpenHands:        port $OPENHANDS_PORT  (running; keep private)"
 else
     log "  OpenHands:        port $OPENHANDS_PORT  (not started — configure .env)"
 fi
 
 if [ -d "${WEB_DIR}/dist" ]; then
-    log "  Dashboard:        http://$(hostname -I | awk '{print $1}'):$API_PORT  (built)"
+    log "  Dashboard:        local port $API_PORT  (built)"
 else
     log "  Dashboard:        NOT BUILT"
 fi
