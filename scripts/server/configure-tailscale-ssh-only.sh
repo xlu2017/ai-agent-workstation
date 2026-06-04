@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# configure-tailscale-ssh-only.sh — move administrative SSH access to Tailscale SSH.
+# configure-tailscale-ssh-only.sh — block all network OpenSSH access except Tailscale SSH.
 #
 # Purpose:
 #   - Enable Tailscale SSH on this machine.
-#   - Move ordinary OpenSSH off public port 22 by binding it to localhost:2222.
+#   - Remove ordinary OpenSSH from all network-facing interfaces.
+#   - Retain ordinary OpenSSH only as a localhost console fallback on 127.0.0.1:2222.
 #   - Leave public ingress enforcement to the cloud/provider firewall.
 #
 # Result:
 #   - Tailnet port 22 is handled by Tailscale SSH.
-#   - Ordinary SSH is available only from the server itself at 127.0.0.1:2222.
-#   - Public SSH on <public-ip>:22 should be blocked at the provider firewall.
+#   - Ordinary OpenSSH is not reachable from the public internet or LAN.
+#   - Ordinary OpenSSH is available only from the server itself at 127.0.0.1:2222.
+#   - Public SSH on <public-ip>:22 must also be blocked at the provider firewall.
 #
 # Safety:
 #   Run this only after confirming this machine is authenticated to Tailscale and
@@ -27,6 +29,23 @@ restart_ssh() {
     systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null
 }
 
+assert_no_network_openssh() {
+    local bad_listeners
+    bad_listeners="$(ss -tlnp 2>/dev/null | awk '
+        /sshd/ && /:22[[:space:]]/ && $4 !~ /^127\.0\.0\.1:2222$/ && $4 !~ /^\[::1\]:2222$/ { print }
+        /sshd/ && /:2222[[:space:]]/ && $4 !~ /^127\.0\.0\.1:2222$/ && $4 !~ /^\[::1\]:2222$/ { print }
+    ' || true)"
+
+    if [[ -n "$bad_listeners" ]]; then
+        error "OpenSSH is still listening on a non-loopback address:"
+        echo "$bad_listeners" >&2
+        error "Restoring backup to avoid leaving an ambiguous SSH state."
+        cp "$BACKUP" "$SSHD_CONFIG"
+        restart_ssh
+        exit 1
+    fi
+}
+
 if [[ $EUID -ne 0 ]]; then
     error "Run as root: sudo $0"
     exit 1
@@ -34,6 +53,11 @@ fi
 
 if ! command -v tailscale >/dev/null 2>&1; then
     error "tailscale is not installed. Run setup.sh first."
+    exit 1
+fi
+
+if ! command -v ss >/dev/null 2>&1; then
+    error "ss command not found; install iproute2 before running this script."
     exit 1
 fi
 
@@ -59,8 +83,8 @@ tailscale set --ssh=true 2>/dev/null || tailscale up --ssh
 log "Backing up $SSHD_CONFIG to $BACKUP"
 cp "$SSHD_CONFIG" "$BACKUP"
 
-log "Moving ordinary OpenSSH to localhost:2222"
-# Remove existing ListenAddress/Port lines managed by this script or defaults that would keep public :22 open.
+log "Removing ordinary OpenSSH from network-facing interfaces"
+# Remove existing ListenAddress/Port lines that would keep public or LAN SSH open.
 sed -i '/^#\?Port /d' "$SSHD_CONFIG"
 sed -i '/^#\?ListenAddress /d' "$SSHD_CONFIG"
 
@@ -84,8 +108,10 @@ if ! sshd -t; then
 fi
 
 restart_ssh
+assert_no_network_openssh
 
-log "OpenSSH now listens on 127.0.0.1:2222 only."
+log "Non-Tailscale network SSH is blocked at the host: OpenSSH is localhost-only on 127.0.0.1:2222."
 log "Tailscale SSH should handle tailnet access on ${TAILSCALE_IP}:22."
-log "Now enforce public ingress in the provider firewall: block public TCP/22 and all other admin ports unless intentionally public."
+log "Now enforce the same policy at the provider firewall: block public TCP/22 and all other admin ports unless intentionally public."
 log "Test from an admin device: ssh agent@${TAILSCALE_IP}"
+log "Expected failure from outside the tailnet: ssh agent@<server-public-ip>"
