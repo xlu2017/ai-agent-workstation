@@ -920,6 +920,108 @@ def action_fork_candidate(session_id: str, candidate_id: str, request: Candidate
     return {"candidate_id": candidate_id, "action": request.action}
 
 
+# --- Benchmark ---
+
+BENCH_TASKS_DIR = Path(os.environ.get("BENCH_TASKS_DIR", "/opt/workstation/bench-tasks"))
+BENCH_RESULTS_DIR = Path(os.environ.get("BENCH_RESULTS_DIR", "/opt/workstation/bench-results"))
+BENCH_APPS_DIR = Path(os.environ.get("BENCH_APPS_DIR", "/opt/workstation/bench-apps"))
+BENCH_SCRIPTS_DIR = Path(os.environ.get("BENCH_SCRIPTS_DIR", "/opt/workstation/bench-scripts"))
+
+
+@app.get("/api/benchmark/tasks")
+def list_benchmark_tasks(repo: str = None):
+    """List available benchmark tasks."""
+    tasks = []
+    search_dir = BENCH_TASKS_DIR / repo if repo else BENCH_TASKS_DIR
+    if not search_dir.exists():
+        return {"tasks": tasks}
+
+    dirs = [search_dir] if repo else sorted(search_dir.iterdir())
+    for repo_dir in dirs:
+        if not repo_dir.is_dir():
+            continue
+        for task_dir in sorted(repo_dir.iterdir()):
+            task_file = task_dir / "task.yaml"
+            if task_file.exists():
+                try:
+                    import yaml
+                    task = yaml.safe_load(task_file.read_text())
+                    tasks.append(task)
+                except Exception:
+                    continue
+    return {"tasks": tasks}
+
+
+@app.get("/api/benchmark/repos")
+def list_benchmark_repos():
+    """List benchmark repos."""
+    repos = []
+    if BENCH_APPS_DIR.exists():
+        for d in sorted(BENCH_APPS_DIR.iterdir()):
+            if d.is_dir() and d.name != "__pycache__":
+                repos.append({"name": d.name, "path": str(d)})
+    return {"repos": repos}
+
+
+@app.get("/api/benchmark/results")
+def list_benchmark_results():
+    """List benchmark run results."""
+    runs = []
+    if BENCH_RESULTS_DIR.exists():
+        for d in sorted(BENCH_RESULTS_DIR.iterdir(), reverse=True):
+            if d.is_dir() and d.name[0:1].isdigit():
+                agg_file = d / "aggregate.json"
+                if agg_file.exists():
+                    agg = json.loads(agg_file.read_text())
+                    agg["run_id"] = d.name
+                    runs.append(agg)
+                else:
+                    task_dirs = [td for td in d.iterdir() if td.is_dir()]
+                    runs.append({"run_id": d.name, "total_tasks": len(task_dirs)})
+    return {"runs": runs[:20]}
+
+
+@app.get("/api/benchmark/results/{run_id}")
+def get_benchmark_run(run_id: str):
+    """Get detailed results for a specific run."""
+    run_dir = BENCH_RESULTS_DIR / run_id
+    if not run_dir.exists():
+        raise HTTPException(404, f"Run '{run_id}' not found")
+
+    results = []
+    for task_dir in sorted(run_dir.iterdir()):
+        result_file = task_dir / "result.json"
+        if result_file.exists():
+            results.append(json.loads(result_file.read_text()))
+
+    aggregate_file = run_dir / "aggregate.json"
+    aggregate = json.loads(aggregate_file.read_text()) if aggregate_file.exists() else None
+
+    return {"run_id": run_id, "results": results, "aggregate": aggregate}
+
+
+class BenchmarkRunRequest(BaseModel):
+    repo: str
+    task_id: Optional[str] = None
+
+
+@app.post("/api/benchmark/run")
+def run_benchmark_task(body: BenchmarkRunRequest):
+    """Run a benchmark task or suite."""
+    runner = BENCH_SCRIPTS_DIR / "run-benchmark.py"
+    if not runner.exists():
+        raise HTTPException(500, "Benchmark runner not found")
+
+    if body.task_id:
+        cmd = [sys.executable, str(runner), "run", "--repo", body.repo, "--task", body.task_id]
+    else:
+        cmd = [sys.executable, str(runner), "run-suite", "--repo", body.repo]
+
+    # Run async (non-blocking)
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return {"status": "started", "repo": body.repo, "task_id": body.task_id}
+
+
 # --- Static files (web dashboard) ---
 
 STATIC_DIR = Path(__file__).parent.parent / "web" / "dist"

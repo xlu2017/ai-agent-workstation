@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
-# workstation-startup.sh — Automated startup for the AI Workstation
+# workstation-startup.sh — Fully automated startup for the AI Workstation
 #
-# This script is designed to run at boot via systemd or manually.
-# It brings up all workstation services in the correct order.
+# Handles both first-time provisioning and subsequent boots.
+# Installs missing packages, builds the dashboard, starts all services.
 #
 # Install as systemd service:
-#   sudo cp /opt/workstation/scripts/workstation-startup.sh /usr/local/bin/
-#   sudo chmod +x /usr/local/bin/workstation-startup.sh
-#   sudo cp /opt/workstation/scripts/workstation.service /etc/systemd/system/
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable workstation
-#   sudo systemctl start workstation
+#   sudo bash /opt/workstation/scripts/install-service.sh
 #
 # Manual run:
 #   sudo /opt/workstation/scripts/workstation-startup.sh
@@ -21,9 +16,11 @@ set +e
 WORKSTATION_DIR="/opt/workstation"
 DOCKER_COMPOSE_DIR="/home/agent/ai-workstation"
 LOG_DIR="${WORKSTATION_DIR}/logs"
+WEB_DIR="${WORKSTATION_DIR}/control-plane/web"
 API_PORT=9877
 LITELLM_PORT=4000
 OPENHANDS_PORT=3000
+DASHBOARD_PORT=$API_PORT
 
 # --- Logging ---
 mkdir -p "$LOG_DIR"
@@ -45,12 +42,12 @@ wait_for_port() {
     local name=$2
     local timeout=${3:-30}
     local elapsed=0
-    
+
     while ! ss -tlnp | grep -q ":${port} " && [ $elapsed -lt $timeout ]; do
         sleep 1
         elapsed=$((elapsed + 1))
     done
-    
+
     if ss -tlnp | grep -q ":${port} "; then
         log "  $name is listening on port $port"
         return 0
@@ -60,42 +57,137 @@ wait_for_port() {
     fi
 }
 
-# --- Step 1: System checks ---
+# ============================================================
+# STEP 1: System checks
+# ============================================================
 log "==== AI Workstation Startup ===="
 log "Host: $(hostname)"
 log "Uptime: $(uptime -p)"
 log "Disk: $(df -h / | tail -1 | awk '{print $3 "/" $2 " (" $5 ")"}')"
 log "RAM: $(free -h | awk '/^Mem:/{print $3 "/" $2}')"
 
-# --- Step 2: Ensure directories exist ---
+# ============================================================
+# STEP 2: Directory structure
+# ============================================================
 log ""
-log "[1/6] Verifying directory structure..."
+log "[1/8] Verifying directory structure..."
 for dir in sessions repos knowledge bench-apps bench-tasks bench-scripts bench-results logs; do
     mkdir -p "${WORKSTATION_DIR}/${dir}"
 done
 log "  Directories OK"
 
-# --- Step 3: Start Docker ---
+# ============================================================
+# STEP 3: Install missing packages (first-time only)
+# ============================================================
 log ""
-log "[2/6] Starting Docker..."
-if ! systemctl is-active --quiet docker; then
-    systemctl start docker
-    sleep 2
-fi
-if systemctl is-active --quiet docker; then
-    log "  Docker is running"
-else
-    log_error "  Docker failed to start"
+log "[2/8] Checking required packages..."
+
+install_if_missing() {
+    local cmd=$1
+    local pkg=${2:-$1}
+    if ! command -v "$cmd" &>/dev/null; then
+        log "  Installing $pkg..."
+        apt-get install -y "$pkg" >> "$LOG_FILE" 2>&1
+    fi
+}
+
+# Only run apt-get update if we need to install something
+NEED_UPDATE=false
+for cmd in firefox node npm python3 docker curl git; do
+    if ! command -v "$cmd" &>/dev/null; then
+        NEED_UPDATE=true
+        break
+    fi
+done
+
+if [ "$NEED_UPDATE" = true ]; then
+    log "  Running apt-get update..."
+    apt-get update >> "$LOG_FILE" 2>&1
 fi
 
-# --- Step 4: Start Docker Compose services (LiteLLM + OpenHands) ---
+install_if_missing firefox firefox
+install_if_missing node nodejs
+install_if_missing npm npm
+install_if_missing python3 python3
+
+# Ensure pip packages for API
+if ! python3 -c "import fastapi" 2>/dev/null; then
+    log "  Installing Python packages (fastapi, uvicorn, pyyaml)..."
+    pip3 install --break-system-packages fastapi uvicorn pyyaml >> "$LOG_FILE" 2>&1
+fi
+
+log "  Packages OK"
+
+# ============================================================
+# STEP 4: Build dashboard (if not built or source changed)
+# ============================================================
 log ""
-log "[3/6] Starting Docker Compose services..."
+log "[3/8] Building dashboard..."
+
+if [ -d "$WEB_DIR" ]; then
+    NEEDS_BUILD=false
+
+    # Build if dist doesn't exist
+    if [ ! -d "${WEB_DIR}/dist" ]; then
+        NEEDS_BUILD=true
+    fi
+
+    # Build if source is newer than dist
+    if [ -d "${WEB_DIR}/dist" ] && [ -f "${WEB_DIR}/src/App.tsx" ]; then
+        if [ "${WEB_DIR}/src/App.tsx" -nt "${WEB_DIR}/dist/index.html" ] 2>/dev/null; then
+            NEEDS_BUILD=true
+        fi
+    fi
+
+    if [ "$NEEDS_BUILD" = true ]; then
+        log "  Installing npm dependencies..."
+        cd "$WEB_DIR"
+        npm install >> "$LOG_FILE" 2>&1
+
+        log "  Building dashboard..."
+        npm run build >> "$LOG_FILE" 2>&1
+
+        if [ -d "${WEB_DIR}/dist" ]; then
+            log "  Dashboard built successfully"
+        else
+            log_error "  Dashboard build failed"
+        fi
+    else
+        log "  Dashboard already built (up to date)"
+    fi
+else
+    log "  Web directory not found — skipping dashboard build"
+fi
+
+# ============================================================
+# STEP 5: Start Docker
+# ============================================================
+log ""
+log "[4/8] Starting Docker..."
+if command -v docker &>/dev/null; then
+    if ! systemctl is-active --quiet docker; then
+        systemctl start docker
+        sleep 2
+    fi
+    if systemctl is-active --quiet docker; then
+        log "  Docker is running"
+    else
+        log_error "  Docker failed to start"
+    fi
+else
+    log "  Docker not installed — skipping"
+fi
+
+# ============================================================
+# STEP 6: Start Docker Compose services (LiteLLM + OpenHands)
+# ============================================================
+log ""
+log "[5/8] Starting Docker Compose services..."
 if [ -f "${DOCKER_COMPOSE_DIR}/docker-compose.yml" ]; then
     if [ -f "${DOCKER_COMPOSE_DIR}/.env" ] && grep -q "DEEPSEEK_API_KEY=sk-" "${DOCKER_COMPOSE_DIR}/.env" 2>/dev/null; then
         cd "$DOCKER_COMPOSE_DIR"
         docker compose up -d >> "$LOG_FILE" 2>&1
-        
+
         # Wait for services
         wait_for_port $LITELLM_PORT "LiteLLM" 30 || true
         wait_for_port $OPENHANDS_PORT "OpenHands" 60 || true
@@ -104,14 +196,17 @@ if [ -f "${DOCKER_COMPOSE_DIR}/docker-compose.yml" ]; then
         log "  To configure: edit ${DOCKER_COMPOSE_DIR}/.env"
     fi
 else
-    log "  Skipped — docker-compose.yml not found"
+    log "  Skipped — docker-compose.yml not found at ${DOCKER_COMPOSE_DIR}"
 fi
 
-# --- Step 5: Start Control Plane API ---
+# ============================================================
+# STEP 7: Start Control Plane API
+# ============================================================
 log ""
-log "[4/6] Starting Control Plane API..."
+log "[6/8] Starting Control Plane API..."
 # Kill existing instance
 pkill -f "uvicorn.*server" 2>/dev/null || true
+pkill -f "python3.*server.py" 2>/dev/null || true
 sleep 1
 
 if [ -f "${WORKSTATION_DIR}/control-plane/api/server.py" ]; then
@@ -124,9 +219,11 @@ else
     log_error "  server.py not found at ${WORKSTATION_DIR}/control-plane/api/server.py"
 fi
 
-# --- Step 6: Verify xRDP ---
+# ============================================================
+# STEP 8: Verify xRDP + Firewall
+# ============================================================
 log ""
-log "[5/6] Verifying xRDP..."
+log "[7/8] Verifying xRDP..."
 if systemctl is-active --quiet xrdp; then
     log "  xRDP is running (port 3389)"
 else
@@ -138,20 +235,22 @@ else
     fi
 fi
 
-# --- Step 7: Verify firewall ---
 log ""
-log "[6/6] Verifying firewall..."
+log "[8/8] Verifying firewall..."
 if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
-    # Ensure critical ports are open
     ufw allow 22/tcp >/dev/null 2>&1
     ufw allow 3389/tcp >/dev/null 2>&1
     ufw allow $API_PORT/tcp >/dev/null 2>&1
-    log "  Firewall active — ports 22, 3389, $API_PORT open"
+    ufw allow $LITELLM_PORT/tcp >/dev/null 2>&1
+    ufw allow $OPENHANDS_PORT/tcp >/dev/null 2>&1
+    log "  Firewall active — ports 22, 3389, $API_PORT, $LITELLM_PORT, $OPENHANDS_PORT open"
 else
     log "  Firewall not active or not installed"
 fi
 
-# --- Summary ---
+# ============================================================
+# SUMMARY
+# ============================================================
 log ""
 log "==== Startup Complete ===="
 log ""
@@ -169,6 +268,12 @@ if ss -tlnp | grep -q ":${OPENHANDS_PORT} "; then
     log "  OpenHands:        port $OPENHANDS_PORT  (running)"
 else
     log "  OpenHands:        port $OPENHANDS_PORT  (not started — configure .env)"
+fi
+
+if [ -d "${WEB_DIR}/dist" ]; then
+    log "  Dashboard:        http://$(hostname -I | awk '{print $1}'):$API_PORT  (built)"
+else
+    log "  Dashboard:        NOT BUILT"
 fi
 
 log ""
