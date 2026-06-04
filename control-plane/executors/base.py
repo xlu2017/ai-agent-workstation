@@ -32,6 +32,7 @@ class TaskResult:
     tests_failed: int = 0
     commit_sha: Optional[str] = None
     error: Optional[str] = None
+    summary: str = ""
     cost_usd: float = 0.0
     duration_seconds: float = 0.0
 

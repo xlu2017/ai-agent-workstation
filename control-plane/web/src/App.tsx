@@ -106,6 +106,24 @@ const SessionChat = ({ sessionId }: { sessionId: string }) => {
           context_attached: data.context_attached,
           staleness: data.staleness,
         }])
+        // Start polling for executor completion
+        if (data.status === 'claimed') {
+          const pollInterval = setInterval(() => {
+            fetch(`${API}/sessions/${sessionId}/messages`)
+              .then(r => r.json())
+              .then(msgs => {
+                const allMsgs = msgs.messages || []
+                const lastMsg = allMsgs[allMsgs.length - 1]
+                if (lastMsg && lastMsg.status && lastMsg.status !== 'claimed') {
+                  setMessages(allMsgs)
+                  clearInterval(pollInterval)
+                }
+              })
+              .catch(() => {})
+          }, 3000)
+          // Stop polling after 2 minutes max
+          setTimeout(() => clearInterval(pollInterval), 120000)
+        }
       })
       .catch(error => {
         setMessages(previous => [...previous, {
