@@ -168,6 +168,13 @@ function CreateSessionForm({ onCreated }: { onCreated: () => void }) {
   const [branch, setBranch] = useState('')
   const [task, setTask] = useState('')
   const [creating, setCreating] = useState(false)
+  const [repos, setRepos] = useState<{ name: string; path: string; source: string }[]>([])
+
+  useEffect(() => {
+    if (open && repos.length === 0) {
+      fetch(`${API}/repos`).then(r => r.json()).then(d => setRepos(d.repos || []))
+    }
+  }, [open])
 
   const create = () => {
     setCreating(true)
@@ -193,11 +200,21 @@ function CreateSessionForm({ onCreated }: { onCreated: () => void }) {
       <div className="card-title" style={{ marginBottom: 12 }}>New Session</div>
       <div style={{ display: 'grid', gap: 8 }}>
         <input className="chat-input" placeholder="Session name (auto-generated if empty)" value={name} onChange={e => setName(e.target.value)} />
-        <input className="chat-input" placeholder="Repo path (e.g. /opt/workstation/repos/my-app)" value={repo} onChange={e => setRepo(e.target.value)} />
+        <select
+          className="chat-input"
+          value={repo}
+          onChange={e => setRepo(e.target.value)}
+          style={{ padding: '8px 12px', background: '#1a1a2e', color: '#e0e0e0', border: '1px solid #333', borderRadius: 6 }}
+        >
+          <option value="">-- Select a repository --</option>
+          {repos.map(r => (
+            <option key={r.path} value={r.name}>{r.name} ({r.source})</option>
+          ))}
+        </select>
         <input className="chat-input" placeholder="Branch name (auto-generated if empty)" value={branch} onChange={e => setBranch(e.target.value)} />
         <input className="chat-input" placeholder="Task description (what the agent should do)" value={task} onChange={e => setTask(e.target.value)} />
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary" onClick={create} disabled={creating}>{creating ? 'Creating...' : 'Create'}</button>
+          <button className="btn btn-primary" onClick={create} disabled={creating || !repo}>{creating ? 'Creating...' : 'Create'}</button>
           <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
         </div>
       </div>
