@@ -26,7 +26,116 @@ BENCH_APPS_DIR = Path(os.environ.get("BENCH_APPS_DIR", "/opt/workstation/bench-a
 BENCH_RESULTS_DIR = Path(os.environ.get("BENCH_RESULTS_DIR", "/opt/workstation/bench-results"))
 SESSIONS_DIR = Path(os.environ.get("SESSIONS_DIR", "/opt/workstation/sessions"))
 REPOS_DIR = Path(os.environ.get("REPOS_DIR", "/opt/workstation/repos"))
-CONTROL_PLANE_URL = os.environ.get("CONTROL_PLANE_URL", "http://localhost:8000")
+CONTROL_PLANE_URL = os.environ.get("CONTROL_PLANE_URL", "http://localhost:9877")
+
+# Dev server configurations per repo
+DEV_SERVER_CONFIG = {
+    "cypress-realworld-app": {
+        "install_cmd": "yarn install",
+        "dev_cmd": "yarn dev",
+        "port": 3000,
+        "ready_pattern": "compiled successfully",
+        "startup_timeout": 60,
+    },
+    "juice-shop": {
+        "install_cmd": "npm install",
+        "dev_cmd": "npm start",
+        "port": 3000,
+        "ready_pattern": "listening on",
+        "startup_timeout": 60,
+    },
+    "todomvc": {
+        "install_cmd": "npm install",
+        "dev_cmd": "npx serve -l 8080",
+        "port": 8080,
+        "ready_pattern": "Accepting connections",
+        "startup_timeout": 15,
+    },
+}
+
+
+def open_browser(url: str):
+    """Open a URL in Firefox on the server desktop."""
+    display = os.environ.get("DISPLAY", ":10")
+    xauth = os.environ.get("XAUTHORITY", os.path.expanduser("~/.Xauthority"))
+    env = os.environ.copy()
+    env["DISPLAY"] = display
+    env["XAUTHORITY"] = xauth
+    try:
+        subprocess.Popen(
+            ["firefox", "--new-tab", url],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print(f"  Browser opened: {url}")
+    except FileNotFoundError:
+        print(f"  Browser not available — open manually: {url}")
+
+
+def start_dev_server(repo: str, worktree_path: str) -> Optional[subprocess.Popen]:
+    """Start the dev server for a web app. Returns the process or None."""
+    config = DEV_SERVER_CONFIG.get(repo)
+    if not config:
+        return None
+
+    port = config["port"]
+    dev_cmd = config["dev_cmd"]
+    install_cmd = config.get("install_cmd")
+    startup_timeout = config.get("startup_timeout", 60)
+
+    # Check if port already in use
+    check = subprocess.run(
+        ["ss", "-tlnp"], capture_output=True, text=True
+    )
+    if f":{port} " in check.stdout:
+        print(f"  Dev server already running on port {port}")
+        return None
+
+    # Install deps if needed
+    if install_cmd:
+        node_modules = Path(worktree_path) / "node_modules"
+        if not node_modules.exists():
+            print(f"  Installing dependencies: {install_cmd}")
+            subprocess.run(
+                install_cmd, shell=True, cwd=worktree_path,
+                capture_output=True, text=True, timeout=300,
+            )
+
+    # Start dev server
+    print(f"  Starting dev server: {dev_cmd} (port {port})")
+    proc = subprocess.Popen(
+        dev_cmd, shell=True, cwd=worktree_path,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    # Wait for it to be ready
+    import select
+    start = time.time()
+    while time.time() - start < startup_timeout:
+        # Check if port is listening
+        check = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True)
+        if f":{port} " in check.stdout:
+            print(f"  Dev server ready on port {port}")
+            return proc
+        if proc.poll() is not None:
+            print(f"  Dev server exited unexpectedly (code {proc.returncode})")
+            return None
+        time.sleep(2)
+
+    print(f"  Dev server did not start within {startup_timeout}s (continuing anyway)")
+    return proc
+
+
+def stop_dev_server(proc: Optional[subprocess.Popen]):
+    """Stop the dev server process."""
+    if proc and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def load_task(repo: str, task_id: str) -> dict:
@@ -263,20 +372,36 @@ def run_task(repo: str, task_id: str, run_id: Optional[str] = None) -> dict:
     session_id = session.get("id", f"bench-{run_id}-{task_id}")
     print(f"  Session: {session_id}")
 
-    # 4. Inject context
-    print("[4/6] Injecting context...")
+    # 4. Start dev server and open browser (for web apps)
+    print("[4/8] Starting dev server...")
+    dev_server_proc = start_dev_server(repo, worktree_path)
+    server_config = DEV_SERVER_CONFIG.get(repo)
+    app_url = None
+    if server_config:
+        app_url = f"http://localhost:{server_config['port']}"
+        print(f"  App URL: {app_url}")
+
+    # 5. Open browser if web app
+    print("[5/8] Opening browser...")
+    if app_url and task.get("context_source") in ("browser", "editor"):
+        open_browser(app_url)
+    else:
+        print("  Not a browser task — skipping")
+
+    # 6. Inject context
+    print("[6/8] Injecting context...")
     inject_context(task, session_id, worktree_path)
     print(f"  Context source: {task.get('context_source', 'editor')}")
 
-    # 5. Submit task to executor
-    print("[5/6] Submitting task to executor...")
+    # 7. Submit task to executor
+    print("[7/8] Submitting task to executor...")
     # In a full implementation, this would call the Direct Executor or OpenHands
     # For now, we log the submission and mark as needs_review
     print(f"  Instruction: {task['instruction'][:100]}...")
     print("  [Awaiting autonomous executor — manual review needed]")
 
-    # 6. Collect results
-    print("[6/6] Collecting results...")
+    # 8. Collect results
+    print("[8/8] Collecting results...")
     runtime = time.time() - start_time
 
     # Get current state (after executor would have run)
@@ -340,6 +465,9 @@ def run_task(repo: str, task_id: str, run_id: Optional[str] = None) -> dict:
     print(f"\n  Result: {result_dir / 'result.json'}")
     print(f"  Status: {result_data['status']}")
     print(f"  Runtime: {result_data['runtime_seconds']}s")
+
+    # Cleanup: stop dev server
+    stop_dev_server(dev_server_proc)
 
     return result_data
 
