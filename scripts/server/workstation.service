@@ -1,0 +1,16 @@
+[Unit]
+Description=AI Workstation Services
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/workstation-startup.sh
+ExecStop=/opt/workstation/scripts/workstation-shutdown.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
