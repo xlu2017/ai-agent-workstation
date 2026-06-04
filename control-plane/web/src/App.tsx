@@ -206,6 +206,9 @@ function SessionsPage() {
             <button className="btn" onClick={() => loadContext(session.id)}>
               {expanded === session.id ? 'Hide Context' : 'Context'}
             </button>
+            <button className="btn btn-detach" onClick={() => window.open(`/#/session/${session.id}`, `session-${session.id}`, 'width=700,height=800,menubar=no,toolbar=no')}>
+              Detach
+            </button>
             <button className="btn btn-danger" onClick={() => destroySession(session.id)}>Destroy</button>
           </div>
           {chatOpen === session.id && <SessionChat sessionId={session.id} />}
@@ -521,8 +524,97 @@ const PAGES: Record<string, () => JSX.Element> = {
   Logs: LogsPage,
 }
 
+const DetachedSessionPage = ({ sessionId }: { sessionId: string }) => {
+  const { data: session } = useFetch<Session>(`${API}/sessions/${sessionId}`, 5000)
+  const [contextData, setContextData] = useState<any>(null)
+  const [timeline, setTimeline] = useState<any>(null)
+
+  useEffect(() => {
+    fetch(`${API}/sessions/${sessionId}/context`).then(response => response.json()).then(setContextData)
+    fetch(`${API}/sessions/${sessionId}/timeline`).then(response => response.json()).then(setTimeline)
+    const interval = setInterval(() => {
+      fetch(`${API}/sessions/${sessionId}/context`).then(response => response.json()).then(setContextData)
+      fetch(`${API}/sessions/${sessionId}/timeline`).then(response => response.json()).then(setTimeline)
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [sessionId])
+
+  if (!session) return <div className="detached-loading">Loading session...</div>
+
+  return (
+    <div className="detached-session">
+      <div className="detached-header">
+        <h2>{sessionId}</h2>
+        <span className={`badge ${session.status === 'active' ? 'badge-green' : 'badge-yellow'}`}>{session.status}</span>
+      </div>
+      <div className="detached-meta">
+        <span>branch: {session.branch || '-'}</span>
+        <span>ports: {session.port_range || '-'}</span>
+        <span>task: {session.task || '-'}</span>
+      </div>
+      {timeline?.summary && (
+        <div className="detached-stats">
+          <div className="stat-pill">Cost: ${timeline.summary.cost_usd?.toFixed(4) || '0.00'}</div>
+          <div className="stat-pill">Files: {timeline.summary.files_edited || 0}</div>
+          <div className="stat-pill">Commands: {timeline.summary.commands_run || 0}</div>
+          <div className="stat-pill">Tests: {timeline.summary.tests_passed || 0}/{(timeline.summary.tests_passed || 0) + (timeline.summary.tests_failed || 0)}</div>
+        </div>
+      )}
+      <div className="detached-context-badges">
+        {contextData?.context?.ui && <span className="badge badge-blue">UI context attached</span>}
+        {contextData?.context?.editor && <span className="badge badge-blue">Editor context attached</span>}
+        {contextData?.context?.terminal && <span className="badge badge-blue">Terminal context attached</span>}
+      </div>
+      <SessionChat sessionId={sessionId} />
+      {contextData?.context && (
+        <div className="detached-context">
+          <h3>Ambient Context</h3>
+          {Object.entries(contextData.context).map(([key, value]) => value && (
+            <details key={key} className="context-detail">
+              <summary>{key}</summary>
+              <div className="context-preview">{String(value).slice(0, 1000)}</div>
+            </details>
+          ))}
+        </div>
+      )}
+      {timeline?.events?.length > 0 && (
+        <div className="detached-timeline">
+          <h3>Timeline</h3>
+          <div className="log-output" style={{ maxHeight: '200px' }}>
+            {timeline.events.slice(-20).map((event: any, index: number) => {
+              const timestamp = (event.timestamp || '').slice(11, 19)
+              return <div key={index}>{timestamp} <strong>{event.type}</strong> {event.file || event.command?.slice(0, 50) || event.instruction?.slice(0, 50) || ''}</div>
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function App() {
   const [page, setPage] = useState('Sessions')
+  const [detachedSession, setDetachedSession] = useState<string | null>(null)
+
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash
+      const sessionMatch = hash.match(/^#\/session\/(.+)$/)
+      if (sessionMatch) {
+        setDetachedSession(sessionMatch[1])
+      } else {
+        setDetachedSession(null)
+      }
+    }
+    handleHash()
+    window.addEventListener('hashchange', handleHash)
+    return () => window.removeEventListener('hashchange', handleHash)
+  }, [])
+
+  if (detachedSession) {
+    return <DetachedSessionPage sessionId={detachedSession} />
+  }
+
   const Page = PAGES[page]
 
   return (
