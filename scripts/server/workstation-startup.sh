@@ -203,12 +203,23 @@ if [ -f "${DOCKER_COMPOSE_DIR}/docker-compose.yml" ]; then
     if [ -f "${DOCKER_COMPOSE_DIR}/.env" ] && grep -q "DEEPSEEK_API_KEY=sk-" "${DOCKER_COMPOSE_DIR}/.env" 2>/dev/null; then
         cd "$DOCKER_COMPOSE_DIR"
 
+        # Fix CRLF in .env if present
+        sed -i 's/\r//' .env 2>/dev/null
+
         # Auto-allocate OpenHands port (avoid conflict with web app dev servers)
         OPENHANDS_PORT=$(find_free_port 3010 3099)
+        export OPENHANDS_PORT
         log "  Allocated OpenHands port: $OPENHANDS_PORT"
 
-        # Update docker-compose port mapping for OpenHands
-        sed -i "s/\"[0-9]*:3000\"/\"${OPENHANDS_PORT}:3000\"/" docker-compose.yml
+        # Auto-generate OpenHands settings with actual API key
+        LITELLM_KEY=$(grep LITELLM_MASTER_KEY .env | cut -d= -f2)
+        if [ -n "$LITELLM_KEY" ]; then
+            mkdir -p config
+            cat > config/openhands_settings.json << EOFSET
+{"language":"en","agent":"CodeActAgent","max_iterations":50,"confirmation_mode":false,"llm_model":"deepseek-v4-flash","llm_api_key":"${LITELLM_KEY}","llm_base_url":"http://litellm:4000","remote_runtime_resource_factor":1,"enable_default_condenser":true,"enable_sound_notifications":false,"user_consents_to_analytics":false}
+EOFSET
+            log "  OpenHands settings generated"
+        fi
 
         docker compose up -d >> "$LOG_FILE" 2>&1
 

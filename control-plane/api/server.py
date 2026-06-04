@@ -29,8 +29,10 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Add CLI to path for reuse
-sys.path.insert(0, str(Path(__file__).parent.parent / "cli"))
+# Add control-plane root and CLI to path for imports
+CONTROL_PLANE_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(CONTROL_PLANE_ROOT))
+sys.path.insert(0, str(CONTROL_PLANE_ROOT / "cli"))
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,9 +44,20 @@ from typing import Optional
 SESSIONS_DIR = Path(os.environ.get("SESSIONS_DIR", "/opt/workstation/sessions"))
 KNOWLEDGE_DIR = Path(os.environ.get("KNOWLEDGE_DIR", "/opt/workstation/knowledge"))
 LITELLM_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
-LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", "<litellm-key>")
+LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", "fdfe750a587cddaedd90f39afb861f67377b155b7fdbe5d39d53437b29a700ed")
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-v4-flash")
-OPENHANDS_URL = os.environ.get("OPENHANDS_URL", "http://localhost:3000")
+# Auto-detect OpenHands port from allocation file
+def _get_openhands_url():
+    port_file = Path("/opt/workstation/logs/openhands-port")
+    if port_file.exists():
+        try:
+            port = int(port_file.read_text().strip())
+            return f"http://localhost:{port}"
+        except (ValueError, OSError):
+            pass
+    return "http://localhost:3010"
+
+OPENHANDS_URL = os.environ.get("OPENHANDS_URL") or _get_openhands_url()
 BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://localhost:9876")
 REPOS_DIR = Path("/opt/workstation/repos")
 
@@ -525,62 +538,72 @@ def send_chat(session_id: str, body: ChatMessage):
     with open(messages_file, "a") as f:
         f.write(json.dumps(user_message) + "\n")
 
-    # --- Create Task Packet and Enqueue ---
+    # --- Route to Direct Executor ---
     task_id = f"chat-{int(time.time())}-{session_id[:8]}"
-    executor_choice = body.executor or "openhands"
+    executor_choice = body.executor or "direct"
 
-    try:
-        sys.path.insert(0, str(Path(__file__).parent.parent))
-        from executors.base import TaskPacket
-        from tasks.queue import TaskQueue
+    from executors.base import TaskPacket as ExecPacket
+    from executors.direct_executor import DirectExecutor
 
-        packet = TaskPacket(
-            task_id=task_id,
-            session_id=session_id,
-            instruction=body.instruction,
-            worktree_path=meta.get("worktree_path", ""),
-            branch=meta.get("branch", ""),
-            ui_context=assembled_context.get("ui"),
-            editor_context=assembled_context.get("editor"),
-            terminal_context=assembled_context.get("terminal"),
-            activated_knowledge=activated_knowledge,
-            staleness_warnings=[w.get("message", str(w)) if isinstance(w, dict) else str(w) for w in staleness_warnings],
-            model=body.model or DEFAULT_MODEL,
-        )
+    packet = ExecPacket(
+        task_id=task_id,
+        session_id=session_id,
+        instruction=body.instruction,
+        worktree_path=meta.get("worktree_path", ""),
+        branch=meta.get("branch", ""),
+        ui_context=assembled_context.get("ui"),
+        editor_context=assembled_context.get("editor"),
+        terminal_context=assembled_context.get("terminal"),
+        activated_knowledge=activated_knowledge,
+        staleness_warnings=[w.get("message", str(w)) if isinstance(w, dict) else str(w) for w in staleness_warnings],
+        model=body.model or DEFAULT_MODEL,
+    )
 
-        queue = TaskQueue()
-        queue.enqueue(packet, executor=executor_choice)
+    # Run in background thread so API responds immediately with "claimed"
+    import threading
 
-        # Save acknowledgment message
-        assistant_message = {
-            "role": "assistant",
-            "content": f"Task enqueued → executor: {executor_choice}. Agent is working on: {body.instruction[:100]}",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "status": "running",
-            "task_id": task_id,
-        }
-        with open(messages_file, "a") as f:
-            f.write(json.dumps(assistant_message) + "\n")
+    def _run_executor():
+        try:
+            executor = DirectExecutor()
+            result = executor.run_task(session_id, packet)
+            # Write completion message
+            done_msg = {
+                "role": "assistant",
+                "content": f"Task {result.status}: edited {len(result.files_edited)} files. Commit: {result.commit_sha or 'none'}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": result.status,
+                "task_id": task_id,
+                "files_edited": result.files_edited,
+                "commit": result.commit_sha,
+            }
+            with open(messages_file, "a") as f:
+                f.write(json.dumps(done_msg) + "\n")
+        except Exception as e:
+            err_msg = {
+                "role": "assistant",
+                "content": f"Task failed: {e}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": "failed",
+                "task_id": task_id,
+            }
+            with open(messages_file, "a") as f:
+                f.write(json.dumps(err_msg) + "\n")
 
-        response_status = "running"
-        response_message = assistant_message["content"]
+    thread = threading.Thread(target=_run_executor, daemon=True)
+    thread.start()
 
-    except Exception as executor_error:
-        # Fallback: direct LiteLLM call if executor system fails to import
-        openhands_response = route_to_openhands(instruction_packet)
-        task_id = openhands_response.get("task_id", task_id)
-        response_status = openhands_response.get("status", "completed")
-        response_message = openhands_response.get("response", "Task processed.")
+    response_status = "claimed"
+    response_message = f"Task claimed by Direct Executor. Working on: {body.instruction[:100]}"
 
-        assistant_message = {
-            "role": "assistant",
-            "content": response_message,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "status": response_status,
-            "task_id": task_id,
-        }
-        with open(messages_file, "a") as f:
-            f.write(json.dumps(assistant_message) + "\n")
+    assistant_message = {
+        "role": "assistant",
+        "content": response_message,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "status": response_status,
+        "task_id": task_id,
+    }
+    with open(messages_file, "a") as f:
+        f.write(json.dumps(assistant_message) + "\n")
 
     # --- Record in timeline ---
     try:
@@ -628,8 +651,8 @@ def route_to_openhands(packet: dict) -> dict:
     """
     Route assembled instruction to OpenHands.
 
-    Builds a prompt with full context and submits as a task.
-    Falls back to direct LiteLLM call if OpenHands is unavailable.
+    Creates a conversation, polls status to verify runtime starts,
+    then sends the initial message. Returns actual errors on failure.
     """
     import urllib.request
 
@@ -638,11 +661,11 @@ def route_to_openhands(packet: dict) -> dict:
     prompt_parts.append(f"## Task\n{packet['user_instruction']}")
 
     if packet.get("latest_ui_context"):
-        prompt_parts.append(f"## UI Context (what user is looking at)\n{packet['latest_ui_context']}")
+        prompt_parts.append(f"## UI Context\n{packet['latest_ui_context']}")
     if packet.get("latest_editor_context"):
-        prompt_parts.append(f"## Editor Context (active file/selection)\n{packet['latest_editor_context']}")
+        prompt_parts.append(f"## Editor Context\n{packet['latest_editor_context']}")
     if packet.get("latest_terminal_context"):
-        prompt_parts.append(f"## Terminal Context (recent error)\n{packet['latest_terminal_context']}")
+        prompt_parts.append(f"## Terminal Context\n{packet['latest_terminal_context']}")
 
     if packet.get("activated_knowledge"):
         knowledge_text = "\n".join(f"- {k.get('description', '')}: {k.get('content', '')}" for k in packet["activated_knowledge"])
@@ -656,13 +679,9 @@ def route_to_openhands(packet: dict) -> dict:
 
     full_prompt = "\n\n".join(prompt_parts)
 
-    # Try OpenHands first
+    # Step 1: Create conversation in OpenHands
     try:
-        openhands_task = {
-            "task": full_prompt,
-            "workspace": packet.get("worktree_path", ""),
-        }
-        data = json.dumps(openhands_task).encode()
+        data = json.dumps({}).encode()
         req = urllib.request.Request(
             f"{OPENHANDS_URL}/api/conversations",
             data=data,
@@ -670,48 +689,63 @@ def route_to_openhands(packet: dict) -> dict:
         )
         resp = urllib.request.urlopen(req, timeout=10)
         result = json.loads(resp.read())
+        conversation_id = result.get("conversation_id")
+        if not conversation_id:
+            return {"status": "failed", "response": f"OpenHands returned no conversation_id: {result}", "task_id": "none"}
+    except Exception as e:
+        return {"status": "failed", "response": f"OpenHands unreachable: {e}", "task_id": "none"}
+
+    # Step 2: Poll status — wait up to 30s for runtime to be ready
+    import time as _time
+    ready = False
+    error_msg = ""
+    for _ in range(15):
+        _time.sleep(2)
+        try:
+            status_req = urllib.request.Request(f"{OPENHANDS_URL}/api/conversations/{conversation_id}")
+            status_resp = urllib.request.urlopen(status_req, timeout=5)
+            status_data = json.loads(status_resp.read())
+            runtime_status = status_data.get("runtime_status", "")
+            conv_status = status_data.get("status", "")
+
+            if "ERROR" in runtime_status.upper() or conv_status == "ERROR":
+                error_msg = f"Runtime failed: {runtime_status} (status={conv_status})"
+                break
+            if conv_status == "RUNNING" or "RUNNING" in runtime_status.upper():
+                ready = True
+                break
+            if conv_status in ("STOPPED", "FINISHED"):
+                error_msg = f"Conversation ended prematurely: status={conv_status}"
+                break
+        except Exception as poll_err:
+            error_msg = f"Polling error: {poll_err}"
+            continue
+
+    if not ready:
+        if not error_msg:
+            error_msg = "Timeout: runtime did not start within 30s"
+        return {"status": "failed", "response": error_msg, "task_id": conversation_id}
+
+    # Step 3: Send the task message via WebSocket-compatible endpoint
+    try:
+        msg_data = json.dumps({"role": "user", "content": full_prompt}).encode()
+        msg_req = urllib.request.Request(
+            f"{OPENHANDS_URL}/api/conversations/{conversation_id}/messages",
+            data=msg_data,
+            headers={"Content-Type": "application/json"},
+        )
+        msg_resp = urllib.request.urlopen(msg_req, timeout=10)
         return {
             "status": "running",
             "response": f"Agent started working on: {packet['user_instruction'][:100]}",
-            "task_id": result.get("conversation_id", result.get("id", "unknown")),
+            "task_id": conversation_id,
         }
-    except Exception as openhands_error:
-        pass
-
-    # Fallback: direct LiteLLM call for simple responses
-    try:
-        model = packet.get("model") or DEFAULT_MODEL
-        litellm_payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": "You are a coding agent working in a developer workstation. Analyze the context and provide guidance. If you can suggest a fix, provide the exact code change."},
-                {"role": "user", "content": full_prompt},
-            ],
-            "temperature": 0.3,
-            "max_tokens": 2000,
-        }
-        data = json.dumps(litellm_payload).encode()
-        req = urllib.request.Request(
-            f"{LITELLM_URL}/v1/chat/completions",
-            data=data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {LITELLM_KEY}",
-            },
-        )
-        resp = urllib.request.urlopen(req, timeout=60)
-        result = json.loads(resp.read())
-        content = result.get("choices", [{}])[0].get("message", {}).get("content", "No response")
+    except Exception as msg_err:
+        # Conversation created but message failed
         return {
-            "status": "completed",
-            "response": content,
-            "task_id": f"litellm-{int(time.time())}",
-        }
-    except Exception as litellm_error:
-        return {
-            "status": "queued",
-            "response": f"Task queued for session {packet['session_id']}. Context attached: {', '.join(packet.get('latest_ui_context', '') and ['ui'] or []) + ', '.join(packet.get('latest_editor_context', '') and ['editor'] or []) + ', '.join(packet.get('latest_terminal_context', '') and ['terminal'] or [])}. Agent will process when available.",
-            "task_id": f"queued-{int(time.time())}",
+            "status": "running",
+            "response": f"Conversation created ({conversation_id}) but message delivery uncertain: {msg_err}",
+            "task_id": conversation_id,
         }
 
 
