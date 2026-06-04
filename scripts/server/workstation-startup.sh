@@ -36,6 +36,22 @@ log_error() {
     echo "$msg" | tee -a "$LOG_FILE" >&2
 }
 
+# --- Port Allocation ---
+find_free_port() {
+    local start=${1:-3010}
+    local end=${2:-3099}
+    local port=$start
+    while [ $port -le $end ]; do
+        if ! ss -tlnp | grep -q ":${port} "; then
+            echo $port
+            return 0
+        fi
+        port=$((port + 1))
+    done
+    echo $start
+    return 1
+}
+
 # --- Health Check Helpers ---
 wait_for_port() {
     local port=$1
@@ -186,11 +202,22 @@ log "[5/8] Starting Docker Compose services..."
 if [ -f "${DOCKER_COMPOSE_DIR}/docker-compose.yml" ]; then
     if [ -f "${DOCKER_COMPOSE_DIR}/.env" ] && grep -q "DEEPSEEK_API_KEY=sk-" "${DOCKER_COMPOSE_DIR}/.env" 2>/dev/null; then
         cd "$DOCKER_COMPOSE_DIR"
+
+        # Auto-allocate OpenHands port (avoid conflict with web app dev servers)
+        OPENHANDS_PORT=$(find_free_port 3010 3099)
+        log "  Allocated OpenHands port: $OPENHANDS_PORT"
+
+        # Update docker-compose port mapping for OpenHands
+        sed -i "s/\"[0-9]*:3000\"/\"${OPENHANDS_PORT}:3000\"/" docker-compose.yml
+
         docker compose up -d >> "$LOG_FILE" 2>&1
 
         # Wait for services
         wait_for_port $LITELLM_PORT "LiteLLM" 30 || true
         wait_for_port $OPENHANDS_PORT "OpenHands" 60 || true
+
+        # Store allocated port for other scripts
+        echo "$OPENHANDS_PORT" > "${WORKSTATION_DIR}/logs/openhands-port"
     else
         log "  Skipped — .env not configured (no API keys)"
         log "  To configure: edit ${DOCKER_COMPOSE_DIR}/.env"
