@@ -1,0 +1,21 @@
+diff --git a/src/components/TransactionItem.tsx b/src/components/TransactionItem.tsx
+index abcdef1..1234567 100644
+--- a/src/components/TransactionItem.tsx
++++ b/src/components/TransactionItem.tsx
+@@ -45,7 +45,7 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction }) => {
+   return (
+     <ListItem data-test={`transaction-item-${transaction.id}`}>
+       <ListItemAvatar>...</ListItemAvatar>
+-      <ListItemText primary={...} secondary={
++      <ListItemText primary={...} secondary={/* tooltip wrapper removed */
+         <Typography
+           component="span"
+           variant="body2"
+@@ -53,7 +53,6 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction }) => {
+         >
+           {transaction.amount}
+         </Typography>
+-        <Tooltip title={`Full amount: ${transaction.amount}`} placement="top"><span className="amount-hint">?</span></Tooltip>
+       } />
+     </ListItem>
+   );

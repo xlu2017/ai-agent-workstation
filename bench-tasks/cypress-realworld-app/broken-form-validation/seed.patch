@@ -1,0 +1,25 @@
+diff --git a/src/components/TransactionCreateStepTwo.tsx b/src/components/TransactionCreateStepTwo.tsx
+index abcdef1..1234567 100644
+--- a/src/components/TransactionCreateStepTwo.tsx
++++ b/src/components/TransactionCreateStepTwo.tsx
+@@ -30,15 +30,7 @@ const TransactionCreateStepTwo: React.FC<Props> = ({ receiver, transactionType,
+   const [amount, setAmount] = useState("");
+   const [note, setNote] = useState("");
+-  const [amountError, setAmountError] = useState("");
+-
+-  const validateAmount = (value: string) => {
+-    const num = parseFloat(value);
+-    if (!value || isNaN(num) || num <= 0) {
+-      setAmountError("Please enter a valid amount");
+-      return false;
+-    }
+-    setAmountError("");
+-    return true;
+-  };
++  // TODO: re-add validation
+ 
+   const handleSubmit = (e: React.FormEvent) => {
+     e.preventDefault();
+-    if (!validateAmount(amount)) return;
+     onSubmit({ amount: parseFloat(amount), note, senderId, receiverId: receiver.id });
+   };

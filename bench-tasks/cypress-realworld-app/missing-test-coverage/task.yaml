@@ -1,0 +1,30 @@
+id: missing-test-coverage
+repo: cypress-realworld-app
+title: "Add unit tests for notification preferences component"
+difficulty: medium
+category: test-coverage
+instruction: |
+  The NotificationPreferences component has 0% test coverage. Write unit
+  tests using React Testing Library that cover:
+  1. Renders all notification toggle switches
+  2. Toggling a switch calls the update handler
+  3. Displays current preferences from props
+  4. Shows loading state while saving
+  5. Shows error state on save failure
+  
+  Follow the existing test patterns in the project (Jest + RTL).
+  Place tests alongside the component following project conventions.
+seed_patch: seed.patch
+expected_files:
+  - src/components/NotificationPreferences.test.tsx
+validation_commands:
+  - "yarn test --watchAll=false --testPathPattern=NotificationPreferences"
+  - "yarn test --watchAll=false --coverage --collectCoverageFrom='src/components/NotificationPreferences.tsx'"
+context_source: editor
+risk_level: low
+success_criteria: |
+  - At least 5 test cases covering the scenarios listed
+  - All tests pass
+  - Coverage > 80% for the component
+  - Tests follow project conventions (RTL + Jest)
+notes: "Test generation is a core autonomous agent capability."
