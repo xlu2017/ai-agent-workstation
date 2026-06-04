@@ -176,3 +176,19 @@ td { padding: 8px 12px; border-bottom: 1px solid var(--border); font-family: var
   white-space: pre-wrap;
   color: #a3a3a3;
 }
+
+.timeline-list { display: flex; flex-direction: column; gap: 2px; }
+.timeline-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-family: var(--mono); }
+.timeline-row:hover { background: rgba(255,255,255,0.03); }
+.timeline-ts { color: var(--text-dim); font-size: 11px; min-width: 60px; }
+.timeline-event { display: flex; align-items: center; gap: 6px; flex: 1; }
+.timeline-event-failed { color: var(--red); }
+.timeline-icon { font-size: 14px; min-width: 20px; text-align: center; }
+.timeline-tool { font-weight: 600; color: var(--accent); min-width: 110px; }
+.timeline-detail { color: var(--text-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-status { font-size: 12px; min-width: 16px; text-align: center; }
+.timeline-ok { color: var(--green); }
+.timeline-fail { color: var(--red); }
+.timeline-task-start { background: rgba(59,130,246,0.08); border-left: 3px solid var(--accent); }
+.timeline-task-done { background: rgba(34,197,94,0.08); border-left: 3px solid var(--green); }
+.timeline-sha { background: var(--surface); padding: 1px 6px; border-radius: 3px; font-size: 11px; color: var(--green); margin-left: 6px; }

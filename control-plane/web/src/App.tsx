@@ -161,6 +161,50 @@ const SessionChat = ({ sessionId }: { sessionId: string }) => {
   )
 }
 
+function CreateSessionForm({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [repo, setRepo] = useState('')
+  const [branch, setBranch] = useState('')
+  const [task, setTask] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  const create = () => {
+    setCreating(true)
+    fetch(`${API}/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name || undefined,
+        repo: repo || undefined,
+        branch: branch || undefined,
+        task: task || undefined,
+      }),
+    })
+      .then(response => response.json())
+      .then(() => { setOpen(false); setName(''); setRepo(''); setBranch(''); setTask(''); onCreated() })
+      .finally(() => setCreating(false))
+  }
+
+  if (!open) return <button className="btn btn-primary" onClick={() => setOpen(true)} style={{ marginBottom: 16 }}>+ Create Session</button>
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title" style={{ marginBottom: 12 }}>New Session</div>
+      <div style={{ display: 'grid', gap: 8 }}>
+        <input className="chat-input" placeholder="Session name (auto-generated if empty)" value={name} onChange={e => setName(e.target.value)} />
+        <input className="chat-input" placeholder="Repo path (e.g. /opt/workstation/repos/my-app)" value={repo} onChange={e => setRepo(e.target.value)} />
+        <input className="chat-input" placeholder="Branch name (auto-generated if empty)" value={branch} onChange={e => setBranch(e.target.value)} />
+        <input className="chat-input" placeholder="Task description (what the agent should do)" value={task} onChange={e => setTask(e.target.value)} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-primary" onClick={create} disabled={creating}>{creating ? 'Creating...' : 'Create'}</button>
+          <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function SessionsPage() {
   const { data, refetch } = useFetch<{ sessions: Session[] }>(`${API}/sessions`)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -182,6 +226,7 @@ function SessionsPage() {
   return (
     <div>
       <h2>Sessions</h2>
+      <CreateSessionForm onCreated={refetch} />
       {data?.sessions.map(session => (
         <div key={session.id} className="card">
           <div className="card-header">
@@ -390,6 +435,45 @@ function LogsPage() {
   )
 }
 
+function ToolCallEvent({ event }: { event: any }) {
+  const tool = event.tool || ''
+  const args = event.args || {}
+  const success = event.success
+
+  const getIcon = () => {
+    if (tool === 'read_file') return '📖'
+    if (tool === 'write_file' || tool === 'apply_patch') return '✏️'
+    if (tool === 'run_command') return '⚡'
+    if (tool === 'git_commit') return '💾'
+    if (tool === 'git_status' || tool === 'git_diff') return '🔍'
+    if (tool === 'list_files' || tool === 'grep') return '🔎'
+    if (tool === 'run_validation') return '🧪'
+    if (tool === 'task_complete') return '✅'
+    if (tool === 'get_latest_context') return '🧠'
+    return '🔧'
+  }
+
+  const getDetail = () => {
+    if (args.path) return args.path
+    if (args.command) return args.command.slice(0, 60)
+    if (args.message) return args.message.slice(0, 60)
+    if (args.pattern) return `/${args.pattern}/`
+    if (args.summary) return args.summary.slice(0, 60)
+    return ''
+  }
+
+  return (
+    <div className={`timeline-event ${success ? '' : 'timeline-event-failed'}`}>
+      <span className="timeline-icon">{getIcon()}</span>
+      <span className="timeline-tool">{tool}</span>
+      <span className="timeline-detail">{getDetail()}</span>
+      <span className={`timeline-status ${success ? 'timeline-ok' : 'timeline-fail'}`}>
+        {success ? '✓' : '✗'}
+      </span>
+    </div>
+  )
+}
+
 function TimelinePage() {
   const { data: sessions } = useFetch<{ sessions: Session[] }>(`${API}/sessions`)
   const [selected, setSelected] = useState('')
@@ -397,7 +481,10 @@ function TimelinePage() {
 
   useEffect(() => {
     if (selected) {
-      fetch(`${API}/sessions/${selected}/timeline`).then(r => r.json()).then(setTimeline)
+      const load = () => fetch(`${API}/sessions/${selected}/timeline`).then(r => r.json()).then(setTimeline)
+      load()
+      const interval = setInterval(load, 3000)
+      return () => clearInterval(interval)
     }
   }, [selected])
 
@@ -411,8 +498,8 @@ function TimelinePage() {
       {timeline?.summary && (
         <div className="grid">
           <div className="card stat">
-            <div className="stat-value">${timeline.summary.cost_usd?.toFixed(4) || '0.00'}</div>
-            <div className="stat-label">Cost</div>
+            <div className="stat-value">{timeline.summary.tool_calls || 0}</div>
+            <div className="stat-label">Tool Calls</div>
           </div>
           <div className="card stat">
             <div className="stat-value">{timeline.summary.files_edited || 0}</div>
@@ -423,20 +510,54 @@ function TimelinePage() {
             <div className="stat-label">Commands</div>
           </div>
           <div className="card stat">
-            <div className="stat-value">{timeline.summary.tests_passed || 0}/{(timeline.summary.tests_passed || 0) + (timeline.summary.tests_failed || 0)}</div>
-            <div className="stat-label">Tests Pass</div>
+            <div className="stat-value">{timeline.summary.commits || 0}</div>
+            <div className="stat-label">Commits</div>
           </div>
         </div>
       )}
       {timeline?.events?.length > 0 && (
         <div className="card" style={{ marginTop: 12 }}>
-          <div className="card-title" style={{ marginBottom: 12 }}>Events</div>
-          <div className="log-output">
+          <div className="card-title" style={{ marginBottom: 12 }}>Events ({timeline.events.length})</div>
+          <div className="timeline-list">
             {timeline.events.map((ev: any, i: number) => {
               const ts = (ev.timestamp || '').slice(11, 19)
-              const icon = ev.type === 'error' ? '✗' : ev.type === 'test_result' ? (ev.passed ? '✓' : '✗') : '·'
-              return <div key={i} style={{ color: ev.type === 'error' || (ev.type === 'test_result' && !ev.passed) ? 'var(--red)' : 'inherit' }}>
-                {ts} {icon} <strong>{ev.type}</strong> {ev.file || ev.command?.slice(0, 50) || ev.test || ev.model || ev.summary || ''}
+              if (ev.type === 'tool_call') {
+                return <div key={i} className="timeline-row">
+                  <span className="timeline-ts">{ts}</span>
+                  <ToolCallEvent event={ev} />
+                </div>
+              }
+              if (ev.type === 'task_start') {
+                return <div key={i} className="timeline-row timeline-task-start">
+                  <span className="timeline-ts">{ts}</span>
+                  <span className="timeline-icon">🚀</span>
+                  <strong>TASK START</strong>
+                  <span className="timeline-detail">{ev.executor} — {(ev.instruction || '').slice(0, 60)}</span>
+                </div>
+              }
+              if (ev.type === 'task_complete') {
+                const statusColor = ev.status === 'committed' ? 'badge-green' : ev.status === 'failed' ? 'badge-red' : 'badge-yellow'
+                return <div key={i} className="timeline-row timeline-task-done">
+                  <span className="timeline-ts">{ts}</span>
+                  <span className="timeline-icon">🏁</span>
+                  <strong>TASK DONE</strong>
+                  <span className={`badge ${statusColor}`}>{ev.status}</span>
+                  {ev.commit && <code className="timeline-sha">{String(ev.commit).slice(0, 8)}</code>}
+                  {ev.tool_calls && <span className="meta">({ev.tool_calls} tool calls)</span>}
+                </div>
+              }
+              if (ev.type === 'agent_message') {
+                return <div key={i} className="timeline-row">
+                  <span className="timeline-ts">{ts}</span>
+                  <span className="timeline-icon">💬</span>
+                  <span className="timeline-detail">{(ev.text || '').slice(0, 80)}</span>
+                </div>
+              }
+              return <div key={i} className="timeline-row">
+                <span className="timeline-ts">{ts}</span>
+                <span className="timeline-icon">·</span>
+                <strong>{ev.type}</strong>
+                <span className="timeline-detail">{ev.file || ev.command?.slice(0, 50) || ev.instruction?.slice(0, 50) || ''}</span>
               </div>
             })}
           </div>
