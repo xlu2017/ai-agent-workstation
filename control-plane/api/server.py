@@ -515,6 +515,74 @@ def _map_files_to_pages(files_edited: list, session_meta: dict) -> list:
     return pages
 
 
+
+def _generate_conversational_summary(instruction: str, result, page_urls: list, worktree: str) -> str:
+    """Generate a Devin-like conversational response after task completion."""
+    import requests
+
+    # Get git diff summary (abbreviated)
+    diff_summary = ""
+    try:
+        import subprocess
+        diff_result = subprocess.run(
+            ["git", "diff", "HEAD~1", "--stat"],
+            cwd=worktree, capture_output=True, text=True, timeout=5
+        )
+        if diff_result.returncode == 0:
+            diff_summary = diff_result.stdout.strip()
+    except Exception:
+        pass
+
+    # Build prompt for conversational summary
+    files_list = "\n".join(f"- `{f}`" for f in result.files_edited) if result.files_edited else "No files edited"
+    pages_list = "\n".join(f"- {p['route']} ({p['file']})" for p in page_urls) if page_urls else ""
+
+    prompt = f"""You are a helpful coding assistant responding in a chat. The user asked you to do something and you completed it. Write a brief, conversational response explaining what you did.
+
+User's request: {instruction}
+
+Agent's summary: {result.summary or 'Task completed'}
+
+Files changed:
+{files_list}
+
+{f'Diff stats: {diff_summary}' if diff_summary else ''}
+{f'Viewable pages: {pages_list}' if pages_list else ''}
+
+Commit: {result.commit_sha or 'none'}
+Status: {result.status}
+Duration: {result.duration_seconds:.1f}s
+
+Write 2-4 sentences. Be direct and specific about what changed. Mention the file names. If there are viewable pages, mention them. Do NOT use markdown headers. Do NOT start with "I" — vary your sentence openings. Keep it concise like a Slack message from a senior engineer."""
+
+    try:
+        resp = requests.post(
+            f"{LITELLM_URL}/chat/completions",
+            headers={"Authorization": f"Bearer {LITELLM_KEY}"},
+            json={
+                "model": DEFAULT_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 200,
+                "temperature": 0.7,
+            },
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data["choices"][0]["message"]["content"].strip()
+    except Exception:
+        pass
+
+    # Fallback: construct a decent message without LLM
+    short_files = ", ".join(f"`{f.split('/')[-1]}`" for f in result.files_edited[:3])
+    fallback = f"Done. Updated {short_files}."
+    if result.commit_sha:
+        fallback += f" Committed as {result.commit_sha[:8]}."
+    if result.summary:
+        fallback = f"{result.summary} ({short_files}, commit {(result.commit_sha or 'none')[:8]})"
+    return fallback
+
+
 @app.post("/api/sessions/{session_id}/chat")
 def send_chat(session_id: str, body: ChatMessage):
     """
@@ -630,9 +698,13 @@ def send_chat(session_id: str, body: ChatMessage):
             result = executor.run_task(session_id, packet)
             # Write completion message
             page_urls = _map_files_to_pages(result.files_edited, meta)
+            # Generate conversational response like Devin
+            conversational_content = _generate_conversational_summary(
+                packet.instruction, result, page_urls, meta.get("worktree_path", "")
+            )
             done_msg = {
                 "role": "assistant",
-                "content": f"Task {result.status}: {result.error or ('edited ' + str(len(result.files_edited)) + ' files')}. Commit: {result.commit_sha or 'none'}",
+                "content": conversational_content,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "status": result.status,
                 "task_id": task_id,
@@ -647,7 +719,7 @@ def send_chat(session_id: str, body: ChatMessage):
             tb_str = traceback.format_exc()
             err_msg = {
                 "role": "assistant",
-                "content": f"Task failed: {e}\nDetails: {tb_str[-400:]}",
+                "content": f"Hit an issue and could not complete the task: {e}\n\nTraceback (last 300 chars):\n{tb_str[-300:]}",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "status": "failed",
                 "task_id": task_id,
@@ -659,7 +731,7 @@ def send_chat(session_id: str, body: ChatMessage):
     thread.start()
 
     response_status = "claimed"
-    response_message = f"Task claimed by Direct Executor. Working on: {body.instruction[:100]}"
+    response_message = "On it - working on this now. I will update you when done."
 
     assistant_message = {
         "role": "assistant",

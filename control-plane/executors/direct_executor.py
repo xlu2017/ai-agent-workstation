@@ -475,6 +475,7 @@ class DirectExecutor(ExecutorAdapter):
             tests_passed=tests_passed,
             tests_failed=tests_failed,
             commit_sha=commit_sha,
+            summary=task_summary,
             duration_seconds=duration,
         )
 
