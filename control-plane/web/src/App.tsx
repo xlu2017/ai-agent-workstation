@@ -26,6 +26,7 @@ interface ChatMsg {
   files_edited?: string[]
   commit?: string
   task_id?: string
+  page_urls?: { file: string; url: string; route: string }[]
 }
 
 interface Health {
@@ -145,23 +146,29 @@ const SessionChat = ({ sessionId }: { sessionId: string }) => {
               </div>
             )}
             {message.files_edited && message.files_edited.length > 0 && (
-              <div className="chat-msg-meta" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+              <div className="chat-msg-meta" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
                 <span style={{ fontWeight: 600, fontSize: 11 }}>Edited files:</span>
                 {message.files_edited.map((file, i) => {
                   const shortPath = file.replace(/.*\/worktree-[^/]+\//, '')
-                  const devServerUrl = shortPath.match(/\.(tsx?|jsx?|css|html)$/)
-                    ? `http://localhost:3000/${shortPath.replace(/^src\//, '').replace(/\.(tsx?|jsx?)$/, '')}`
-                    : null
                   return (
-                    <span key={i} style={{ fontSize: 11, fontFamily: 'monospace' }}>
-                      {devServerUrl ? (
-                        <a href={devServerUrl} target="_blank" rel="noopener" style={{ color: '#6ec6ff', textDecoration: 'underline' }}>{shortPath}</a>
-                      ) : (
-                        <span style={{ color: '#aaa' }}>{shortPath}</span>
-                      )}
+                    <span key={i} style={{ fontSize: 11, fontFamily: 'monospace', display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <span style={{ color: '#aaa' }}>{shortPath}</span>
+                      <a href={`${API}/sessions/${sessionId}/file/${shortPath}`} target="_blank" rel="noopener" style={{ color: '#888', fontSize: 10 }}>[source]</a>
+                      
                     </span>
                   )
                 })}
+                {message.page_urls && message.page_urls.length > 0 && (
+                  <>
+                    <span style={{ fontWeight: 600, fontSize: 11, marginTop: 4 }}>View pages:</span>
+                    {message.page_urls.map((p, i) => (
+                      <a key={i} href={p.url} target="_blank" rel="noopener" style={{ color: '#6ec6ff', fontSize: 12, textDecoration: 'underline', fontWeight: 500 }}>
+                        {p.route} \u2192 {p.file}
+                      </a>
+                    ))}
+                  </>
+                )}
+                <a href={`${API}/sessions/${sessionId}/diff`} target="_blank" rel="noopener" style={{ color: '#6ec6ff', fontSize: 11, textDecoration: 'underline', marginTop: 4, display: 'inline-block' }}>View Diff ↗</a>
               </div>
             )}
           </div>
@@ -184,6 +191,8 @@ const SessionChat = ({ sessionId }: { sessionId: string }) => {
     </div>
   )
 }
+
+
 
 function CreateSessionForm({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false)
