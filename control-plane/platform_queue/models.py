@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
-ExecutorName = Literal["openhands", "direct"]
+ExecutorName = Literal["openhands"]
 
 
 class PlatformTaskInput(BaseModel):
@@ -27,6 +27,15 @@ class PlatformTaskInput(BaseModel):
     activated_knowledge: list[dict[str, Any]] = Field(default_factory=list)
     staleness_warnings: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_executor(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("executor") == "direct":
+            payload = dict(data)
+            payload["executor"] = "openhands"
+            return payload
+        return data
+
 
 class PlatformTaskOutput(BaseModel):
     """Result returned by a platform task worker."""
@@ -34,7 +43,7 @@ class PlatformTaskOutput(BaseModel):
     status: str
     task_id: str
     session_id: str
-    executor: ExecutorName
+    executor: ExecutorName = "openhands"
     files_edited: list[str] = Field(default_factory=list)
     commands_run: list[str] = Field(default_factory=list)
     tests_passed: int = 0
