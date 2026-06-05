@@ -201,7 +201,7 @@ class ExecutorAdapter(ABC):
         return None
 
     def _record_timeline_event(self, session_id: str, event_type: str, data: dict):
-        """Record an event in the session timeline."""
+        """Record raw timeline event and derived chat-facing status update."""
         events_dir = SESSIONS_DIR / session_id / "events"
         events_dir.mkdir(parents=True, exist_ok=True)
         events_file = events_dir / "events.jsonl"
@@ -212,3 +212,11 @@ class ExecutorAdapter(ABC):
         }
         with open(events_file, "a") as f:
             f.write(json.dumps(event) + "\n")
+
+        try:
+            from status_feed.narrator import emit_status_for_event
+
+            emit_status_for_event(session_id, event)
+        except Exception:
+            # Status narration must never break executor progress.
+            pass
