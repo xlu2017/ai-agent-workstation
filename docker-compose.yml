@@ -1,17 +1,17 @@
 # docker-compose.yml — AI Coding Agent Workstation
-# Services: LiteLLM Proxy, local OpenHands runtime
+# Services: local LiteLLM proxy, local OpenHands runtime
 #
 # Usage:
 #   cp .env.example .env  # then fill in API keys
-#   scripts/vendor-openhands.sh
-#   scripts/build-openhands-local.sh
+#   scripts/vendor-source-repos.sh
+#   scripts/build-offline-images.sh
 #   docker compose up -d
 #   docker compose logs -f
 
 services:
-  # --- LiteLLM Proxy: Unified model gateway ---
+  # --- LiteLLM Proxy: local model gateway image ---
   litellm:
-    image: ghcr.io/berriai/litellm:main-latest
+    image: ${LITELLM_IMAGE:-localhost/litellm-platform:local}
     container_name: litellm
     restart: unless-stopped
     ports:
@@ -37,8 +37,6 @@ services:
       - workstation
 
   # --- OpenHands: canonical local agent runtime ---
-  # Build this image from vendor/openhands with scripts/build-openhands-local.sh.
-  # Do not use floating public images for production execution.
   openhands:
     image: ${OPENHANDS_IMAGE:-localhost/openhands-platform:local}
     container_name: openhands
