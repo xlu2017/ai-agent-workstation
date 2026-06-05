@@ -5,10 +5,9 @@
 # Backups (stored locally, not in repo)
 backups/
 
-# Vendored upstream runtime trees can be very large.
-# Track lock files, wrapper Dockerfiles, and docs; mirror full sources separately.
-vendor/openhands/
-!vendor/README.md
+# Vendored upstream source trees are intentionally tracked.
+# Keep vendor/README.md plus the full contents of vendor/<dependency>/ in git
+# after running scripts/vendor-source-repos.sh.
 
 # Logs
 logs/
