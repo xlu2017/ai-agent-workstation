@@ -113,11 +113,25 @@ warn "Recommended public ingress: none, or temporary SSH only for break-glass re
 warn "Run scripts/server/configure-tailscale-ssh-only.sh after Tailscale is authenticated to make tailnet port 22 Tailscale-only."
 
 # --- Step 8: Configure SSH hardening ---
+# Use prohibit-password (not "no") so key-based root access survives until
+# configure-tailscale-ssh-only.sh finishes. That script sets PermitRootLogin no.
 log "Step 8/10: Hardening OpenSSH..."
-sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+
+# Copy root's authorized_keys to agent so at least one non-root user can SSH in
+if [[ -f /root/.ssh/authorized_keys ]]; then
+    sudo -u "${AGENT_USER}" mkdir -p "/home/${AGENT_USER}/.ssh"
+    cp /root/.ssh/authorized_keys "/home/${AGENT_USER}/.ssh/authorized_keys"
+    chown "${AGENT_USER}:${AGENT_USER}" "/home/${AGENT_USER}/.ssh/authorized_keys"
+    chmod 600 "/home/${AGENT_USER}/.ssh/authorized_keys"
+    chmod 700 "/home/${AGENT_USER}/.ssh"
+    log "  Copied root authorized_keys to ${AGENT_USER}"
+fi
+
 restart_ssh
+log "  SSH hardened: root=key-only, passwords=disabled. Full lockdown via configure-tailscale-ssh-only.sh."
 
 # --- Step 9: Configure remote desktop ---
 log "Step 9/10: Configuring xrdp..."
