@@ -5,19 +5,16 @@ States: queued → running → validating → committed | failed | needs_review
 """
 
 import json
-import os
 import threading
-import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 import sys
 from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).parent.parent))
 
 from executors.base import TaskPacket, TaskResult, SESSIONS_DIR, TASKS_DIR
-from executors.direct_executor import DirectExecutor
+from executors.openhands_adapter import OpenHandsExecutorAdapter
 from executors.aider_executor import AiderExecutor
 
 
@@ -62,8 +59,9 @@ class TaskQueue:
     def __init__(self):
         TASKS_DIR.mkdir(parents=True, exist_ok=True)
         self._executors = {
-            "direct": DirectExecutor(),
-            "openhands": DirectExecutor(),  # Direct is the primary executor
+            "openhands": OpenHandsExecutorAdapter(),
+            # Compatibility aliases. These do not invoke the retired DirectExecutor.
+            "direct": OpenHandsExecutorAdapter(),
             "aider": AiderExecutor(),
         }
         self._running_tasks = {}
@@ -71,6 +69,9 @@ class TaskQueue:
 
     def enqueue(self, packet: TaskPacket, executor: str = "openhands") -> str:
         """Add task to queue. Returns task_id."""
+        if executor == "direct":
+            executor = "openhands"
+
         packet.risk_level = classify_risk(packet.instruction)
         packet_path = packet.save()
 
@@ -96,6 +97,9 @@ class TaskQueue:
 
     def _execute_task(self, packet: TaskPacket, executor_name: str):
         """Execute task in background."""
+        if executor_name == "direct":
+            executor_name = "openhands"
+
         self._update_task_status(packet.task_id, "running")
 
         with self._lock:
@@ -186,20 +190,3 @@ class TaskQueue:
         meta.update(kwargs)
         meta_path.parent.mkdir(parents=True, exist_ok=True)
         meta_path.write_text(json.dumps(meta, indent=2))
-
-    def get_task_status(self, task_id: str) -> dict:
-        """Get current task status."""
-        meta_path = TASKS_DIR / task_id / "meta.json"
-        if meta_path.exists():
-            return json.loads(meta_path.read_text())
-        return {"task_id": task_id, "status": "unknown"}
-
-    def list_tasks(self, limit: int = 50) -> list:
-        """List recent tasks."""
-        tasks = []
-        if TASKS_DIR.exists():
-            for d in sorted(TASKS_DIR.iterdir(), reverse=True)[:limit]:
-                meta_file = d / "meta.json"
-                if meta_file.exists():
-                    tasks.append(json.loads(meta_file.read_text()))
-        return tasks
