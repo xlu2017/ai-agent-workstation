@@ -1,8 +1,10 @@
 # docker-compose.yml — AI Coding Agent Workstation
-# Services: LiteLLM Proxy, OpenHands (optional)
+# Services: LiteLLM Proxy, local OpenHands runtime
 #
 # Usage:
 #   cp .env.example .env  # then fill in API keys
+#   scripts/vendor-openhands.sh
+#   scripts/build-openhands-local.sh
 #   docker compose up -d
 #   docker compose logs -f
 
@@ -34,29 +36,29 @@ services:
     networks:
       - workstation
 
-  # --- OpenHands: Optional AI Coding Agent (not primary executor) ---
-  # Uncomment if you want OpenHands as an alternative executor.
-  # Primary execution uses the Direct Executor via LiteLLM.
-  #
-  # openhands:
-  #   image: ghcr.io/all-hands-ai/openhands:latest
-  #   container_name: openhands
-  #   restart: unless-stopped
-  #   ports:
-  #     - "${OPENHANDS_PORT:-3010}:3000"
-  #   environment:
-  #     - LLM_BASE_URL=http://litellm:4000
-  #     - LLM_API_KEY=${LITELLM_MASTER_KEY}
-  #     - LLM_MODEL=deepseek-v4-flash
-  #     - WORKSPACE_MOUNT_PATH=${WORKSPACE_PATH:-/home/agent/projects}
-  #   volumes:
-  #     - /var/run/docker.sock:/var/run/docker.sock
-  #     - ${WORKSPACE_PATH:-/home/agent/projects}:/opt/workspace_base
-  #   depends_on:
-  #     litellm:
-  #       condition: service_healthy
-  #   networks:
-  #     - workstation
+  # --- OpenHands: canonical local agent runtime ---
+  # Build this image from vendor/openhands with scripts/build-openhands-local.sh.
+  # Do not use floating public images for production execution.
+  openhands:
+    image: ${OPENHANDS_IMAGE:-localhost/openhands-platform:local}
+    container_name: openhands
+    restart: unless-stopped
+    ports:
+      - "${OPENHANDS_PORT:-3000}:3000"
+    environment:
+      - LLM_BASE_URL=http://litellm:4000
+      - LLM_API_KEY=${LITELLM_MASTER_KEY}
+      - LLM_MODEL=${OPENHANDS_LLM_MODEL:-deepseek-v4-flash}
+      - WORKSPACE_MOUNT_PATH=${WORKSPACE_PATH:-/home/agent/projects}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${WORKSPACE_PATH:-/home/agent/projects}:/opt/workspace_base
+      - /opt/workstation/sessions:/opt/workstation/sessions
+    depends_on:
+      litellm:
+        condition: service_healthy
+    networks:
+      - workstation
 
 networks:
   workstation:
