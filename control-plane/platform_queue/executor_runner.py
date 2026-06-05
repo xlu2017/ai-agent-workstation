@@ -1,4 +1,4 @@
-"""Run a queued platform task through the selected executor adapter."""
+"""Run a queued platform task through the OpenHands executor adapter."""
 
 from __future__ import annotations
 
@@ -9,13 +9,12 @@ CONTROL_PLANE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CONTROL_PLANE_DIR))
 
 from executors.base import TaskPacket  # noqa: E402
-from executors.direct_executor import DirectExecutor  # noqa: E402
 from executors.openhands_adapter import OpenHandsExecutorAdapter  # noqa: E402
 from platform_queue.models import PlatformTaskInput, PlatformTaskOutput  # noqa: E402
 
 
 def run_platform_task(input: PlatformTaskInput) -> PlatformTaskOutput:
-    """Execute a platform task synchronously and return a serializable result."""
+    """Execute a platform task through OpenHands and return a serializable result."""
 
     packet = TaskPacket(
         task_id=input.task_id,
@@ -32,19 +31,13 @@ def run_platform_task(input: PlatformTaskInput) -> PlatformTaskOutput:
         model=input.model,
     )
 
-    if input.executor == "openhands":
-        executor = OpenHandsExecutorAdapter()
-    elif input.executor == "direct":
-        executor = DirectExecutor()
-    else:
-        raise ValueError(f"Unsupported executor: {input.executor}")
-
+    executor = OpenHandsExecutorAdapter()
     result = executor.run_task(input.session_id, packet)
     return PlatformTaskOutput(
         status=result.status,
         task_id=input.task_id,
         session_id=input.session_id,
-        executor=input.executor,
+        executor="openhands",
         files_edited=[str(f) for f in result.files_edited],
         commands_run=[str(c) for c in result.commands_run],
         tests_passed=result.tests_passed,
