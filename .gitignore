@@ -5,6 +5,11 @@
 # Backups (stored locally, not in repo)
 backups/
 
+# Vendored upstream runtime trees can be very large.
+# Track lock files, wrapper Dockerfiles, and docs; mirror full sources separately.
+vendor/openhands/
+!vendor/README.md
+
 # Logs
 logs/
 
