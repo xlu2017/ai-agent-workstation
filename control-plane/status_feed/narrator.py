@@ -32,7 +32,7 @@ class StatusNarrator:
     """Create and persist natural-language chat updates from timeline events."""
 
     def emit_for_event(self, session_id: str, event: dict[str, Any]) -> dict[str, Any] | None:
-        message = self.describe_event(event)
+        message = self.describe_event(session_id, event)
         if not message:
             return None
 
@@ -46,7 +46,7 @@ class StatusNarrator:
         self._append_status(session_id, update)
         return update
 
-    def describe_event(self, event: dict[str, Any]) -> dict[str, Any] | None:
+    def describe_event(self, session_id: str, event: dict[str, Any]) -> dict[str, Any] | None:
         event_type = event.get("type")
 
         if event_type == "task_start":
@@ -57,20 +57,26 @@ class StatusNarrator:
             detail = f"Task: {instruction}"
             if branch:
                 detail += f" Branch: {branch}."
-            return self._msg("started", text, detail=detail, severity="info")
+            return self._msg("started", text, detail=detail, severity="info", reason_source="task")
 
         if event_type == "queued":
             executor = event.get("executor", "executor")
             return self._msg("queued", f"I queued this task for {executor}.", severity="info")
 
         if event_type == "think":
-            thought = self._clip(event.get("thought", ""), 180)
+            thought = self._clip(event.get("thought", ""), 240)
             if not thought:
                 return self._msg("thinking", "I am planning the next step.", severity="info")
-            return self._msg("thinking", "I am planning the next step.", detail=thought, severity="info")
+            return self._msg(
+                "thinking",
+                "I am planning the next step.",
+                detail=thought,
+                severity="info",
+                reason_source="agent_thought",
+            )
 
         if event_type == "tool_call":
-            return self._describe_tool_call(event)
+            return self._describe_tool_call(session_id, event)
 
         if event_type == "stuck_detected":
             tool = event.get("tool", "a tool")
@@ -88,6 +94,12 @@ class StatusNarrator:
                 severity="error",
             )
 
+        if event_type == "agent_message":
+            text = self._clip(event.get("text", ""), 300)
+            if not text:
+                return None
+            return self._msg("message", "The agent sent an update.", detail=text, severity="info")
+
         if event_type == "openhands_conversation_start":
             cid = self._clip(event.get("conversation_id", ""), 16)
             return self._msg(
@@ -102,7 +114,7 @@ class StatusNarrator:
             return self._describe_openhands_status(status)
 
         if event_type == "openhands_event":
-            return self._describe_openhands_event(event)
+            return self._describe_openhands_event(session_id, event)
 
         if event_type == "openhands_timeout":
             return self._msg(
@@ -133,13 +145,13 @@ class StatusNarrator:
 
         return None
 
-    def _describe_tool_call(self, event: dict[str, Any]) -> dict[str, Any] | None:
+    def _describe_tool_call(self, session_id: str, event: dict[str, Any]) -> dict[str, Any] | None:
         tool = str(event.get("tool", "tool"))
         success = bool(event.get("success", False))
         args = event.get("args") if isinstance(event.get("args"), dict) else {}
 
         if tool in {"write_file", "apply_patch"}:
-            return self._describe_file_edit(tool, args, success)
+            return self._describe_file_edit(session_id, tool, args, success)
 
         label_map = {
             "read_file": "I am reading a file.",
@@ -168,17 +180,29 @@ class StatusNarrator:
 
         return self._msg("working", text, detail="; ".join(detail_parts) or None, severity=severity)
 
-    def _describe_file_edit(self, tool: str, args: dict[str, Any], success: bool) -> dict[str, Any]:
+    def _describe_file_edit(
+        self,
+        session_id: str,
+        tool: str,
+        args: dict[str, Any],
+        success: bool,
+    ) -> dict[str, Any]:
         path = self._clip(args.get("path", "the target file"), 180)
         reason = self._extract_reason(args)
+        reason_source = "explicit_tool_reason" if reason else None
+
+        if not reason:
+            reason, reason_source = self._find_recent_reason(session_id)
+
         operation = "writing" if tool == "write_file" else "patching"
 
         if reason:
-            text = f"I am {operation} {path} because {self._clip(reason, 220)}."
+            prefix = "because" if reason_source == "explicit_tool_reason" else "based on"
+            text = f"I am {operation} {path} {prefix} {self._clip(reason, 240)}."
             detail = None
         else:
             text = f"I am {operation} {path}."
-            detail = "No explicit edit reason was provided by the executor."
+            detail = "I could not find an explicit or recent rationale for this edit."
 
         if not success:
             text += " The edit attempt did not succeed."
@@ -186,7 +210,7 @@ class StatusNarrator:
         else:
             severity = "info"
 
-        return self._msg("editing", text, detail=detail, severity=severity)
+        return self._msg("editing", text, detail=detail, severity=severity, reason_source=reason_source)
 
     def _describe_openhands_status(self, status: str) -> dict[str, Any] | None:
         if status == "UNKNOWN":
@@ -203,7 +227,7 @@ class StatusNarrator:
         phase, text, severity = mapping.get(status, ("working", f"OpenHands status is {status}.", "info"))
         return self._msg(phase, text, severity=severity)
 
-    def _describe_openhands_event(self, event: dict[str, Any]) -> dict[str, Any] | None:
+    def _describe_openhands_event(self, session_id: str, event: dict[str, Any]) -> dict[str, Any] | None:
         summary = event.get("summary") if isinstance(event.get("summary"), dict) else {}
         raw = event.get("raw") if isinstance(event.get("raw"), dict) else {}
         kind = str(summary.get("kind") or "OpenHands event")
@@ -218,6 +242,7 @@ class StatusNarrator:
                     f"OpenHands sent a {role} message.",
                     detail=self._clip(text, 300),
                     severity="info",
+                    reason_source="agent_message",
                 )
             return self._msg("message", f"OpenHands sent a {role} message.", severity="info")
 
@@ -225,26 +250,32 @@ class StatusNarrator:
             tool = str(summary.get("tool_name") or summary.get("action") or self._recursive_find(raw, ("tool_name", "name", "tool")) or "a tool")
             path = self._recursive_find(raw, ("path", "file", "file_path", "target_file"))
             reason = self._extract_reason(raw)
+            reason_source = "explicit_openhands_event" if reason else None
+            if not reason:
+                reason, reason_source = self._find_recent_reason(session_id)
 
             if self._looks_like_edit_tool(tool) or path:
                 if path and reason:
+                    prefix = "because" if reason_source == "explicit_openhands_event" else "based on"
                     return self._msg(
                         "editing",
-                        f"OpenHands is editing {self._clip(path, 180)} because {self._clip(reason, 220)}.",
+                        f"OpenHands is editing {self._clip(path, 180)} {prefix} {self._clip(reason, 240)}.",
                         severity="info",
+                        reason_source=reason_source,
                     )
                 if path:
                     return self._msg(
                         "editing",
                         f"OpenHands is editing {self._clip(path, 180)}.",
-                        detail="No explicit edit reason was present in the OpenHands event.",
+                        detail="I could not find an explicit or recent rationale for this edit.",
                         severity="info",
                     )
                 if reason:
                     return self._msg(
                         "editing",
-                        f"OpenHands is making an edit because {self._clip(reason, 220)}.",
+                        f"OpenHands is making an edit based on {self._clip(reason, 240)}.",
                         severity="info",
+                        reason_source=reason_source,
                     )
 
             return self._msg("working", f"OpenHands is using {tool}.", severity="info")
@@ -314,13 +345,17 @@ class StatusNarrator:
         text: str,
         detail: str | None = None,
         severity: str = "info",
+        reason_source: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        message = {
             "phase": phase,
             "severity": severity,
             "text": self._redact(text),
             "detail": self._redact(detail) if detail else None,
         }
+        if reason_source:
+            message["reason_source"] = reason_source
+        return message
 
     def _extract_reason(self, value: Any) -> str | None:
         found = self._recursive_find(value, REASON_KEYS)
@@ -328,6 +363,40 @@ class StatusNarrator:
             return None
         text = str(found).strip()
         return text or None
+
+    def _find_recent_reason(self, session_id: str) -> tuple[str | None, str | None]:
+        events_file = SESSIONS_DIR / session_id / "events" / "events.jsonl"
+        if not events_file.exists():
+            return None, None
+
+        try:
+            lines = events_file.read_text().splitlines()[-80:]
+        except OSError:
+            return None, None
+
+        task_instruction = None
+        for line in reversed(lines):
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            event_type = event.get("type")
+            if event_type == "think" and event.get("thought"):
+                return str(event["thought"]), "recent_agent_thought"
+            if event_type == "agent_message" and event.get("text"):
+                return str(event["text"]), "recent_agent_message"
+            if event_type == "openhands_event":
+                summary = event.get("summary") if isinstance(event.get("summary"), dict) else {}
+                text = summary.get("text")
+                if text:
+                    return str(text), "recent_openhands_message"
+            if event_type == "task_start" and event.get("instruction") and task_instruction is None:
+                task_instruction = str(event["instruction"])
+
+        if task_instruction:
+            return task_instruction, "task_instruction"
+        return None, None
 
     def _recursive_find(self, value: Any, keys: tuple[str, ...]) -> Any | None:
         if isinstance(value, dict):
