@@ -19,11 +19,18 @@ git checkout "$REF"
 SHA="$(git rev-parse HEAD)"
 TAG="${SHA:0:12}"
 
-python3 "$ROOT/scripts/write-openhands-lock.py" \
-  --lock "$LOCK" \
-  --repo "$REPO" \
-  --ref "$REF" \
-  --sha "$SHA" \
-  --tag "$TAG"
+cat > "$LOCK" <<EOF
+{
+  "name": "openhands-runtime",
+  "upstream_repository": "$REPO",
+  "source_dir": "vendor/openhands",
+  "ref": "$REF",
+  "commit_sha": "$SHA",
+  "image_name": "localhost/openhands-platform",
+  "image_tag": "$TAG",
+  "private_registry_image": null
+}
+EOF
 
 echo "OpenHands vendored at $SHA"
+echo "Lock file: $LOCK"
