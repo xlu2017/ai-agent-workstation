@@ -24,6 +24,8 @@ SESSIONS_DIR = Path("/opt/workstation/sessions")
 
 SECRET_KEY_RE = re.compile(r"(api[_-]?key|token|secret|password|authorization|credential)", re.I)
 SECRET_VALUE_RE = re.compile(r"(sk-[A-Za-z0-9_-]{12,}|[A-Za-z0-9_/-]{32,})")
+EDIT_TOOLS = {"write_file", "apply_patch", "FileEditorTool", "str_replace_editor", "edit_file"}
+REASON_KEYS = ("reason", "rationale", "why", "explanation", "intent", "purpose")
 
 
 class StatusNarrator:
@@ -132,14 +134,15 @@ class StatusNarrator:
         return None
 
     def _describe_tool_call(self, event: dict[str, Any]) -> dict[str, Any] | None:
-        tool = event.get("tool", "tool")
+        tool = str(event.get("tool", "tool"))
         success = bool(event.get("success", False))
         args = event.get("args") if isinstance(event.get("args"), dict) else {}
 
+        if tool in {"write_file", "apply_patch"}:
+            return self._describe_file_edit(tool, args, success)
+
         label_map = {
             "read_file": "I am reading a file.",
-            "write_file": "I am writing a file.",
-            "apply_patch": "I am applying a code change.",
             "list_files": "I am listing files in the worktree.",
             "grep": "I am searching the codebase.",
             "run_command": "I am running a command.",
@@ -150,12 +153,12 @@ class StatusNarrator:
             "get_latest_context": "I am refreshing session context.",
             "task_complete": "I am marking the task complete.",
         }
-        text = label_map.get(str(tool), f"I am using {tool}.")
+        text = label_map.get(tool, f"I am using {tool}.")
 
         detail_parts = []
-        for key in ("path", "command", "message", "pattern"):
+        for key in ("path", "command", "message", "pattern", "reason", "rationale", "why"):
             if key in args:
-                detail_parts.append(f"{key}: {self._clip(args[key], 180)}")
+                detail_parts.append(f"{key}: {self._clip(args[key], 220)}")
 
         if not success and tool != "think":
             text = f"{text} The last attempt did not succeed."
@@ -165,8 +168,27 @@ class StatusNarrator:
 
         return self._msg("working", text, detail="; ".join(detail_parts) or None, severity=severity)
 
+    def _describe_file_edit(self, tool: str, args: dict[str, Any], success: bool) -> dict[str, Any]:
+        path = self._clip(args.get("path", "the target file"), 180)
+        reason = self._extract_reason(args)
+        operation = "writing" if tool == "write_file" else "patching"
+
+        if reason:
+            text = f"I am {operation} {path} because {self._clip(reason, 220)}."
+            detail = None
+        else:
+            text = f"I am {operation} {path}."
+            detail = "No explicit edit reason was provided by the executor."
+
+        if not success:
+            text += " The edit attempt did not succeed."
+            severity = "warning"
+        else:
+            severity = "info"
+
+        return self._msg("editing", text, detail=detail, severity=severity)
+
     def _describe_openhands_status(self, status: str) -> dict[str, Any] | None:
-        # Avoid noisy generic UNKNOWN updates.
         if status == "UNKNOWN":
             return None
         mapping = {
@@ -183,6 +205,7 @@ class StatusNarrator:
 
     def _describe_openhands_event(self, event: dict[str, Any]) -> dict[str, Any] | None:
         summary = event.get("summary") if isinstance(event.get("summary"), dict) else {}
+        raw = event.get("raw") if isinstance(event.get("raw"), dict) else {}
         kind = str(summary.get("kind") or "OpenHands event")
         source = summary.get("source")
 
@@ -199,7 +222,31 @@ class StatusNarrator:
             return self._msg("message", f"OpenHands sent a {role} message.", severity="info")
 
         if "ActionEvent" in kind:
-            tool = summary.get("tool_name") or summary.get("action") or "a tool"
+            tool = str(summary.get("tool_name") or summary.get("action") or self._recursive_find(raw, ("tool_name", "name", "tool")) or "a tool")
+            path = self._recursive_find(raw, ("path", "file", "file_path", "target_file"))
+            reason = self._extract_reason(raw)
+
+            if self._looks_like_edit_tool(tool) or path:
+                if path and reason:
+                    return self._msg(
+                        "editing",
+                        f"OpenHands is editing {self._clip(path, 180)} because {self._clip(reason, 220)}.",
+                        severity="info",
+                    )
+                if path:
+                    return self._msg(
+                        "editing",
+                        f"OpenHands is editing {self._clip(path, 180)}.",
+                        detail="No explicit edit reason was present in the OpenHands event.",
+                        severity="info",
+                    )
+                if reason:
+                    return self._msg(
+                        "editing",
+                        f"OpenHands is making an edit because {self._clip(reason, 220)}.",
+                        severity="info",
+                    )
+
             return self._msg("working", f"OpenHands is using {tool}.", severity="info")
 
         if "ObservationEvent" in kind:
@@ -274,6 +321,34 @@ class StatusNarrator:
             "text": self._redact(text),
             "detail": self._redact(detail) if detail else None,
         }
+
+    def _extract_reason(self, value: Any) -> str | None:
+        found = self._recursive_find(value, REASON_KEYS)
+        if found is None:
+            return None
+        text = str(found).strip()
+        return text or None
+
+    def _recursive_find(self, value: Any, keys: tuple[str, ...]) -> Any | None:
+        if isinstance(value, dict):
+            for key in keys:
+                if key in value and value[key]:
+                    return value[key]
+            for nested in value.values():
+                result = self._recursive_find(nested, keys)
+                if result is not None:
+                    return result
+        elif isinstance(value, list):
+            for item in value:
+                result = self._recursive_find(item, keys)
+                if result is not None:
+                    return result
+        return None
+
+    @staticmethod
+    def _looks_like_edit_tool(tool: str) -> bool:
+        lowered = tool.lower()
+        return tool in EDIT_TOOLS or "edit" in lowered or "patch" in lowered or "write" in lowered
 
     @staticmethod
     def _clip(value: Any, limit: int) -> str:
