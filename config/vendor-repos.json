@@ -1,0 +1,26 @@
+{
+  "policy": "Source for required open-source runtime dependencies must be vendored into this repository under vendor/<name>. Submodules are not sufficient for offline operation.",
+  "repos": [
+    {
+      "name": "openhands",
+      "upstream": "https://github.com/OpenHands/OpenHands.git",
+      "ref": "main",
+      "path": "vendor/openhands",
+      "required_for": "canonical agent runtime"
+    },
+    {
+      "name": "litellm",
+      "upstream": "https://github.com/BerriAI/litellm.git",
+      "ref": "litellm_internal_staging",
+      "path": "vendor/litellm",
+      "required_for": "model gateway"
+    },
+    {
+      "name": "hatchet",
+      "upstream": "https://github.com/hatchet-dev/hatchet.git",
+      "ref": "main",
+      "path": "vendor/hatchet",
+      "required_for": "durable task queue and workers"
+    }
+  ]
+}
