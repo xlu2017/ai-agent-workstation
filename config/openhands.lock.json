@@ -1,0 +1,15 @@
+{
+  "name": "openhands-runtime",
+  "upstream_repository": "https://github.com/OpenHands/OpenHands.git",
+  "source_dir": "vendor/openhands",
+  "ref": "main",
+  "commit_sha": null,
+  "image_name": "localhost/openhands-platform",
+  "image_tag": null,
+  "private_registry_image": null,
+  "notes": [
+    "Run scripts/vendor-openhands.sh to resolve ref to an exact commit and populate commit_sha/image_tag.",
+    "Run scripts/build-openhands-local.sh after vendoring to build the local runtime image.",
+    "Do not use floating public images such as ghcr.io/all-hands-ai/openhands:latest for production execution."
+  ]
+}
