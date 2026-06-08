@@ -55,7 +55,8 @@ LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", "fdfe750a587cddaedd90f39afb86
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-v4-flash")
 
 
-def _get_openhands_url():
+def _get_vendor_runtime_url():
+    """Resolve optional vendor runtime URL (legacy, retained for health check)."""
     port_file = Path("/opt/workstation/logs/openhands-port")
     if port_file.exists():
         try:
@@ -66,7 +67,7 @@ def _get_openhands_url():
     return "http://localhost:3010"
 
 
-OPENHANDS_URL = os.environ.get("OPENHANDS_URL") or _get_openhands_url()
+VENDOR_RUNTIME_URL = os.environ.get("OPENHANDS_URL") or _get_vendor_runtime_url()
 BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://localhost:9876")
 
 TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
@@ -237,7 +238,7 @@ def get_health():
     import urllib.request
     checks = {}
 
-    for name, url in [("agent_core", f"{AGENT_CORE_URL}/actions"), ("litellm", f"{LITELLM_URL}/health/liveliness"), ("openhands", f"{OPENHANDS_URL}/api/options/config"), ("bridge", f"{BRIDGE_URL}/sessions")]:
+    for name, url in [("agent_core", f"{AGENT_CORE_URL}/actions"), ("litellm", f"{LITELLM_URL}/health/liveliness"), ("vendor_runtime", f"{VENDOR_RUNTIME_URL}/api/options/config"), ("bridge", f"{BRIDGE_URL}/sessions")]:
         try:
             urllib.request.urlopen(url, timeout=3)
             checks[name] = {"status": "healthy", "url": url.rsplit("/", 1)[0] if "/" in url[8:] else url}
@@ -550,7 +551,7 @@ _running_tasks: dict[str, asyncio.Task] = {}
 async def session_chat(session_id: str, body: ChatMessage):
     """Submit a prompt for execution in a session.
 
-    Flow: route → policy check → advisory plan → execute via OpenHands → events.
+    Flow: route → policy check → advisory plan → execute via executor → events.
     Runs execution in background so event polling works during execution.
     """
     from execution.prompt_handler import handle_prompt, TaskState
@@ -745,7 +746,7 @@ def list_services():
         {"name": "agent-core", "port": 3210, "description": "Advisory memory/planning", "can_start": True, "can_stop": True, "can_restart": True},
         {"name": "litellm", "port": 4000, "description": "LLM proxy gateway", "can_start": True, "can_stop": True, "can_restart": True},
         {"name": "control-plane", "port": 9877, "description": "FastAPI orchestrator", "can_start": True, "can_stop": False, "can_restart": True},
-        {"name": "openhands", "port": 3000, "description": "Execution runtime (Docker)", "can_start": True, "can_stop": True, "can_restart": True},
+        {"name": "vendor-runtime", "port": 3000, "description": "Vendor execution runtime (Docker)", "can_start": True, "can_stop": True, "can_restart": True},
         {"name": "dashboard", "port": 5173, "description": "Web UI (Vite dev)", "can_start": True, "can_stop": True, "can_restart": True},
     ]
     # Check which ports are actually listening
@@ -768,13 +769,13 @@ def list_services():
                     except (IndexError, ValueError):
                         pass
                     break
-    # Also check docker for openhands
+    # Also check docker for vendor runtime
     try:
         dr = sp.run(["docker", "ps", "--format", "{{.Names}} {{.Status}}"],
                     capture_output=True, text=True, timeout=5)
-        if "openhands" in dr.stdout:
+        if "vendor-runtime" in dr.stdout or "openhands" in dr.stdout:
             for svc in services:
-                if svc["name"] == "openhands":
+                if svc["name"] == "vendor-runtime":
                     svc["status"] = "running"
                     svc["docker"] = True
     except Exception:
@@ -832,9 +833,9 @@ def _service_commands():
             "port": 9877,
             "start": "cd /opt/workstation/repos/jubilant-goggles/control-plane && nohup /home/agent/.local/bin/uvicorn api.server:app --host 0.0.0.0 --port 9877 --reload > /opt/workstation/logs/control-plane.log 2>&1 &",
         },
-        "openhands": {
+        "vendor-runtime": {
             "port": 3000,
-            "start": "docker run -d --name openhands --network host -v /opt/workstation/repos:/opt/workspace -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/all-hands-ai/openhands:latest",
+            "start": "docker run -d --name vendor-runtime --network host -v /opt/workstation/repos:/opt/workspace -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/all-hands-ai/openhands:latest",
             "docker": True,
         },
         "dashboard": {

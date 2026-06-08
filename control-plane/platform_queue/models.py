@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 
-ExecutorName = Literal["openhands"]
+ExecutorName = Literal["agentic", "deterministic"]
 
 
 class PlatformTaskInput(BaseModel):
@@ -18,7 +18,7 @@ class PlatformTaskInput(BaseModel):
     instruction: str
     worktree_path: str
     branch: str
-    executor: ExecutorName = "openhands"
+    executor: ExecutorName = "agentic"
     model: str = "deepseek-v4-flash"
     risk_level: Literal["low", "medium", "high"] = "low"
     ui_context: str | None = None
@@ -30,9 +30,9 @@ class PlatformTaskInput(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize_legacy_executor(cls, data: Any) -> Any:
-        if isinstance(data, dict) and data.get("executor") == "direct":
+        if isinstance(data, dict) and data.get("executor") in ("direct", "openhands"):
             payload = dict(data)
-            payload["executor"] = "openhands"
+            payload["executor"] = "agentic"
             return payload
         return data
 
@@ -43,7 +43,7 @@ class PlatformTaskOutput(BaseModel):
     status: str
     task_id: str
     session_id: str
-    executor: ExecutorName = "openhands"
+    executor: ExecutorName = "agentic"
     files_edited: list[str] = Field(default_factory=list)
     commands_run: list[str] = Field(default_factory=list)
     tests_passed: int = 0

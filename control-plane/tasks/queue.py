@@ -14,7 +14,7 @@ from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).parent.parent))
 
 from executors.base import TaskPacket, TaskResult, SESSIONS_DIR, TASKS_DIR
-from executors.openhands_adapter import OpenHandsExecutorAdapter
+from execution.agentic_executor import AgenticExecutor
 from executors.aider_executor import AiderExecutor
 
 
@@ -59,18 +59,19 @@ class TaskQueue:
     def __init__(self):
         TASKS_DIR.mkdir(parents=True, exist_ok=True)
         self._executors = {
-            "openhands": OpenHandsExecutorAdapter(),
-            # Compatibility aliases. These do not invoke the retired DirectExecutor.
-            "direct": OpenHandsExecutorAdapter(),
+            "agentic": AgenticExecutor(),
+            # Compatibility aliases
+            "openhands": AgenticExecutor(),
+            "direct": AgenticExecutor(),
             "aider": AiderExecutor(),
         }
         self._running_tasks = {}
         self._lock = threading.Lock()
 
-    def enqueue(self, packet: TaskPacket, executor: str = "openhands") -> str:
+    def enqueue(self, packet: TaskPacket, executor: str = "agentic") -> str:
         """Add task to queue. Returns task_id."""
-        if executor == "direct":
-            executor = "openhands"
+        if executor in ("direct", "openhands"):
+            executor = "agentic"
 
         packet.risk_level = classify_risk(packet.instruction)
         packet_path = packet.save()
@@ -97,8 +98,8 @@ class TaskQueue:
 
     def _execute_task(self, packet: TaskPacket, executor_name: str):
         """Execute task in background."""
-        if executor_name == "direct":
-            executor_name = "openhands"
+        if executor_name in ("direct", "openhands"):
+            executor_name = "agentic"
 
         self._update_task_status(packet.task_id, "running")
 
