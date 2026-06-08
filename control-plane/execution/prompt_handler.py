@@ -37,7 +37,7 @@ def _sessions_dir() -> Path:
 
 
 SESSIONS_DIR = _sessions_dir()
-OPENHANDS_URL = os.environ.get("OPENHANDS_URL", "http://localhost:3010")
+OPENHANDS_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
 
 
 class TaskState(str, Enum):
@@ -239,10 +239,17 @@ async def handle_prompt(
             await client.close()
 
             if plan_response.get("ok"):
-                plan_summary = str(plan_response.get("plan", {}).get("steps", []))[:200]
+                plan_obj = plan_response.get("plan", {})
+                plan_steps = plan_obj.get("steps", [])
+                plan_summary = str(plan_steps)[:200]
+                # Include full plan data in event for dashboard display
+                import json as _json
+                plan_full = _json.dumps(plan_obj, indent=2, default=str)[:4000]
                 _emit_event(session_id, "plan_generated", "Advisory plan received", {
-                    "plan_mode": plan_response.get("plan", {}).get("mode", "finite"),
-                    "step_count": len(plan_response.get("plan", {}).get("steps", [])),
+                    "plan_mode": plan_obj.get("mode", "finite"),
+                    "step_count": len(plan_steps),
+                    "type": "plan_output",
+                    "output": plan_full,
                 })
             else:
                 _emit_event(session_id, "plan_validation_failed",
@@ -308,38 +315,36 @@ async def _execute_via_openhands(
     task_id: str,
     model: str = "",
 ) -> dict[str, Any]:
-    """Execute instruction via OpenHands adapter.
+    """Execute instruction via the OpenHands local executor adapter.
 
-    Returns dict with status, summary, files_edited, duration_seconds.
-    If OpenHands is unavailable, returns blocked state with clear reason.
+    Uses vendored OpenHands SDK concepts with LLM tool-calling loop.
+    Executes directly on host filesystem — no Docker runtime needed.
     """
     from executors.openhands_adapter import OpenHandsExecutorAdapter
 
     session_dir = _sessions_dir() / session_id
     meta_path = session_dir / "meta.json"
 
-    # Load session metadata for worktree info
-    import json
+    import json as _json
     worktree_path = ""
     branch = ""
     if meta_path.exists():
         try:
-            meta = json.loads(meta_path.read_text())
-            worktree_path = meta.get("worktree_path", "")
+            meta = _json.loads(meta_path.read_text())
+            worktree_path = meta.get("repo_path", "") or meta.get("worktree_path", "")
             branch = meta.get("branch", "")
         except Exception:
             pass
 
-    if not worktree_path:
-        worktree_path = str(session_dir / "worktree")
+    if not worktree_path or not Path(worktree_path).exists():
+        worktree_path = "/opt/workstation/repos/agent-core"
 
     adapter = OpenHandsExecutorAdapter()
 
-    # Check if OpenHands is reachable
     if not adapter.is_available():
         return {
             "status": "blocked",
-            "summary": f"OpenHands is unavailable at {OPENHANDS_URL}",
+            "summary": "Execution backend (LiteLLM) is unavailable",
             "files_edited": [],
             "duration_seconds": 0,
         }
@@ -351,29 +356,39 @@ async def _execute_via_openhands(
         instruction=instruction,
         worktree_path=worktree_path,
         branch=branch or "main",
-        model=model or os.environ.get("DEFAULT_MODEL", "deepseek-v4-flash"),
+        model=model or os.environ.get("DEFAULT_MODEL", "deepseek-chat"),
     )
 
     start = time.time()
     try:
         result = adapter.run_task(session_id, packet)
         duration = time.time() - start
+        # Get raw output from events (last executor_finished event)
+        raw_output = ""
+        events_file = _sessions_dir() / session_id / "events" / "events.jsonl"
+        if events_file.exists():
+            import json as _j2
+            for line in reversed(events_file.read_text().strip().split("\n")):
+                try:
+                    ev = _j2.loads(line)
+                    if ev.get("event_type") == "action_progress" and "Tool:" in ev.get("data", {}).get("message", ""):
+                        # Get the args summary which has the command
+                        pass
+                except Exception:
+                    pass
+
         return {
-            "status": result.status if hasattr(result, "status") else "completed",
-            "summary": result.summary if hasattr(result, "summary") else "Task executed",
-            "files_edited": result.files_edited if hasattr(result, "files_edited") else [],
+            "status": result.status,
+            "summary": result.summary,
+            "files_edited": result.files_edited,
             "duration_seconds": duration,
+            "tests_passed": result.tests_passed,
+            "tests_failed": result.tests_failed,
+            "commands_run": result.commands_run,
         }
     except Exception as e:
         duration = time.time() - start
         error_str = str(e)
-        if "Connection refused" in error_str or "URLError" in error_str:
-            return {
-                "status": "blocked",
-                "summary": f"OpenHands unreachable: {error_str[:200]}",
-                "files_edited": [],
-                "duration_seconds": duration,
-            }
         return {
             "status": "failed",
             "summary": f"Execution error: {error_str[:200]}",
