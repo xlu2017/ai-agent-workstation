@@ -56,7 +56,7 @@ WorkingDirectory=/opt/workstation/control-plane/api
 Environment=SESSIONS_DIR=/opt/workstation/sessions
 Environment=KNOWLEDGE_DIR=/opt/workstation/knowledge
 Environment=LITELLM_URL=http://localhost:4000
-Environment=OPENHANDS_URL=http://localhost:3000
+Environment=VENDOR_RUNTIME_URL=http://localhost:3000
 Environment=BRIDGE_URL=http://localhost:9876
 ExecStart=/usr/bin/python3 server.py
 Restart=on-failure
