@@ -21,7 +21,7 @@ sys.path.insert(0, str(CONTROL_PLANE_ROOT / "cli"))
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -375,6 +375,14 @@ async def session_chat(session_id: str, body: ChatMessage):
     import uuid as _uuid
 
     task_id = f"task-{_uuid.uuid4().hex[:12]}"
+
+    # Reject concurrent requests for the same session
+    existing = _running_tasks.get(session_id)
+    if existing and not existing.done():
+        return JSONResponse(
+            status_code=409,
+            content={"error": "A task is already running for this session", "session_id": session_id},
+        )
 
     async def _run_in_background():
         try:

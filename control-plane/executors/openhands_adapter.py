@@ -29,6 +29,7 @@ import json
 import os
 import pty
 import select
+import shlex
 import signal
 import subprocess
 import time
@@ -584,7 +585,7 @@ class ToolExecutor:
 
         try:
             result = subprocess.run(
-                ["git"] + command.split(),
+                ["git"] + shlex.split(command),
                 cwd=self.workspace,
                 capture_output=True,
                 text=True,
@@ -686,7 +687,7 @@ class ToolExecutor:
                     str(resolved).startswith("/tmp")):
                 return f"BLOCKED: path '{path}' escapes workspace boundary"
         except Exception:
-            pass
+            return f"BLOCKED: cannot resolve path '{path}'"
         return fpath
 
     def _get_branch(self) -> str:
@@ -791,10 +792,32 @@ def _prune_messages(messages: list[dict], max_chars: int = 200000) -> None:
             old_len = len(content)
             msg["content"] = content[:200] + "\n... [truncated to fit context] ...\n" + content[-200:]
             total -= (old_len - len(msg["content"]))
-    # If still over, remove middle messages
+    # If still over, remove oldest assistant+tool groups (keep system + first user)
     while total > max_chars and len(messages) > 4:
-        removed = messages.pop(2)
-        total -= len(str(removed.get("content", "") or ""))
+        idx = 2
+        if idx >= len(messages):
+            break
+        msg = messages[idx]
+        # Remove the message and track size reduction
+        removed_size = len(str(msg.get("content", "") or ""))
+        messages.pop(idx)
+        # If we removed an assistant message with tool_calls, also remove its paired tool responses
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            tool_call_ids = {tc.get("id") for tc in msg["tool_calls"] if isinstance(tc, dict)}
+            while idx < len(messages) and messages[idx].get("role") == "tool":
+                if messages[idx].get("tool_call_id") in tool_call_ids:
+                    orphan = messages.pop(idx)
+                    removed_size += len(str(orphan.get("content", "") or ""))
+                else:
+                    break
+        # If we removed a tool message, find and clean up its parent's tool_call entry
+        elif msg.get("role") == "tool" and msg.get("tool_call_id"):
+            orphan_id = msg["tool_call_id"]
+            for prev in messages[:idx]:
+                if prev.get("role") == "assistant" and prev.get("tool_calls"):
+                    prev["tool_calls"] = [tc for tc in prev["tool_calls"]
+                                          if tc.get("id") != orphan_id]
+        total -= removed_size
 
 
 def _run_agent_loop(
