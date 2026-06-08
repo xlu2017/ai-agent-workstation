@@ -89,7 +89,7 @@ class RuntimePolicy:
         "rm -rf /", "shutdown", "reboot", "mkfs",
     ])
     mutation_allowed: bool = True
-    commit_requires_approval: bool = True
+    commit_requires_approval: bool = False
     push_requires_approval: bool = True
     deploy_requires_approval: bool = True
     secrets_require_approval: bool = True
