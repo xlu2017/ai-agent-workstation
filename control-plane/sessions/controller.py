@@ -29,7 +29,7 @@ from pydantic import BaseModel
 from adapters.workflow.base import WorkflowAdapter
 from agent_core_client.client import AgentCoreClient, PlanRequest
 from live_feed.events import EventStore, EventType, create_event
-from prompt_router.router import RoutingDecision, RoutingInput, RoutingOutput, route_prompt
+from prompt_router.router import RoutingDecision, RoutingInput, RoutingOutput, route_prompt, route_prompt_async
 from sessions.models import Session, SessionStatus, SessionStore, SessionType
 
 
@@ -186,8 +186,8 @@ class SessionController:
             user_intent_hint=request.user_intent_hint,
         )
 
-        # 3. Route
-        routing_output = route_prompt(routing_input)
+        # 3. Route (LLM-first with heuristic fallback)
+        routing_output = await route_prompt_async(routing_input)
 
         # 4. Record routing decision
         self.event_store.append(

@@ -244,6 +244,161 @@ class TestPromptRouter:
 
 
 # ════════════════════════════════════════════════════════════════════
+# 2b. LLM router tests (async, with mocked LLM)
+# ════════════════════════════════════════════════════════════════════
+
+class TestLLMRouter:
+    """Tests for the LLM-based prompt router."""
+
+    @pytest.mark.asyncio
+    async def test_control_commands_bypass_llm(self):
+        """Control commands should be handled by regex, not LLM."""
+        from prompt_router.router import route_prompt_async, RoutingInput, RoutingDecision
+        inp = RoutingInput(session_id="s1", prompt="stop")
+        out = await route_prompt_async(inp)
+        assert out.decision == RoutingDecision.INTERRUPT_CURRENT
+        assert out.control_command == "cancel"
+
+    @pytest.mark.asyncio
+    async def test_llm_routing_with_mock(self):
+        """When LLM returns a valid response, use it."""
+        from unittest.mock import AsyncMock, patch
+        from prompt_router.router import route_prompt_async, RoutingInput, RoutingDecision
+
+        mock_response = {
+            "choices": [{
+                "message": {
+                    "content": '{"decision": "spawn_child_session", "rationale": "User is requesting a different task in the same repo"}'
+                }
+            }]
+        }
+
+        class MockResponse:
+            def json(self):
+                return mock_response
+            def raise_for_status(self):
+                pass
+
+        class MockClient:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+            async def post(self, *args, **kwargs):
+                return MockResponse()
+
+        inp = RoutingInput(
+            session_id="s1",
+            prompt="also set up the database migration for the auth module",
+            current_plan_status="running",
+            repo_id="my-repo",
+        )
+        with patch("prompt_router.router.httpx.AsyncClient", return_value=MockClient()):
+            with patch("prompt_router.router.ROUTER_LLM_ENABLED", True):
+                out = await route_prompt_async(inp)
+        assert out.decision == RoutingDecision.SPAWN_CHILD_SESSION
+        assert "[LLM]" in out.rationale
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_falls_back_to_heuristic(self):
+        """When LLM fails, fall back to heuristic routing."""
+        from unittest.mock import patch
+        from prompt_router.router import route_prompt_async, RoutingInput, RoutingDecision
+
+        inp = RoutingInput(
+            session_id="s1",
+            prompt="also check tests",
+            current_plan_status="running",
+        )
+        with patch("prompt_router.router.ROUTER_LLM_ENABLED", True):
+            with patch("prompt_router.router.httpx.AsyncClient") as mock_cls:
+                mock_cls.side_effect = Exception("connection refused")
+                out = await route_prompt_async(inp)
+        assert out.decision == RoutingDecision.MODIFY_CURRENT_PLAN
+        assert "[heuristic]" in out.rationale
+
+    @pytest.mark.asyncio
+    async def test_llm_disabled_uses_heuristic(self):
+        """When LLM is disabled, use heuristics directly."""
+        from unittest.mock import patch
+        from prompt_router.router import route_prompt_async, RoutingInput, RoutingDecision
+
+        inp = RoutingInput(
+            session_id="s1",
+            prompt="fix the login bug",
+            current_plan_status="none",
+        )
+        with patch("prompt_router.router.ROUTER_LLM_ENABLED", False):
+            out = await route_prompt_async(inp)
+        assert out.decision == RoutingDecision.APPEND_TO_CURRENT
+        assert "[heuristic]" in out.rationale
+
+    @pytest.mark.asyncio
+    async def test_llm_invalid_decision_falls_back(self):
+        """When LLM returns an invalid decision, fall back to heuristic."""
+        from unittest.mock import patch
+        from prompt_router.router import route_prompt_async, RoutingInput, RoutingDecision
+
+        mock_response = {
+            "choices": [{
+                "message": {
+                    "content": '{"decision": "invalid_decision", "rationale": "bad"}'
+                }
+            }]
+        }
+
+        class MockResponse:
+            def json(self):
+                return mock_response
+            def raise_for_status(self):
+                pass
+
+        class MockClient:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+            async def post(self, *args, **kwargs):
+                return MockResponse()
+
+        inp = RoutingInput(
+            session_id="s1",
+            prompt="do something else entirely",
+            current_plan_status="running",
+        )
+        with patch("prompt_router.router.httpx.AsyncClient", return_value=MockClient()):
+            with patch("prompt_router.router.ROUTER_LLM_ENABLED", True):
+                out = await route_prompt_async(inp)
+        assert "[heuristic]" in out.rationale
+
+    @pytest.mark.asyncio
+    async def test_llm_receives_session_context(self):
+        """Verify the LLM receives session context in its prompt."""
+        from unittest.mock import AsyncMock, patch
+        from prompt_router.router import _build_routing_user_prompt, RoutingInput
+
+        inp = RoutingInput(
+            session_id="s1",
+            prompt="also fix the tests",
+            current_plan_status="running",
+            current_action="apply_patch",
+            repo_id="my-repo",
+            user_intent_hint="correction",
+            recent_events=[
+                {"event_type": "action_started"},
+                {"event_type": "action_completed"},
+            ],
+        )
+        msg = _build_routing_user_prompt(inp)
+        assert "also fix the tests" in msg
+        assert "running" in msg
+        assert "apply_patch" in msg
+        assert "my-repo" in msg
+        assert "correction" in msg
+        assert "action_started" in msg
+
+
+# ════════════════════════════════════════════════════════════════════
 # 3. Session model tests
 # ════════════════════════════════════════════════════════════════════
 
