@@ -3,61 +3,64 @@ name: workstation-remote-desktop
 services:
   guacamole-init:
     image: guacamole/guacamole:${GUACAMOLE_VERSION:-1.5.5}
+    user: "0:0"
     restart: "no"
     env_file:
       - .env
     volumes:
       - guacamole-init:/init
-    entrypoint: ["/bin/sh", "-ec"]
-    command: |
-      /opt/guacamole/bin/initdb.sh --postgresql > /init/01-guacamole-schema.sql
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        /opt/guacamole/bin/initdb.sh --postgresql > /init/01-guacamole-schema.sql
 
-      escape_sql() {
-        printf "%s" "$$1" | sed "s/'/''/g"
-      }
+        escape_sql() {
+          printf "%s" "$$1" | sed "s/'/''/g"
+        }
 
-      rdp_host=$$(escape_sql "$${RDP_HOST:-dev-server}")
-      rdp_port=$$(escape_sql "$${RDP_PORT:-3389}")
-      rdp_username=$$(escape_sql "$${RDP_USERNAME:-agent}")
-      rdp_password=$$(escape_sql "$${RDP_PASSWORD:-}")
-      color_depth=$$(escape_sql "$${GUACAMOLE_RDP_COLOR_DEPTH:-16}")
+        rdp_host=$$(escape_sql "$${RDP_HOST:-dev-server}")
+        rdp_port=$$(escape_sql "$${RDP_PORT:-3389}")
+        rdp_username=$$(escape_sql "$${RDP_USERNAME:-agent}")
+        rdp_password=$$(escape_sql "$${RDP_PASSWORD:-}")
+        color_depth=$$(escape_sql "$${GUACAMOLE_RDP_COLOR_DEPTH:-16}")
 
-      cat > /init/02-default-rdp-connection.sql <<SQL
-      WITH inserted_connection AS (
-        INSERT INTO guacamole_connection (connection_name, protocol)
-        VALUES ('Workstation xRDP', 'rdp')
-        RETURNING connection_id
-      )
-      INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
-      SELECT connection_id, parameter_name, parameter_value
-      FROM inserted_connection
-      CROSS JOIN (
-        VALUES
-          ('hostname', '$${rdp_host}'),
-          ('port', '$${rdp_port}'),
-          ('username', '$${rdp_username}'),
-          ('password', '$${rdp_password}'),
-          ('security', 'any'),
-          ('ignore-cert', 'true'),
-          ('color-depth', '$${color_depth}'),
-          ('resize-method', 'display-update'),
-          ('disable-audio', 'true'),
-          ('enable-wallpaper', 'false'),
-          ('enable-font-smoothing', 'false'),
-          ('enable-desktop-composition', 'false'),
-          ('enable-menu-animations', 'false'),
-          ('enable-drive', 'false')
-      ) AS params(parameter_name, parameter_value);
+        cat > /init/02-default-rdp-connection.sql <<SQL
+        WITH inserted_connection AS (
+          INSERT INTO guacamole_connection (connection_name, protocol)
+          VALUES ('Workstation xRDP', 'rdp')
+          RETURNING connection_id
+        )
+        INSERT INTO guacamole_connection_parameter (connection_id, parameter_name, parameter_value)
+        SELECT connection_id, parameter_name, parameter_value
+        FROM inserted_connection
+        CROSS JOIN (
+          VALUES
+            ('hostname', '$${rdp_host}'),
+            ('port', '$${rdp_port}'),
+            ('username', '$${rdp_username}'),
+            ('password', '$${rdp_password}'),
+            ('security', 'any'),
+            ('ignore-cert', 'true'),
+            ('color-depth', '$${color_depth}'),
+            ('resize-method', 'display-update'),
+            ('disable-audio', 'true'),
+            ('enable-wallpaper', 'false'),
+            ('enable-font-smoothing', 'false'),
+            ('enable-desktop-composition', 'false'),
+            ('enable-menu-animations', 'false'),
+            ('enable-drive', 'false')
+        ) AS params(parameter_name, parameter_value);
 
-      INSERT INTO guacamole_connection_permission (entity_id, connection_id, permission)
-      SELECT e.entity_id, c.connection_id, 'READ'
-      FROM guacamole_entity e
-      CROSS JOIN guacamole_connection c
-      WHERE e.name = 'guacadmin'
-        AND e.type = 'USER'
-        AND c.connection_name = 'Workstation xRDP'
-      ON CONFLICT DO NOTHING;
-      SQL
+        INSERT INTO guacamole_connection_permission (entity_id, connection_id, permission)
+        SELECT e.entity_id, c.connection_id, 'READ'
+        FROM guacamole_entity e
+        CROSS JOIN guacamole_connection c
+        WHERE e.name = 'guacadmin'
+          AND e.type = 'USER'
+          AND c.connection_name = 'Workstation xRDP'
+        ON CONFLICT DO NOTHING;
+        SQL
 
   postgres:
     image: postgres:16-alpine
