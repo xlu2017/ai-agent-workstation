@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Menu, Send, ChevronLeft, Folder, GitBranch, Plus, X, Circle, CheckCircle, AlertCircle, Clock, ArrowUp, Power, RefreshCw, Server, Monitor } from 'lucide-react'
+import { Menu, Send, ChevronLeft, Folder, GitBranch, Plus, X, Circle, CheckCircle, AlertCircle, Clock, ArrowUp, Power, RefreshCw, Server, Monitor, Maximize2, Minimize2 } from 'lucide-react'
 
 // crypto.randomUUID() requires a secure context (HTTPS or localhost).
 // When accessed via HTTP + IP (e.g. http://100.119.21.55:5173/), it's unavailable.
@@ -92,6 +92,8 @@ function RemoteDesktopPage() {
   const [config, setConfig] = useState<RemoteDesktopConfig | null>(null)
   const [remoteHealth, setRemoteHealth] = useState<RemoteDesktopHealth | null>(null)
   const [error, setError] = useState('')
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const frameShellRef = useRef<HTMLDivElement>(null)
 
   const refresh = useCallback(() => {
     fetch(`${API}/v2/remote-desktop/config`)
@@ -110,6 +112,26 @@ function RemoteDesktopPage() {
     const id = setInterval(refresh, 10000)
     return () => clearInterval(id)
   }, [refresh])
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === frameShellRef.current)
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
+
+  const toggleFullscreen = useCallback(() => {
+    const frameShell = frameShellRef.current
+    if (!frameShell) return
+
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(err => setError((err as Error).message))
+      return
+    }
+
+    frameShell.requestFullscreen().catch(err => setError((err as Error).message))
+  }, [])
 
   if (error) {
     return (
@@ -170,11 +192,20 @@ cp ops/remote-desktop/.env.example ops/remote-desktop/.env
 docker compose -f ops/remote-desktop/docker-compose.guacamole.yml up -d`}</pre>
         </div>
       ) : (
-        <div className="remote-frame-shell">
+        <div ref={frameShellRef} className={`remote-frame-shell ${isFullscreen ? 'remote-frame-shell-fullscreen' : ''}`}>
+          <div className="remote-frame-toolbar">
+            <span>Apache Guacamole</span>
+            <button className="btn-refresh" onClick={toggleFullscreen}>
+              {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              {isFullscreen ? 'Exit Full Screen' : 'Full Screen'}
+            </button>
+          </div>
           <iframe
             title="Apache Guacamole Remote Desktop"
             src={config.url}
             className="remote-frame"
+            allow="fullscreen; clipboard-read; clipboard-write"
+            allowFullScreen
           />
         </div>
       )}
