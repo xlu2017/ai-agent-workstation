@@ -35,6 +35,7 @@ Preferred access is Tailscale-first. The workstation does not rely on `ufw` or `
 | Tailscale SSH | `ssh agent@<tailscale-hostname>` | Primary terminal access on tailnet port 22 |
 | SSH + ports over Tailscale | `ssh -L 9877:localhost:9877 -L 4000:localhost:4000 agent@<tailscale-hostname>` | Control plane and LiteLLM UI without public exposure |
 | RDP over Tailscale | Connect to `<tailscale-hostname>:3389` | GUI/browser access when enabled by Tailscale policy |
+| Browser remote desktop | `/remote-desktop` with `/guacamole/` same-origin proxy | Browser-based desktop access without a native RDP client |
 | VS Code | Remote-SSH to `<tailscale-hostname>` | Development |
 | Local OpenSSH fallback | Provider console, then `ssh -p 2222 agent@127.0.0.1` | Local-only recovery after Tailscale-only SSH configuration |
 
@@ -47,6 +48,19 @@ sudo /opt/workstation/scripts/configure-tailscale-ssh-only.sh
 ```
 
 This script enables Tailscale SSH, moves ordinary OpenSSH to `127.0.0.1:2222`, and leaves public TCP/22 blocking to the provider firewall.
+
+### Browser remote desktop
+
+Use Apache Guacamole for browser desktop access. Start the stack with:
+
+```bash
+cd ~/jubilant-goggles
+cp ops/remote-desktop/.env.example ops/remote-desktop/.env
+nano ops/remote-desktop/.env
+docker compose --env-file ops/remote-desktop/.env -f ops/remote-desktop/docker-compose.guacamole.yml up -d
+```
+
+Then open `/remote-desktop` in the dashboard. Keep Guacamole and xRDP private to Tailscale or an authenticated same-origin proxy. See [Browser Remote Desktop Operations](operations/remote-desktop.md).
 
 Provider firewall target:
 
