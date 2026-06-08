@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Menu, Send, ChevronLeft, Folder, GitBranch, Plus, X, Circle, CheckCircle, AlertCircle, Clock, ArrowUp, Power, RefreshCw, Server, Monitor, Maximize2, Minimize2 } from 'lucide-react'
+import { Menu, Send, ChevronLeft, Folder, GitBranch, Plus, X, Circle, CheckCircle, AlertCircle, Clock, ArrowUp, Power, RefreshCw, Server, Monitor, Maximize2, Minimize2, Download } from 'lucide-react'
 
 // crypto.randomUUID() requires a secure context (HTTPS or localhost).
 // When accessed via HTTP + IP (e.g. http://100.119.21.55:5173/), it's unavailable.
@@ -423,12 +423,19 @@ interface ServiceInfo {
   status: 'running' | 'stopped'
   pid: number | null
   docker?: boolean
+  repo_backed?: boolean
+  update_supported?: boolean
+  update_in_progress?: boolean
+  last_update?: { commit: string; timestamp: string; status: string } | null
 }
 
 function PortManager() {
   const [services, setServices] = useState<ServiceInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [updateLoading, setUpdateLoading] = useState<Record<string, boolean>>({})
+  const [updateError, setUpdateError] = useState<Record<string, string>>({})
+  const [updateSuccess, setUpdateSuccess] = useState<Record<string, string>>({})
 
   const fetchServices = useCallback(() => {
     fetch(`${API}/services`)
@@ -464,6 +471,29 @@ function PortManager() {
     setActionLoading(null)
   }
 
+  const updateLatest = async (name: string) => {
+    setUpdateLoading(prev => ({ ...prev, [name]: true }))
+    setUpdateError(prev => { const n = { ...prev }; delete n[name]; return n })
+    setUpdateSuccess(prev => { const n = { ...prev }; delete n[name]; return n })
+    try {
+      const res = await fetch(`${API}/v2/services/${name}/update-latest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ restart: true }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setUpdateSuccess(prev => ({ ...prev, [name]: data.message || 'Updated' }))
+      } else {
+        setUpdateError(prev => ({ ...prev, [name]: data.error?.message || 'Update failed' }))
+      }
+      fetchServices()
+    } catch {
+      setUpdateError(prev => ({ ...prev, [name]: 'Network error' }))
+    }
+    setUpdateLoading(prev => ({ ...prev, [name]: false }))
+  }
+
   const restartService = async (name: string) => {
     setActionLoading(name)
     try {
@@ -497,6 +527,8 @@ function PortManager() {
               {svc.docker && <span className="pm-docker">docker</span>}
             </div>
             <div className="pm-item-desc">{svc.description}</div>
+            {updateError[svc.name] && <div className="pm-update-msg pm-update-error">{updateError[svc.name]}</div>}
+            {updateSuccess[svc.name] && <div className="pm-update-msg pm-update-success">{updateSuccess[svc.name]}</div>}
             <div className="pm-item-actions">
               {actionLoading === svc.name ? (
                 <span className="pm-busy">...</span>
@@ -505,14 +537,36 @@ function PortManager() {
                   <button className="pm-btn pm-btn-restart" onClick={() => restartService(svc.name)} title="Restart">
                     <RefreshCw size={12} />
                   </button>
+                  {svc.repo_backed && (
+                    <button
+                      className={`pm-btn pm-btn-update${updateLoading[svc.name] ? ' pm-btn-updating' : ''}`}
+                      onClick={() => updateLatest(svc.name)}
+                      disabled={!svc.update_supported || updateLoading[svc.name] || svc.update_in_progress}
+                      title={!svc.update_supported ? 'GitHub token not configured on server' : 'Update latest from GitHub'}
+                    >
+                      <Download size={12} className={updateLoading[svc.name] ? 'pm-spin' : ''} />
+                    </button>
+                  )}
                   <button className="pm-btn pm-btn-stop" onClick={() => stopService(svc.name)} title="Stop">
                     <Power size={12} />
                   </button>
                 </>
               ) : (
-                <button className="pm-btn pm-btn-start" onClick={() => startService(svc.name)} title="Start">
-                  <Power size={12} />
-                </button>
+                <>
+                  <button className="pm-btn pm-btn-start" onClick={() => startService(svc.name)} title="Start">
+                    <Power size={12} />
+                  </button>
+                  {svc.repo_backed && (
+                    <button
+                      className={`pm-btn pm-btn-update${updateLoading[svc.name] ? ' pm-btn-updating' : ''}`}
+                      onClick={() => updateLatest(svc.name)}
+                      disabled={!svc.update_supported || updateLoading[svc.name] || svc.update_in_progress}
+                      title={!svc.update_supported ? 'GitHub token not configured on server' : 'Update latest from GitHub'}
+                    >
+                      <Download size={12} className={updateLoading[svc.name] ? 'pm-spin' : ''} />
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
