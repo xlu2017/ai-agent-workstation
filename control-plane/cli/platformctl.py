@@ -35,17 +35,13 @@ BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://localhost:9876")
 
 
 def cmd_session_list(args):
-    """List all active sessions."""
     sessions = list_sessions()
-
     if args.json:
         print(json.dumps(sessions, indent=2))
         return
-
     if not sessions:
         print("No active sessions.")
         return
-
     print(f"{'ID':<20} {'Branch':<25} {'Ports':<12} {'Status':<10} {'Task'}")
     print("-" * 90)
     for s in sessions:
@@ -53,22 +49,11 @@ def cmd_session_list(args):
 
 
 def cmd_session_create(args):
-    """Create a new session."""
     try:
-        meta = create_session(
-            SessionCreateRequest(
-                name=args.name,
-                repo=args.repo,
-                branch=args.branch,
-                ports=args.ports,
-                profile=args.profile,
-                task=args.task,
-            )
-        )
+        meta = create_session(SessionCreateRequest(name=args.name, repo=args.repo, branch=args.branch, ports=args.ports, profile=args.profile, task=args.task))
     except SessionAlreadyExists as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(1)
-
     if args.json:
         print(json.dumps(meta, indent=2))
     else:
@@ -79,7 +64,6 @@ def cmd_session_create(args):
 
 
 def cmd_session_destroy(args):
-    """Destroy a session."""
     try:
         result = destroy_session(args.name)
     except SessionNotFound as exc:
@@ -89,17 +73,14 @@ def cmd_session_destroy(args):
 
 
 def cmd_session_inspect(args):
-    """Show session details."""
     try:
         meta = inspect_session(args.name, context_limit=200)
     except SessionNotFound as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(1)
-
     if args.json:
         print(json.dumps(meta, indent=2))
         return
-
     print(f"Session: {meta['id']}")
     print(f"  Status: {meta.get('status', '?')}")
     print(f"  Branch: {meta.get('branch', '-')}")
@@ -111,24 +92,18 @@ def cmd_session_inspect(args):
     print()
     for ctx_type in ("ui", "editor", "terminal"):
         val = meta.get("context", {}).get(ctx_type)
-        if val:
-            print(f"  Latest {ctx_type} context: {val[:100]}...")
-        else:
-            print(f"  Latest {ctx_type} context: (none)")
+        print(f"  Latest {ctx_type} context: {val[:100]}..." if val else f"  Latest {ctx_type} context: (none)")
 
 
 def cmd_context_show(args):
-    """Show current context for a session."""
     try:
         result = get_session_context(args.session)["context"]
     except SessionNotFound as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(1)
-
     if args.json:
         print(json.dumps(result, indent=2))
         return
-
     for name, content in result.items():
         print(f"=== {name} ===")
         print(content[:500])
@@ -138,43 +113,26 @@ def cmd_context_show(args):
 
 
 def cmd_health(args):
-    """Show system health."""
     import urllib.request
-
     checks = {}
-
-    try:
-        urllib.request.urlopen(f"{LITELLM_URL}/health/liveliness", timeout=5)
-        checks["litellm"] = {"status": "healthy", "url": LITELLM_URL}
-    except Exception as e:
-        checks["litellm"] = {"status": "unhealthy", "error": str(e)}
-
-    try:
-        urllib.request.urlopen(OPENHANDS_URL, timeout=5)
-        checks["openhands"] = {"status": "healthy", "url": OPENHANDS_URL}
-    except Exception as e:
-        checks["openhands"] = {"status": "unhealthy", "error": str(e)}
-
-    try:
-        urllib.request.urlopen(f"{BRIDGE_URL}/sessions", timeout=5)
-        checks["bridge"] = {"status": "healthy", "url": BRIDGE_URL}
-    except Exception as e:
-        checks["bridge"] = {"status": "unhealthy", "error": str(e)}
-
+    for name, url in (("litellm", f"{LITELLM_URL}/health/liveliness"), ("openhands", OPENHANDS_URL), ("bridge", f"{BRIDGE_URL}/sessions")):
+        try:
+            urllib.request.urlopen(url, timeout=5)
+            checks[name] = {"status": "healthy", "url": url}
+        except Exception as e:
+            checks[name] = {"status": "unhealthy", "error": str(e)}
     try:
         disk = subprocess.run(["df", "-h", "/"], capture_output=True, text=True)
         disk_line = disk.stdout.strip().split("\n")[-1].split()
         checks["disk"] = {"used": disk_line[2], "available": disk_line[3], "percent": disk_line[4]}
     except Exception:
         checks["disk"] = {"status": "unknown"}
-
     try:
         mem = subprocess.run(["free", "-h"], capture_output=True, text=True)
         mem_line = mem.stdout.strip().split("\n")[1].split()
         checks["memory"] = {"total": mem_line[1], "used": mem_line[2], "available": mem_line[6]}
     except Exception:
         checks["memory"] = {"status": "unknown"}
-
     try:
         docker = subprocess.run(["docker", "ps", "--format", "{{.Names}}\t{{.Status}}"], capture_output=True, text=True)
         containers = []
@@ -185,67 +143,112 @@ def cmd_health(args):
         checks["docker"] = containers
     except Exception:
         checks["docker"] = []
-
     checks["sessions"] = {"active": len(list_sessions())}
-
     if args.json:
         print(json.dumps(checks, indent=2))
         return
-
     print("=== System Health ===")
     for svc in ["litellm", "openhands", "bridge"]:
         status = checks[svc].get("status", "?")
         icon = "UP" if status == "healthy" else "DOWN"
         print(f"  {svc:<12} {icon}")
-
     print("\n=== Resources ===")
     if "percent" in checks.get("disk", {}):
         print(f"  Disk: {checks['disk']['used']} used / {checks['disk']['available']} free ({checks['disk']['percent']})")
     if "total" in checks.get("memory", {}):
         print(f"  RAM:  {checks['memory']['used']} used / {checks['memory']['available']} free (of {checks['memory']['total']})")
-
     print("\n=== Docker ===")
     for c in checks.get("docker", []):
         print(f"  {c['name']:<30} {c['status']}")
-
     print("\n=== Sessions ===")
     print(f"  Active: {checks['sessions']['active']}")
 
 
 def cmd_logs(args):
-    """Show recent logs."""
     lines = args.lines or 50
     logs = {}
-
     try:
-        result = subprocess.run(
-            ["docker", "logs", "--tail", str(lines), "litellm"],
-            capture_output=True, text=True,
-        )
+        result = subprocess.run(["docker", "logs", "--tail", str(lines), "litellm"], capture_output=True, text=True)
         logs["litellm"] = result.stdout[-2000:] + result.stderr[-2000:]
     except Exception:
         logs["litellm"] = ""
-
     events_log = Path("/opt/workstation/glue/ui-bridge/events.jsonl")
     if events_log.exists():
-        log_lines = events_log.read_text().strip().split("\n")
-        logs["bridge_events"] = log_lines[-lines:]
-
+        logs["bridge_events"] = events_log.read_text().strip().split("\n")[-lines:]
     if args.json:
         print(json.dumps(logs, indent=2))
-    else:
-        if args.service == "litellm" or not args.service:
-            print("=== LiteLLM Logs ===")
-            print(logs.get("litellm", "(none)")[:2000])
-        if args.service == "bridge" or not args.service:
-            print("\n=== Bridge Events ===")
-            for line in logs.get("bridge_events", [])[-10:]:
-                print(f"  {line[:120]}")
+        return
+    if args.service == "litellm" or not args.service:
+        print("=== LiteLLM Logs ===")
+        print(logs.get("litellm", "(none)")[:2000])
+    if args.service == "bridge" or not args.service:
+        print("\n=== Bridge Events ===")
+        for line in logs.get("bridge_events", [])[-10:]:
+            print(f"  {line[:120]}")
 
 
-# Remaining CLI commands were intentionally removed from this cleanup patch if
-# they existed only in stale duplicated scaffolding. Add new commands back by
-# delegating to shared control-plane modules instead of embedding service logic.
+def cmd_models_list(args):
+    import urllib.request
+    try:
+        req = urllib.request.urlopen(f"{LITELLM_URL}/models", timeout=5)
+        live = json.loads(req.read()).get("data", [])
+    except Exception:
+        live = []
+    config_path = Path("/opt/workstation/config/litellm_config.yaml")
+    configured = []
+    if config_path.exists():
+        try:
+            import yaml
+            configured = yaml.safe_load(config_path.read_text()).get("model_list", [])
+        except Exception:
+            configured = []
+    payload = {"live": live, "configured": configured}
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return
+    print("=== Live Models ===")
+    for model in live:
+        print(f"  {model.get('id', model)}")
+    print("\n=== Configured Models ===")
+    for model in configured:
+        print(f"  {model.get('model_name', model)}")
+
+
+def cmd_models_status(args):
+    args.json = True
+    cmd_models_list(args)
+
+
+def cmd_knowledge_list(args):
+    entries = []
+    if KNOWLEDGE_DIR.exists():
+        try:
+            import yaml
+            for f in sorted(KNOWLEDGE_DIR.glob("*.yaml")):
+                try:
+                    entry = yaml.safe_load(f.read_text())
+                    if isinstance(entry, dict):
+                        entry.setdefault("file", f.name)
+                        entries.append(entry)
+                except Exception:
+                    continue
+        except ImportError:
+            pass
+    if args.json:
+        print(json.dumps(entries, indent=2))
+        return
+    if not entries:
+        print("No knowledge entries found.")
+        return
+    for entry in entries:
+        name = entry.get("name") or entry.get("id") or entry.get("file")
+        print(f"- {name}")
+
+
+def cmd_knowledge_activate(args):
+    print("knowledge activate is not implemented in the CLI. Use the API knowledge endpoints or the knowledge loader.", file=sys.stderr)
+    sys.exit(2)
+
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Workstation control-plane CLI")
@@ -253,25 +256,17 @@ def build_parser():
 
     session = sub.add_parser("session")
     session_sub = session.add_subparsers(dest="session_command")
-
     session_list = session_sub.add_parser("list")
     session_list.add_argument("--json", action="store_true")
     session_list.set_defaults(func=cmd_session_list)
-
     session_create = session_sub.add_parser("create")
-    session_create.add_argument("--name")
-    session_create.add_argument("--repo")
-    session_create.add_argument("--branch")
-    session_create.add_argument("--ports")
-    session_create.add_argument("--profile")
-    session_create.add_argument("--task")
+    for name in ("name", "repo", "branch", "ports", "profile", "task"):
+        session_create.add_argument(f"--{name}")
     session_create.add_argument("--json", action="store_true")
     session_create.set_defaults(func=cmd_session_create)
-
     session_destroy = session_sub.add_parser("destroy")
     session_destroy.add_argument("name")
     session_destroy.set_defaults(func=cmd_session_destroy)
-
     session_inspect = session_sub.add_parser("inspect")
     session_inspect.add_argument("name")
     session_inspect.add_argument("--json", action="store_true")
@@ -293,6 +288,24 @@ def build_parser():
     logs.add_argument("--lines", type=int)
     logs.add_argument("--json", action="store_true")
     logs.set_defaults(func=cmd_logs)
+
+    models = sub.add_parser("models")
+    models_sub = models.add_subparsers(dest="models_command")
+    models_list = models_sub.add_parser("list")
+    models_list.add_argument("--json", action="store_true")
+    models_list.set_defaults(func=cmd_models_list)
+    models_status = models_sub.add_parser("status")
+    models_status.add_argument("--json", action="store_true")
+    models_status.set_defaults(func=cmd_models_status)
+
+    knowledge = sub.add_parser("knowledge")
+    knowledge_sub = knowledge.add_subparsers(dest="knowledge_command")
+    knowledge_list = knowledge_sub.add_parser("list")
+    knowledge_list.add_argument("--json", action="store_true")
+    knowledge_list.set_defaults(func=cmd_knowledge_list)
+    knowledge_activate = knowledge_sub.add_parser("activate")
+    knowledge_activate.add_argument("name")
+    knowledge_activate.set_defaults(func=cmd_knowledge_activate)
 
     return parser
 
