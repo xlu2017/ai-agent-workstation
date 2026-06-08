@@ -42,6 +42,7 @@ def test_update_rejects_unknown_service():
 def test_update_missing_token_returns_safe_error(monkeypatch):
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GITHUB_PAT", raising=False)
+    monkeypatch.delenv("PAT", raising=False)
     response = _client().post("/api/v2/services/agent-core/update-latest")
     assert response.status_code == 500
     data = response.json()
@@ -105,7 +106,7 @@ def test_sanitize_truncates_long_output():
 def test_concurrent_update_locked(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_test123456789012345678901234567890")
 
-    lock = _get_lock("/opt/agent-core")
+    lock = _get_lock(SERVICE_CONFIGS["agent-core"]["path"])
     lock.acquire()
 
     try:
@@ -169,7 +170,7 @@ def test_service_list_includes_update_metadata(monkeypatch):
     assert openhands["repo_backed"] is False
 
 
-# ── Shared checkout locking (dashboard + control-plane share /opt/jubilant-goggles) ──
+# ── Shared checkout locking (dashboard + control-plane share one checkout) ──
 
 
 def test_shared_checkout_uses_same_lock():

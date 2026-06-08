@@ -34,35 +34,39 @@ logger = logging.getLogger(__name__)
 
 SERVICE_CONFIGS: dict[str, dict] = {
     "agent-core": {
-        "repo_url": "https://github.com/xlu2017/agent-core.git",
-        "branch": "main",
-        "path": "/opt/agent-core",
+        "repo_url": "https://github.com/MapleEdge/agent-core.git",
+        "branch": "base-init",
+        "path": "/opt/workstation/repos/agent-core",
         "install_commands": ["pnpm install --frozen-lockfile"],
         "build_commands": ["pnpm build"],
-        "restart_command": "systemctl restart agent-core",
+        "restart_command": "fuser -k 3210/tcp; sleep 1; nohup node dist/index.js > /opt/workstation/logs/agent-core.log 2>&1 &",
     },
     "dashboard": {
-        "repo_url": "https://github.com/xlu2017/jubilant-goggles.git",
-        "branch": "main",
-        "path": "/opt/jubilant-goggles",
-        "install_commands": ["pnpm install --frozen-lockfile"],
-        "build_commands": ["pnpm build"],
-        "restart_command": "systemctl restart dashboard",
+        "repo_url": "https://github.com/MapleEdge/jubilant-goggles.git",
+        "branch": "initial-setup",
+        "path": "/opt/workstation/repos/jubilant-goggles",
+        "install_commands": [
+            "(cd control-plane/web && pnpm install --frozen-lockfile)",
+            "rsync -a --delete --exclude node_modules control-plane/web/ /opt/workstation/control-plane/web/",
+            "(cd /opt/workstation/control-plane/web && pnpm install --frozen-lockfile)",
+        ],
+        "build_commands": ["(cd /opt/workstation/control-plane/web && pnpm build)"],
+        "restart_command": "fuser -k 5173/tcp; sleep 1; cd /opt/workstation/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
     },
     "control-plane": {
-        "repo_url": "https://github.com/xlu2017/jubilant-goggles.git",
-        "branch": "main",
-        "path": "/opt/jubilant-goggles",
+        "repo_url": "https://github.com/MapleEdge/jubilant-goggles.git",
+        "branch": "initial-setup",
+        "path": "/opt/workstation/repos/jubilant-goggles",
         "install_commands": [],
         "build_commands": [],
-        "restart_command": "systemctl restart control-plane",
+        "restart_command": "fuser -k 9877/tcp; sleep 1; cd /opt/workstation/repos/jubilant-goggles/control-plane && nohup /home/agent/.local/bin/uvicorn api.server:app --host 0.0.0.0 --port 9877 --reload > /opt/workstation/logs/control-plane.log 2>&1 &",
     },
 }
 
 
 def _get_token() -> str | None:
     """Read GitHub PAT from environment. Never log or return this value."""
-    return os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_PAT")
+    return os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_PAT") or os.environ.get("PAT")
 
 
 # ---------------------------------------------------------------------------
