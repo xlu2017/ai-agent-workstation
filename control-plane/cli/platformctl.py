@@ -30,7 +30,7 @@ from sessions.session_manager import (
 SESSIONS_DIR = Path(os.environ.get("SESSIONS_DIR", "/opt/workstation/sessions"))
 KNOWLEDGE_DIR = Path(os.environ.get("KNOWLEDGE_DIR", "/opt/workstation/knowledge"))
 LITELLM_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
-OPENHANDS_URL = os.environ.get("OPENHANDS_URL", "http://localhost:3000")
+VENDOR_RUNTIME_URL = os.environ.get("OPENHANDS_URL", "http://localhost:3000")
 BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://localhost:9876")
 
 
@@ -115,7 +115,7 @@ def cmd_context_show(args):
 def cmd_health(args):
     import urllib.request
     checks = {}
-    for name, url in (("litellm", f"{LITELLM_URL}/health/liveliness"), ("openhands", OPENHANDS_URL), ("bridge", f"{BRIDGE_URL}/sessions")):
+    for name, url in (("litellm", f"{LITELLM_URL}/health/liveliness"), ("vendor-runtime", VENDOR_RUNTIME_URL), ("bridge", f"{BRIDGE_URL}/sessions")):
         try:
             urllib.request.urlopen(url, timeout=5)
             checks[name] = {"status": "healthy", "url": url}
@@ -148,7 +148,7 @@ def cmd_health(args):
         print(json.dumps(checks, indent=2))
         return
     print("=== System Health ===")
-    for svc in ["litellm", "openhands", "bridge"]:
+    for svc in ["litellm", "vendor-runtime", "bridge"]:
         status = checks[svc].get("status", "?")
         icon = "UP" if status == "healthy" else "DOWN"
         print(f"  {svc:<12} {icon}")

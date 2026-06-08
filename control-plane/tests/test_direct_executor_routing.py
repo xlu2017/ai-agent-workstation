@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Regression test: Dashboard chat routes to DirectExecutor, NOT OpenHands.
+Regression test: Dashboard chat routes to AgenticExecutor.
 
 Verifies:
 1. Chat creates a task
-2. DirectExecutor claims the task (status="claimed")
-3. No route_to_openhands call is made
+2. AgenticExecutor claims the task (status="claimed")
+3. No vendor-specific routing is invoked
 4. Status is truthful (claimed -> committed/failed, never false "running")
 5. Task reaches a terminal state with real executor output
 """
@@ -18,10 +18,10 @@ import urllib.request
 API_URL = os.environ.get("CONTROL_PLANE_API", "http://localhost:9877")
 
 
-def test_dashboard_chat_uses_direct_executor_not_openhands():
-    """Submit a chat instruction and verify DirectExecutor handles it."""
+def test_dashboard_chat_uses_agentic_executor():
+    """Submit a chat instruction and verify AgenticExecutor handles it."""
 
-    session_id = "test-direct-executor"
+    session_id = "test-agentic-executor"
 
     # Create test session
     try:
@@ -36,7 +36,7 @@ def test_dashboard_chat_uses_direct_executor_not_openhands():
 
     # Submit chat instruction
     chat_data = json.dumps({
-        "instruction": "Add a comment to the top of README.md saying '# Test edit by DirectExecutor'",
+        "instruction": "Add a comment to the top of README.md saying '# Test edit by AgenticExecutor'",
     }).encode()
     req = urllib.request.Request(
         f"{API_URL}/api/sessions/{session_id}/chat",
@@ -48,13 +48,14 @@ def test_dashboard_chat_uses_direct_executor_not_openhands():
 
     # ASSERTION 1: Task was claimed (not "running" or "completed" immediately)
     assert result["status"] == "claimed", f"Expected 'claimed', got '{result['status']}'"
-    assert result.get("executor") == "direct", f"Expected executor='direct', got '{result.get('executor')}'"
+    assert result.get("executor") in ("agentic", "direct"), f"Expected executor='agentic' or 'direct', got '{result.get('executor')}'"
     task_id = result["task_id"]
-    print(f"[PASS] Task claimed by DirectExecutor: {task_id}")
+    print(f"[PASS] Task claimed by executor: {task_id}")
 
-    # ASSERTION 2: No route_to_openhands was called
-    assert "openhands" not in result.get("message", "").lower(), "OpenHands should not be in response"
-    print("[PASS] No OpenHands routing detected")
+    # ASSERTION 2: No vendor-specific routing leakage
+    msg_lower = result.get("message", "").lower()
+    assert "openhands" not in msg_lower, "Vendor naming should not appear in response"
+    print("[PASS] No vendor-specific routing detected")
 
     # ASSERTION 3: Wait for executor to finish and check terminal state
     max_wait = 120  # seconds
@@ -94,12 +95,11 @@ def test_dashboard_chat_uses_direct_executor_not_openhands():
 
     print(f"\n{'='*60}")
     print(f"RESULT: All assertions passed.")
-    print(f"  DirectExecutor is the default execution path.")
+    print(f"  AgenticExecutor is the default execution path.")
     print(f"  Task: {task_id}")
     print(f"  Final status: {final_status}")
-    print(f"  No OpenHands dependency.")
     print(f"{'='*60}")
 
 
 if __name__ == "__main__":
-    test_dashboard_chat_uses_direct_executor_not_openhands()
+    test_dashboard_chat_uses_agentic_executor()

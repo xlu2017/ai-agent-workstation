@@ -165,9 +165,9 @@ def test_service_list_includes_update_metadata(monkeypatch):
     assert agent_core["repo_backed"] is True
     assert agent_core["update_supported"] is True
 
-    openhands = next((s for s in services if s["name"] == "openhands"), None)
-    assert openhands is not None
-    assert openhands["repo_backed"] is False
+    vendor_runtime = next((s for s in services if s["name"] == "vendor-runtime"), None)
+    assert vendor_runtime is not None
+    assert vendor_runtime["repo_backed"] is False
 
 
 # ── Shared checkout locking (dashboard + control-plane share one checkout) ──
