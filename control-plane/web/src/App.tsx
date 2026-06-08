@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Menu, Send, ChevronLeft, Folder, GitBranch, Plus, X, Circle, CheckCircle, AlertCircle, Clock, ArrowUp, Power, RefreshCw, Server } from 'lucide-react'
+import { Menu, Send, ChevronLeft, Folder, GitBranch, Plus, X, Circle, CheckCircle, AlertCircle, Clock, ArrowUp, Power, RefreshCw, Server, Monitor, Maximize2, Minimize2, Download } from 'lucide-react'
 
 // crypto.randomUUID() requires a secure context (HTTPS or localhost).
 // When accessed via HTTP + IP (e.g. http://100.119.21.55:5173/), it's unavailable.
@@ -52,6 +52,26 @@ interface Health {
   active_ports: number[]
 }
 
+interface RemoteDesktopConfig {
+  enabled: boolean
+  provider: string
+  url: string
+  rdp_host: string
+  security: string
+  auto_login: boolean
+}
+
+interface RemoteDesktopHealth {
+  ok: boolean
+  enabled: boolean
+  provider: string
+  guacamole: string
+  guacd: string
+  rdp: string
+  rdp_host: string
+  rdp_port: number
+}
+
 interface ChatEntry {
   id: string
   role: 'user' | 'system'
@@ -63,10 +83,200 @@ interface ChatEntry {
 }
 
 const API = '/api'
+const CONTROL_API = window.location.port === '5173'
+  ? `${window.location.protocol}//${window.location.hostname}:9877/api`
+  : API
+
+interface GuacamoleSession {
+  authToken: string
+  username: string
+  dataSource: string
+  availableDataSources: string[]
+  connection_url: string
+}
 
 function StatusDot({ status }: { status: string }) {
   const color = status === 'healthy' ? '#4ade80' : status === 'unhealthy' ? '#f87171' : '#fbbf24'
   return <Circle size={8} fill={color} stroke={color} style={{ marginRight: 6 }} />
+}
+
+function RemoteDesktopPage() {
+  const [config, setConfig] = useState<RemoteDesktopConfig | null>(null)
+  const [remoteHealth, setRemoteHealth] = useState<RemoteDesktopHealth | null>(null)
+  const [error, setError] = useState('')
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [frameSrc, setFrameSrc] = useState('')
+  const [autoLoginStatus, setAutoLoginStatus] = useState('')
+  const frameShellRef = useRef<HTMLDivElement>(null)
+
+  const refresh = useCallback(() => {
+    fetch(`${API}/v2/remote-desktop/config`)
+      .then(r => r.json())
+      .then(setConfig)
+      .catch(err => setError((err as Error).message))
+
+    fetch(`${API}/v2/remote-desktop/health`)
+      .then(r => r.json())
+      .then(setRemoteHealth)
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refresh()
+    const id = setInterval(refresh, 10000)
+    return () => clearInterval(id)
+  }, [refresh])
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === frameShellRef.current)
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
+
+  const toggleFullscreen = useCallback(() => {
+    const frameShell = frameShellRef.current
+    if (!frameShell) return
+
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(err => setError((err as Error).message))
+      return
+    }
+
+    frameShell.requestFullscreen().catch(err => setError((err as Error).message))
+  }, [])
+
+  const startGuacamoleSession = useCallback(() => {
+    if (!config?.enabled) return
+    if (!config.auto_login) {
+      setFrameSrc(config.url)
+      setAutoLoginStatus('')
+      return
+    }
+
+    setAutoLoginStatus('Signing in to Guacamole...')
+    fetch(`${API}/v2/remote-desktop/token`, { method: 'POST' })
+      .then(async response => {
+        if (!response.ok) {
+          const message = await response.text()
+          throw new Error(message || 'Unable to sign in to Guacamole')
+        }
+        return response.json() as Promise<GuacamoleSession>
+      })
+      .then(session => {
+        localStorage.setItem('GUAC_AUTH', JSON.stringify({
+          authToken: session.authToken,
+          username: session.username,
+          dataSource: session.dataSource,
+          availableDataSources: session.availableDataSources,
+        }))
+        setFrameSrc(session.connection_url || config.url)
+        setAutoLoginStatus('Signed in')
+      })
+      .catch(err => {
+        setAutoLoginStatus(`Auto-login failed: ${(err as Error).message}`)
+        setFrameSrc(config.url)
+      })
+  }, [config?.auto_login, config?.enabled, config?.url])
+
+  useEffect(() => {
+    if (config?.enabled) {
+      startGuacamoleSession()
+    }
+  }, [config?.auto_login, config?.enabled, config?.url, startGuacamoleSession])
+
+  if (error) {
+    return (
+      <div className="remote-desktop-page">
+        <div className="remote-card">
+          <h2>Remote Desktop</h2>
+          <p className="remote-error">Unable to load remote desktop config: {error}</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!config) {
+    return <div className="remote-desktop-page"><div className="remote-card">Loading remote desktop status...</div></div>
+  }
+
+  const guacamoleStatus = remoteHealth?.guacamole || 'unknown'
+  const rdpStatus = remoteHealth?.rdp || 'unknown'
+  const overallStatus = config.enabled ? (remoteHealth?.ok ? 'ready' : 'degraded') : 'disabled'
+
+  return (
+    <div className="remote-desktop-page">
+      <div className="remote-header">
+        <div>
+          <h2>Remote Desktop</h2>
+          <p>Browser access is proxied through Apache Guacamole to xRDP on the private network.</p>
+        </div>
+        <button className="btn-refresh" onClick={refresh}><RefreshCw size={14} /> Refresh</button>
+      </div>
+
+      <div className="remote-status-grid">
+        <div className="remote-status-card">
+          <span className="remote-label">Connection</span>
+          <strong className={`remote-status remote-status-${overallStatus}`}>{overallStatus}</strong>
+        </div>
+        <div className="remote-status-card">
+          <span className="remote-label">Guacamole</span>
+          <strong>{guacamoleStatus}</strong>
+        </div>
+        <div className="remote-status-card">
+          <span className="remote-label">xRDP target</span>
+          <strong>{rdpStatus}</strong>
+          <small>{remoteHealth?.rdp_host || config.rdp_host}:{remoteHealth?.rdp_port || 3389}</small>
+        </div>
+        <div className="remote-status-card">
+          <span className="remote-label">Security</span>
+          <strong>{config.security.replace('_', ' ')}</strong>
+        </div>
+      </div>
+
+      {!config.enabled ? (
+        <div className="remote-card remote-disabled">
+          <h3>Remote desktop is disabled</h3>
+          <p>Set <code>REMOTE_DESKTOP_ENABLED=true</code>, start the Guacamole stack, and keep Guacamole/xRDP reachable only over Tailscale or an authenticated same-origin dashboard proxy.</p>
+          <pre>{`cd ~/jubilant-goggles
+cp ops/remote-desktop/.env.example ops/remote-desktop/.env
+# edit ops/remote-desktop/.env with the RDP password locally
+docker compose -f ops/remote-desktop/docker-compose.guacamole.yml up -d`}</pre>
+        </div>
+      ) : (
+        <div ref={frameShellRef} className={`remote-frame-shell ${isFullscreen ? 'remote-frame-shell-fullscreen' : ''}`}>
+          <div className="remote-frame-toolbar">
+            <div className="remote-frame-title">
+              <span>Apache Guacamole</span>
+              {autoLoginStatus && <small>{autoLoginStatus}</small>}
+            </div>
+            <div className="remote-frame-actions">
+              <button className="btn-refresh" onClick={startGuacamoleSession}>
+                <RefreshCw size={14} />
+                Reconnect
+              </button>
+              <button className="btn-refresh" onClick={toggleFullscreen}>
+                {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                {isFullscreen ? 'Exit Full Screen' : 'Full Screen'}
+              </button>
+            </div>
+          </div>
+          {frameSrc ? (
+            <iframe
+              title="Apache Guacamole Remote Desktop"
+              src={frameSrc}
+              className="remote-frame"
+              allow="fullscreen; clipboard-read; clipboard-write"
+              allowFullScreen
+            />
+          ) : (
+            <div className="remote-frame-loading">Opening remote desktop...</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function EventTimeline({ events }: { events: SessionEvent[] }) {
@@ -216,15 +426,25 @@ interface ServiceInfo {
   status: 'running' | 'stopped'
   pid: number | null
   docker?: boolean
+  repo_backed?: boolean
+  update_supported?: boolean
+  update_in_progress?: boolean
+  last_update?: { commit: string; timestamp: string; status: string } | null
+  can_start?: boolean
+  can_stop?: boolean
+  can_restart?: boolean
 }
 
 function PortManager() {
   const [services, setServices] = useState<ServiceInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [updateLoading, setUpdateLoading] = useState<Record<string, boolean>>({})
+  const [updateError, setUpdateError] = useState<Record<string, string>>({})
+  const [updateSuccess, setUpdateSuccess] = useState<Record<string, string>>({})
 
   const fetchServices = useCallback(() => {
-    fetch(`${API}/services`)
+    fetch(`${CONTROL_API}/services`)
       .then(r => r.json())
       .then(data => setServices(data.services || []))
       .catch(() => {})
@@ -237,34 +457,67 @@ function PortManager() {
     return () => clearInterval(id)
   }, [fetchServices])
 
+  const waitForServiceStatus = async (name: string, status: ServiceInfo['status'], attempts = 10) => {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const response = await fetch(`${CONTROL_API}/services`)
+      const data = await response.json()
+      const nextServices = data.services || []
+      setServices(nextServices)
+      if (nextServices.find((svc: ServiceInfo) => svc.name === name)?.status === status) {
+        return
+      }
+      await new Promise(r => setTimeout(r, 1000))
+    }
+  }
+
   const startService = async (name: string) => {
-    setActionLoading(name)
+    setActionLoading(`${name}:start`)
     try {
-      await fetch(`${API}/services/${name}/start`, { method: 'POST' })
-      await new Promise(r => setTimeout(r, 2000))
-      fetchServices()
+      await fetch(`${CONTROL_API}/services/${name}/start`, { method: 'POST' })
+      await waitForServiceStatus(name, 'running')
+      if (name === 'dashboard') window.location.reload()
     } catch {}
     setActionLoading(null)
   }
 
   const stopService = async (name: string) => {
-    setActionLoading(name)
+    setActionLoading(`${name}:stop`)
     try {
-      await fetch(`${API}/services/${name}/stop`, { method: 'POST' })
-      await new Promise(r => setTimeout(r, 1000))
-      fetchServices()
+      await fetch(`${CONTROL_API}/services/${name}/stop`, { method: 'POST' })
+      await waitForServiceStatus(name, 'stopped')
     } catch {}
     setActionLoading(null)
   }
 
-  const restartService = async (name: string) => {
-    setActionLoading(name)
+  const updateLatest = async (name: string) => {
+    setUpdateLoading(prev => ({ ...prev, [name]: true }))
+    setUpdateError(prev => { const n = { ...prev }; delete n[name]; return n })
+    setUpdateSuccess(prev => { const n = { ...prev }; delete n[name]; return n })
     try {
-      await fetch(`${API}/services/${name}/stop`, { method: 'POST' })
-      await new Promise(r => setTimeout(r, 1500))
-      await fetch(`${API}/services/${name}/start`, { method: 'POST' })
-      await new Promise(r => setTimeout(r, 2000))
+      const res = await fetch(`${CONTROL_API}/v2/services/${name}/update-latest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ restart: true }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setUpdateSuccess(prev => ({ ...prev, [name]: data.message || 'Updated' }))
+      } else {
+        setUpdateError(prev => ({ ...prev, [name]: data.error?.message || 'Update failed' }))
+      }
       fetchServices()
+    } catch {
+      setUpdateError(prev => ({ ...prev, [name]: 'Network error' }))
+    }
+    setUpdateLoading(prev => ({ ...prev, [name]: false }))
+  }
+
+  const restartService = async (name: string) => {
+    setActionLoading(`${name}:restart`)
+    try {
+      await fetch(`${CONTROL_API}/services/${name}/restart`, { method: 'POST' })
+      await waitForServiceStatus(name, 'running', name === 'control-plane' ? 15 : 10)
+      if (name === 'dashboard' || name === 'control-plane') window.location.reload()
     } catch {}
     setActionLoading(null)
   }
@@ -290,22 +543,52 @@ function PortManager() {
               {svc.docker && <span className="pm-docker">docker</span>}
             </div>
             <div className="pm-item-desc">{svc.description}</div>
+            {updateError[svc.name] && <div className="pm-update-msg pm-update-error">{updateError[svc.name]}</div>}
+            {updateSuccess[svc.name] && <div className="pm-update-msg pm-update-success">{updateSuccess[svc.name]}</div>}
             <div className="pm-item-actions">
-              {actionLoading === svc.name ? (
+              {actionLoading?.startsWith(`${svc.name}:`) ? (
                 <span className="pm-busy">...</span>
               ) : svc.status === 'running' ? (
                 <>
-                  <button className="pm-btn pm-btn-restart" onClick={() => restartService(svc.name)} title="Restart">
-                    <RefreshCw size={12} />
-                  </button>
-                  <button className="pm-btn pm-btn-stop" onClick={() => stopService(svc.name)} title="Stop">
-                    <Power size={12} />
-                  </button>
+                  {svc.can_restart !== false && (
+                    <button className="pm-btn pm-btn-restart" onClick={() => restartService(svc.name)} title="Restart">
+                      <RefreshCw size={12} />
+                    </button>
+                  )}
+                  {svc.repo_backed && (
+                    <button
+                      className={`pm-btn pm-btn-update${updateLoading[svc.name] ? ' pm-btn-updating' : ''}`}
+                      onClick={() => updateLatest(svc.name)}
+                      disabled={!svc.update_supported || updateLoading[svc.name] || svc.update_in_progress}
+                      title={!svc.update_supported ? 'GitHub token not configured on server' : 'Update latest from GitHub'}
+                    >
+                      <Download size={12} className={updateLoading[svc.name] ? 'pm-spin' : ''} />
+                    </button>
+                  )}
+                  {svc.can_stop !== false && (
+                    <button className="pm-btn pm-btn-stop" onClick={() => stopService(svc.name)} title="Stop">
+                      <Power size={12} />
+                    </button>
+                  )}
                 </>
               ) : (
-                <button className="pm-btn pm-btn-start" onClick={() => startService(svc.name)} title="Start">
-                  <Power size={12} />
-                </button>
+                <>
+                  {svc.can_start !== false && (
+                    <button className="pm-btn pm-btn-start" onClick={() => startService(svc.name)} title="Start">
+                      <Power size={12} />
+                    </button>
+                  )}
+                  {svc.repo_backed && (
+                    <button
+                      className={`pm-btn pm-btn-update${updateLoading[svc.name] ? ' pm-btn-updating' : ''}`}
+                      onClick={() => updateLatest(svc.name)}
+                      disabled={!svc.update_supported || updateLoading[svc.name] || svc.update_in_progress}
+                      title={!svc.update_supported ? 'GitHub token not configured on server' : 'Update latest from GitHub'}
+                    >
+                      <Download size={12} className={updateLoading[svc.name] ? 'pm-spin' : ''} />
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -429,7 +712,19 @@ export default function App() {
   const [showBrowser, setShowBrowser] = useState(true)
   const [showPortManager, setShowPortManager] = useState(true)
   const [pickerLoading, setPickerLoading] = useState(false)
+  const [routePath, setRoutePath] = useState(window.location.pathname)
   const chatEndRef = useRef<HTMLDivElement>(null)
+
+  const navigate = useCallback((path: string) => {
+    window.history.pushState({}, '', path)
+    setRoutePath(path)
+  }, [])
+
+  useEffect(() => {
+    const handlePopState = () => setRoutePath(window.location.pathname)
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
 
   // Fetch health
   useEffect(() => {
@@ -620,9 +915,13 @@ export default function App() {
           <button className="sidebar-toggle" onClick={() => setShowSidebar(!showSidebar)}>
             <Menu size={20} />
           </button>
-          <h1 className="logo" onClick={() => { setSessionId(null); setChat([]) }} style={{ cursor: 'pointer' }}>Control Plane</h1>
+          <h1 className="logo" onClick={() => { navigate('/'); setSessionId(null); setChat([]) }} style={{ cursor: 'pointer' }}>Control Plane</h1>
         </div>
         <div className="header-right">
+          <button className="nav-link" onClick={() => navigate('/remote-desktop')}>
+            <Monitor size={14} />
+            Remote Desktop
+          </button>
           {health && (
             <div className="health-strip">
               <StatusDot status={health.agent_core?.status || 'unknown'} /><span>agent-core</span>
@@ -664,7 +963,9 @@ export default function App() {
 
       {/* Main chat area */}
       <main className="main">
-        {!sessionId ? (
+        {routePath === '/remote-desktop' ? (
+          <RemoteDesktopPage />
+        ) : !sessionId ? (
           <div className="welcome">
             <h2>Workstation Agent</h2>
             <p>Create or select a session to start working.</p>
