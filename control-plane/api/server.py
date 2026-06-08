@@ -1,3 +1,4 @@
+import asyncio
 #!/usr/bin/env python3
 """
 Control Plane API — FastAPI server wrapping shared control-plane services.
@@ -38,6 +39,7 @@ from sessions.session_manager import (
 SESSIONS_DIR = Path(os.environ.get("SESSIONS_DIR", "/opt/workstation/sessions"))
 KNOWLEDGE_DIR = Path(os.environ.get("KNOWLEDGE_DIR", "/opt/workstation/knowledge"))
 LITELLM_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
+AGENT_CORE_URL = os.environ.get("AGENT_CORE_URL", "http://localhost:3210")
 LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", "fdfe750a587cddaedd90f39afb861f67377b155b7fdbe5d39d53437b29a700ed")
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-v4-flash")
 
@@ -130,7 +132,7 @@ def get_health():
     import urllib.request
     checks = {}
 
-    for name, url in [("litellm", f"{LITELLM_URL}/health/liveliness"), ("openhands", OPENHANDS_URL), ("bridge", f"{BRIDGE_URL}/sessions")]:
+    for name, url in [("agent_core", f"{AGENT_CORE_URL}/actions"), ("litellm", f"{LITELLM_URL}/health/liveliness"), ("openhands", f"{OPENHANDS_URL}/api/options/config"), ("bridge", f"{BRIDGE_URL}/sessions")]:
         try:
             urllib.request.urlopen(url, timeout=3)
             checks[name] = {"status": "healthy", "url": url.rsplit("/", 1)[0] if "/" in url[8:] else url}
@@ -354,42 +356,118 @@ class ChatMessage(BaseModel):
     instruction: str
     model: Optional[str] = None
     executor: Optional[str] = None
+    execution_mode: Optional[str] = "finite"  # finite | open_ended | loop
 
 
 # --- Chat/Task endpoint (end-to-end prompt flow) ---
+
+# Background task tracking
+_running_tasks: dict[str, asyncio.Task] = {}
 
 @app.post("/api/sessions/{session_id}/chat")
 async def session_chat(session_id: str, body: ChatMessage):
     """Submit a prompt for execution in a session.
 
     Flow: route → policy check → advisory plan → execute via OpenHands → events.
+    Runs execution in background so event polling works during execution.
     """
     from execution.prompt_handler import handle_prompt, TaskState
-    try:
-        result = await handle_prompt(
-            session_id=session_id,
-            instruction=body.instruction,
-            model=body.model or DEFAULT_MODEL,
-        )
-        status_code = 200
-        if result.state == TaskState.BLOCKED:
-            status_code = 202  # Accepted but blocked
-        elif result.state == TaskState.FAILED:
-            status_code = 500
+    import uuid as _uuid
 
-        return {
-            "task_id": result.task_id,
-            "session_id": result.session_id,
-            "state": result.state.value,
-            "message": result.message,
-            "routing_decision": result.routing_decision,
-            "plan_summary": result.plan_summary,
-            "error": result.error,
-            "events_path": result.events_path,
-            "metadata": result.metadata,
-        }
-    except Exception as e:
-        raise HTTPException(500, f"Prompt handling failed: {e}") from e
+    task_id = f"task-{_uuid.uuid4().hex[:12]}"
+
+    async def _run_in_background():
+        try:
+            result = await handle_prompt(
+                session_id=session_id,
+                instruction=body.instruction,
+                model=body.model or DEFAULT_MODEL,
+                execution_mode=body.execution_mode or "finite",
+            )
+            return result
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return None
+
+    bg_task = asyncio.create_task(_run_in_background())
+    _running_tasks[session_id] = bg_task
+
+    # Wait briefly to capture initial events (routing, planning)
+    await asyncio.sleep(0.5)
+
+    # If task completed quickly, return full result
+    if bg_task.done():
+        result = bg_task.result()
+        if result:
+            return {
+                "task_id": result.task_id,
+                "session_id": result.session_id,
+                "state": result.state.value,
+                "message": result.message,
+                "routing_decision": getattr(result, "routing_decision", ""),
+                "plan_summary": str(getattr(result, "plan_summary", ""))[:200],
+                "error": getattr(result, "error", ""),
+                "events_path": str(getattr(result, "events_path", "")),
+                "metadata": getattr(result, "metadata", {}),
+            }
+        return {"task_id": task_id, "session_id": session_id, "state": "failed", "message": "Execution error"}
+
+    # Task still running — return immediately so event polling can work
+    return {
+        "task_id": task_id,
+        "session_id": session_id,
+        "state": "working",
+        "message": "Execution started. Poll events for progress.",
+    }
+
+
+
+
+@app.get("/api/sessions/{session_id}/chat/status")
+async def session_chat_status(session_id: str):
+    """Check if background chat execution is complete."""
+    from execution.prompt_handler import TaskState
+    bg_task = _running_tasks.get(session_id)
+    if not bg_task:
+        return {"state": "unknown", "message": "No active task"}
+    if not bg_task.done():
+        return {"state": "working", "message": "Still executing..."}
+    result = bg_task.result()
+    _running_tasks.pop(session_id, None)
+    if not result:
+        return {"state": "failed", "message": "Execution error"}
+    return {
+        "task_id": result.task_id,
+        "session_id": result.session_id,
+        "state": result.state.value,
+        "message": result.message,
+        "routing_decision": getattr(result, "routing_decision", ""),
+        "plan_summary": str(getattr(result, "plan_summary", ""))[:200],
+        "error": getattr(result, "error", ""),
+    }
+
+@app.get("/api/sessions/{session_id}/events/stream")
+async def stream_session_events(session_id: str, after: int = 0):
+    """Stream events for a session via SSE. Returns new events since 'after' sequence number."""
+    import json as _json
+    events_file = SESSIONS_DIR / session_id / "events" / "events.jsonl"
+    events = []
+    if events_file.exists():
+        all_lines = events_file.read_text().strip().split("\n")
+        for idx, line in enumerate(all_lines):
+            if line.strip():
+                try:
+                    ev = _json.loads(line)
+                    # Use index as fallback sequence number
+                    seq = ev.get("sequence", idx + 1)
+                    if seq > after:
+                        ev["_seq"] = seq
+                        events.append(ev)
+                except Exception:
+                    continue
+    total = len(events) + after
+    return {"events": events, "total": total}
 
 
 @app.get("/api/sessions/{session_id}/state")
@@ -413,3 +491,162 @@ def get_session_events(session_id: str, limit: int = 100):
             except json.JSONDecodeError:
                 continue
     return {"events": events[-limit:], "total": len(events)}
+
+
+@app.get("/api/browse")
+def browse_directory(path: str = "/opt/workstation/repos"):
+    """Browse filesystem directories for repo selection."""
+    from pathlib import Path as P
+    target = P(path).resolve()
+    # Security: only allow browsing under safe roots
+    safe_roots = [P("/opt/workstation"), P("/home/agent"), P("/tmp")]
+    if not any(str(target).startswith(str(r)) for r in safe_roots):
+        return {"error": "Access denied", "path": str(target), "entries": []}
+    if not target.exists():
+        return {"error": "Path not found", "path": str(target), "entries": []}
+    if not target.is_dir():
+        return {"error": "Not a directory", "path": str(target), "entries": []}
+    entries = []
+    try:
+        for item in sorted(target.iterdir()):
+            if item.name.startswith('.') and item.name != '.git':
+                continue
+            if item.is_dir():
+                is_repo = (item / ".git").exists()
+                entries.append({
+                    "name": item.name,
+                    "path": str(item),
+                    "is_dir": True,
+                    "is_repo": is_repo,
+                })
+    except PermissionError:
+        return {"error": "Permission denied", "path": str(target), "entries": []}
+    return {"path": str(target), "entries": entries, "parent": str(target.parent)}
+
+
+@app.get("/api/services")
+def list_services():
+    """List known services with port, status, and PID."""
+    import subprocess as sp
+    services = [
+        {"name": "agent-core", "port": 3210, "description": "Advisory memory/planning"},
+        {"name": "litellm", "port": 4000, "description": "LLM proxy gateway"},
+        {"name": "control-plane", "port": 9877, "description": "FastAPI orchestrator"},
+        {"name": "openhands", "port": 3000, "description": "Execution runtime (Docker)"},
+        {"name": "dashboard", "port": 5173, "description": "Web UI (Vite dev)"},
+    ]
+    # Check which ports are actually listening
+    try:
+        result = sp.run(["ss", "-tlnp"], capture_output=True, text=True, timeout=5)
+        lines = result.stdout
+    except Exception:
+        lines = ""
+    for svc in services:
+        port_str = f":{svc['port']}"
+        listening = port_str in lines
+        svc["status"] = "running" if listening else "stopped"
+        svc["pid"] = None
+        if listening:
+            for line in lines.split("\n"):
+                if port_str in line and "pid=" in line:
+                    try:
+                        pid_part = line.split("pid=")[1].split(",")[0]
+                        svc["pid"] = int(pid_part)
+                    except (IndexError, ValueError):
+                        pass
+                    break
+    # Also check docker for openhands
+    try:
+        dr = sp.run(["docker", "ps", "--format", "{{.Names}} {{.Status}}"],
+                    capture_output=True, text=True, timeout=5)
+        if "openhands" in dr.stdout:
+            for svc in services:
+                if svc["name"] == "openhands":
+                    svc["status"] = "running"
+                    svc["docker"] = True
+    except Exception:
+        pass
+    return {"services": services}
+
+
+@app.post("/api/services/{name}/start")
+def start_service(name: str):
+    """Start a known service."""
+    import subprocess as sp
+    commands = {
+        "agent-core": "cd /opt/workstation/repos/agent-core && nohup node dist/index.js > /opt/workstation/logs/agent-core.log 2>&1 &",
+        "litellm": "nohup litellm --config /opt/workstation/litellm-config.yaml --port 4000 > /opt/workstation/logs/litellm.log 2>&1 &",
+        "openhands": "docker run -d --name openhands --network host -v /opt/workstation/repos:/opt/workspace -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/all-hands-ai/openhands:latest",
+        "dashboard": "cd /opt/workstation/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
+    }
+    if name not in commands:
+        return {"error": f"Unknown service: {name}", "started": False}
+    try:
+        sp.run(commands[name], shell=True, timeout=10)
+        return {"message": f"Started {name}", "started": True}
+    except Exception as e:
+        return {"error": str(e), "started": False}
+
+
+@app.post("/api/services/{name}/stop")
+def stop_service(name: str):
+    """Stop a known service by killing its port or docker container."""
+    import subprocess as sp
+    ports = {"agent-core": 3210, "litellm": 4000, "openhands": 3000, "dashboard": 5173}
+    if name == "openhands":
+        try:
+            sp.run(["docker", "stop", "openhands"], timeout=15)
+            sp.run(["docker", "rm", "openhands"], timeout=5)
+            return {"message": "Stopped openhands container", "stopped": True}
+        except Exception as e:
+            return {"error": str(e), "stopped": False}
+    if name not in ports:
+        return {"error": f"Unknown service: {name}", "stopped": False}
+    port = ports[name]
+    try:
+        sp.run(f"fuser -k {port}/tcp", shell=True, timeout=5)
+        return {"message": f"Stopped {name} (port {port})", "stopped": True}
+    except Exception as e:
+        return {"error": str(e), "stopped": False}
+
+
+@app.post("/api/open-file-manager")
+def open_file_manager(path: str = "/opt/workstation/repos"):
+    """Open the OS file manager at a given path."""
+    import subprocess as sp
+    try:
+        sp.Popen(["xdg-open", path], env={**os.environ, "DISPLAY": ":10", "XAUTHORITY": "/home/agent/.Xauthority"})
+        return {"message": f"Opened file manager at {path}", "opened": True}
+    except Exception as e:
+        return {"error": str(e), "opened": False}
+
+
+
+@app.post("/api/pick-folder")
+def pick_folder(start_path: str = "/opt/workstation/repos"):
+    """Open a native folder picker dialog on the visible desktop."""
+    import subprocess as sp
+    try:
+        result = sp.run(
+            ["/opt/workstation/pick-folder.sh", start_path],
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return {"path": result.stdout.strip(), "selected": True}
+        return {"path": None, "selected": False, "message": "No folder selected"}
+    except sp.TimeoutExpired:
+        return {"path": None, "selected": False, "message": "Dialog timed out"}
+    except Exception as e:
+        return {"error": str(e), "selected": False}
+
+
+@app.post("/api/prewarm-picker")
+def prewarm_picker():
+    """Pre-warm the zenity process so Browse opens faster next time."""
+    import subprocess as sp
+    # Just verify zenity is accessible - no actual window opened
+    try:
+        sp.run(["zenity", "--version"], capture_output=True, timeout=2)
+        return {"ready": True}
+    except Exception:
+        return {"ready": False}
