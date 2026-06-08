@@ -500,6 +500,24 @@ function PortManager() {
         body: JSON.stringify({ restart: true }),
       })
       const data = await res.json()
+      if (data.ok && data.deferred) {
+        // Self-update: server will restart after this response.
+        // Poll until the server comes back, then refresh.
+        setUpdateSuccess(prev => ({ ...prev, [name]: 'Updating... server will reload shortly.' }))
+        const pollUntilBack = async () => {
+          for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 2000))
+            try {
+              const h = await fetch(`${CONTROL_API}/health`, { signal: AbortSignal.timeout(3000) })
+              if (h.ok) { fetchServices(); return }
+            } catch { /* server still restarting */ }
+          }
+        }
+        await pollUntilBack()
+        setUpdateSuccess(prev => ({ ...prev, [name]: 'Updated and reloaded.' }))
+        setUpdateLoading(prev => ({ ...prev, [name]: false }))
+        return
+      }
       if (data.ok) {
         setUpdateSuccess(prev => ({ ...prev, [name]: data.message || 'Updated' }))
       } else {
