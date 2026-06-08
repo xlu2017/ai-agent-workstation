@@ -13,6 +13,7 @@ A production-quality, self-hosted development workstation for AI coding agents. 
 | Control Plane | Running on port 9877 |
 | DeepSeek API | Active (V4-Flash primary) |
 | Remote Desktop | xRDP on port 3389 (XFCE 4) |
+| Browser Remote Desktop | Apache Guacamole via `/remote-desktop` and `/guacamole/` |
 | Node Exporter | Active on port 9100 |
 | Chrome | Installed with remote debugging support |
 | BorgBackup | Configured, daily 3AM cron |
@@ -34,6 +35,9 @@ ssh -L 9877:localhost:9877 -L 4000:localhost:4000 agent@<tailscale-hostname>
 
 # RDP for graphical desktop, only when allowed by Tailscale/provider policy:
 # Host: <tailscale-hostname>, Port: 3389, User: agent
+
+# Browser remote desktop through Guacamole:
+# See docs/operations/remote-desktop.md
 ```
 
 ## Architecture
@@ -54,6 +58,7 @@ Hetzner Cloud CCX33 ($74/mo)
 ├── Observability (prometheus-node-exporter :9100)
 ├── Chrome (remote debugging :9222)
 ├── xRDP + XFCE4 (remote desktop :3389)
+├── Apache Guacamole (browser remote desktop via private :8080 / proxy)
 ├── UI-Bridge Service (source map resolution :9876)
 └── Security (Tailscale SSH, provider firewall, chrony, SSH key-only fallback)
 ```
@@ -91,6 +96,7 @@ See [docs/architecture.md](docs/architecture.md) for full details.
 │   └── ARCHITECTURE.md
 ├── docs/
 │   ├── architecture.md             # System architecture
+│   ├── operations/remote-desktop.md # Browser remote desktop via Guacamole
 │   ├── provider-comparison.md      # Infra & API comparison
 │   ├── cost-model.md               # Budget projections
 │   ├── operations.md               # Day-to-day operations
