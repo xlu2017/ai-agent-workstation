@@ -2,14 +2,16 @@
 ExecutionAdapter interface — low-level action execution abstraction.
 
 Implementations:
-  OpenHandsExecutorAdapter  — primary coding execution backend
-  FallbackExecutorAdapter   — dev/test/simple local fallback only
+  AgenticExecutor       — primary local agentic coding executor (LLM tool-calling loop)
+  DeterministicExecutor — fast deterministic executor for simple local operations
 """
 
 from __future__ import annotations
 
 import abc
 from typing import Any
+
+from execution.results import ExecutionResult
 
 
 class ExecutionAdapter(abc.ABC):
@@ -23,17 +25,9 @@ class ExecutionAdapter(abc.ABC):
         action_name: str,
         params: dict[str, Any],
         context: dict[str, Any],
-    ) -> dict[str, Any]:
+    ) -> ExecutionResult:
         """Execute a single action in a worktree.
 
-        Returns:
-            {
-                status: succeeded | failed | blocked | skipped,
-                backend: openhands | fallback,
-                output: {},
-                error: "",
-                files_touched: [],
-                duration_ms: int,
-            }
+        Returns an ExecutionResult with normalized status, events, and output.
         """
         ...

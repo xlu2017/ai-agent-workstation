@@ -44,7 +44,7 @@ interface SessionState {
 interface Health {
   agent_core: { status: string; error?: string }
   litellm: { status: string; url?: string; error?: string }
-  openhands: { status: string; error?: string }
+  vendor_runtime: { status: string; error?: string }
   bridge: { status: string; error?: string }
   disk: { used: string; available: string; percent: string }
   memory: { total: string; used: string; available: string }
@@ -926,7 +926,7 @@ export default function App() {
             <div className="health-strip">
               <StatusDot status={health.agent_core?.status || 'unknown'} /><span>agent-core</span>
               <StatusDot status={health.litellm?.status || 'unknown'} /><span>LiteLLM</span>
-              <StatusDot status={health.openhands?.status || 'unknown'} /><span>OpenHands</span>
+              <StatusDot status={health.vendor_runtime?.status || 'unknown'} /><span>Runtime</span>
               <span className="health-ports">{health.active_ports?.join(', ')}</span>
             </div>
           )}

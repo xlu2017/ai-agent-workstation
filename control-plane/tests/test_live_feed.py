@@ -682,7 +682,7 @@ class TestAgentCoreClient:
             status="failed",
             output={"stderr": "login.test.ts failed"},
             duration_ms=8400,
-            executor="openhands",
+            executor="agentic",
         )
         assert rec.status == "failed"
         assert rec.duration_ms == 8400

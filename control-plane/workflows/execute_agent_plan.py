@@ -9,7 +9,7 @@ For each plan step:
   5. Runtime validate step
   6. If blocked: emit ACTION_BLOCKED, record outcome, decide continue/stop
   7. Choose execution path:
-       atomic -> ExecutionRouter -> OpenHands/fallback
+       atomic -> ExecutionRouter -> AgenticExecutor/DeterministicExecutor
        composite -> CompositeActionRouter -> LangGraph -> ExecutionRouter
   8. Execute step
   9. Emit ACTION_COMPLETED or ACTION_FAILED
@@ -33,9 +33,17 @@ from adapters.composite_action.base import is_composite_action
 from adapters.composite_action.router import CompositeActionRouter
 from adapters.execution.router import ExecutionRouter
 from agent_core_client.client import AgentCoreClient, OutcomeRecord
+from execution.redaction import redact_output, redact_value
+from execution.results import ExecutionResult
 from execution.runtime_validator import RuntimeValidator
 from live_feed.events import EventStore, EventType, create_event
 from sessions.models import SessionStatus, SessionStore
+
+# Platform-native actions that executors should not claim credit for
+_PLATFORM_ONLY_EVENT_TYPES = {
+    "pr_created", "pr_merged", "ci_passed",
+    "service_deployed", "validation_passed",
+}
 
 
 class PlanExecutor:
@@ -182,8 +190,37 @@ class PlanExecutor:
                 )
             duration_ms = int(time.time() * 1000) - start_ms
 
-            status = exec_result.get("status", "failed")
+            # Normalize: ExecutionResult (dataclass) or dict (legacy)
+            if isinstance(exec_result, ExecutionResult):
+                status = exec_result.status
+                backend = exec_result.backend
+                error = exec_result.error
+                output = exec_result.output
+                files_touched = exec_result.files_touched
+                executor_events = exec_result.events
+            else:
+                status = exec_result.get("status", "failed")
+                backend = exec_result.get("backend", "")
+                error = exec_result.get("error", "")
+                output = exec_result.get("output", {})
+                files_touched = exec_result.get("files_touched", [])
+                executor_events = []
+
             steps_executed += 1
+
+            # Append executor events to EventStore (filtered)
+            for evt in executor_events:
+                evt_type = getattr(evt, "event_type", "") if hasattr(evt, "event_type") else ""
+                if evt_type in _PLATFORM_ONLY_EVENT_TYPES:
+                    continue
+                self.event_store.append(
+                    create_event(
+                        EventType.ACTION_PROGRESS, session_id,
+                        action_name=action_name,
+                        step_index=i,
+                        executor_event=redact_value(evt.to_dict() if hasattr(evt, "to_dict") else {}),
+                    )
+                )
 
             # 9. Emit ACTION_COMPLETED or ACTION_FAILED
             if status == "succeeded":
@@ -192,10 +229,10 @@ class PlanExecutor:
                         EventType.ACTION_COMPLETED, session_id,
                         action_name=action_name,
                         status=status,
-                        backend=exec_result.get("backend", ""),
+                        backend=backend,
                         duration_ms=duration_ms,
                         step_index=i,
-                        files_touched=exec_result.get("files_touched", []),
+                        files_touched=files_touched,
                     )
                 )
             else:
@@ -204,8 +241,8 @@ class PlanExecutor:
                         EventType.ACTION_FAILED, session_id,
                         action_name=action_name,
                         status=status,
-                        error=exec_result.get("error", ""),
-                        backend=exec_result.get("backend", ""),
+                        error=error,
+                        backend=backend,
                         duration_ms=duration_ms,
                         step_index=i,
                     )
@@ -216,33 +253,36 @@ class PlanExecutor:
             await self._record_outcome(
                 session_id, action_name, params,
                 status=status,
-                output=exec_result.get("output", {}),
-                error=exec_result.get("error", ""),
+                output=redact_value(output),
+                error=redact_output(error),
                 duration_ms=duration_ms,
                 rationale=rationale,
-                files_touched=exec_result.get("files_touched", []),
-                executor=exec_result.get("backend", ""),
+                files_touched=files_touched,
+                executor=backend,
             )
 
             # 11. If commit succeeded, emit COMMIT_CREATED
             if action_name == "commit" and status == "succeeded":
-                commit_hash = exec_result.get("output", {}).get("commit_hash", "")
-                self.event_store.append(
-                    create_event(
-                        EventType.COMMIT_CREATED, session_id,
-                        commit_hash=commit_hash,
-                        message=params.get("message", ""),
-                        trigger="plan_execution",
+                commit_hash = ""
+                if isinstance(output, dict):
+                    commit_hash = output.get("commit_hash", "")
+                if commit_hash:
+                    self.event_store.append(
+                        create_event(
+                            EventType.COMMIT_CREATED, session_id,
+                            commit_hash=commit_hash,
+                            message=params.get("message", ""),
+                            trigger="plan_execution",
+                        )
                     )
-                )
 
             results.append({
                 "step_index": i,
                 "action_name": action_name,
                 "status": status,
-                "backend": exec_result.get("backend", ""),
+                "backend": backend,
                 "duration_ms": duration_ms,
-                "files_touched": exec_result.get("files_touched", []),
+                "files_touched": files_touched,
             })
 
         # Emit PLAN_COMPLETED

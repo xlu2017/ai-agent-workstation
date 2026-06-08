@@ -26,7 +26,7 @@ jubilant-goggles owns:
   - Durable workflow execution (Hatchet)
   - Runtime validation (permissions, paths, sessions)
   - Composite action subflows (LangGraph)
-  - Execution backends (OpenHands, fallback)
+  - Execution backends (AgenticExecutor, DeterministicExecutor)
   - Commits and PRs
 
 Repo context adapters must NOT be added to jubilant-goggles.
@@ -45,9 +45,9 @@ User prompt
   → Hatchet execute_agent_plan workflow
   → per-step runtime validation
   → if atomic action:
-       ExecutionRouter → OpenHands or Fallback
+       ExecutionRouter → AgenticExecutor or DeterministicExecutor
   → if composite action:
-       CompositeActionRouter → LangGraph → ExecutionRouter → OpenHands/Fallback
+       CompositeActionRouter → LangGraph → ExecutionRouter → AgenticExecutor/DeterministicExecutor
   → live feed events (ACTION_STARTED, ACTION_COMPLETED, etc.)
   → agent-core POST /actions/outcome
 ```
@@ -75,26 +75,29 @@ HATCHET_CLIENT_TOKEN=...
 
 ### 2. ExecutionAdapter (Action Backends)
 
-| Adapter | Backend | Actions |
-|---------|---------|---------|
-| `OpenHandsExecutorAdapter` | OpenHands | All coding actions (primary) |
-| `FallbackExecutorAdapter` | Local subprocess | grep, read_file, run_tests, summarize_diff, commit, apply_patch |
+| Executor | Backend Name | Actions |
+|----------|-------------|---------|
+| `AgenticExecutor` | `agentic` | Primary local agentic coding executor — LLM tool-calling loop for bounded actions (autonomous_code_edit, investigate_and_patch, repair_test_failure, apply_patch with intent) |
+| `DeterministicExecutor` | `deterministic` | Fast deterministic executor for simple local operations (grep, read_file, list_files, apply_patch with exact content, run_tests with explicit command, commit) |
 
-OpenHands is the primary coding execution backend. The fallback executor is for dev/test only.
+**AgenticExecutor** is the primary coding execution backend. It uses a local LLM tool-calling loop to inspect files, edit files, run commands, and emit granular events. It executes one bounded assigned action and does not decide the next platform step after its assigned action completes.
+
+**DeterministicExecutor** is the fast simple/fallback executor for cheap, direct actions. No LLM loop, no autonomous decisions.
 
 Configuration:
 ```
-EXECUTOR_BACKEND=openhands | fallback
-OPENHANDS_ENABLED=true
-OPENHANDS_BASE_URL=http://localhost:...
-OPENHANDS_WORKSPACE_BASE=/opt/workstation/repos
-ALLOW_FALLBACK_EXECUTOR=false
+EXECUTOR_BACKEND=agentic | deterministic
+AGENTIC_EXECUTOR_ENABLED=true
+AGENTIC_EXECUTOR_MAX_ITERATIONS=50
+AGENTIC_EXECUTOR_COMMAND_TIMEOUT=60
+ALLOW_DETERMINISTIC_EXECUTOR=true
 ```
 
 ExecutionRouter rules:
-1. `EXECUTOR_BACKEND=openhands` → OpenHands
-2. `EXECUTOR_BACKEND=fallback` → Fallback
-3. Default: OpenHands if `OPENHANDS_ENABLED=true`, else fallback if `ALLOW_FALLBACK_EXECUTOR=true`, else fail
+1. `EXECUTOR_BACKEND=agentic` → AgenticExecutor
+2. `EXECUTOR_BACKEND=deterministic` → DeterministicExecutor
+3. Default: AgenticExecutor if `AGENTIC_EXECUTOR_ENABLED=true`, else DeterministicExecutor if `ALLOW_DETERMINISTIC_EXECUTOR=true`, else fail
+4. Context-aware routing: `apply_patch` with `intent` → agentic; `apply_patch` with `patch`/`content` → deterministic; `run_tests` with repair → agentic; `run_tests` with explicit command → deterministic
 
 ### 3. CompositeActionAdapter (Multi-Step Subflows)
 
@@ -126,9 +129,17 @@ Validates before execution (separate from agent-core schema validation):
 - Commit requires allowed_actions + non-empty message
 - Composite actions require LangGraph enabled or fallback mode
 
-### 5. execute_agent_plan Workflow
+### 5. execute_agent_plan Workflow (PlanExecutor)
 
-The core workflow that runs an advisory plan step-by-step:
+The core workflow that runs an advisory plan step-by-step.
+
+**PlanExecutor is the action sequence runner, not the planner.** agent-core is the planner and validator, not the executor.
+
+Core invariant:
+- Executor decides **how** to complete the current assigned action.
+- Planner decides **what** action should happen next.
+- Workflow decides **when** to ask for another plan.
+- Platform decides **whether** an action is allowed.
 
 ```
 for each step:
@@ -140,9 +151,10 @@ for each step:
   6. If blocked → ACTION_BLOCKED, record outcome
   7. Route: atomic → ExecutionRouter, composite → CompositeActionRouter
   8. Execute
-  9. Emit ACTION_COMPLETED or ACTION_FAILED
-  10. Record outcome to agent-core
-  11. If commit succeeded → COMMIT_CREATED
+  9. Append executor events to EventStore (redacted, filtered)
+  10. Emit ACTION_COMPLETED or ACTION_FAILED
+  11. Record outcome to agent-core (redacted output/error)
+  12. If commit succeeded → COMMIT_CREATED
 ```
 
 Plan modes:
@@ -151,6 +163,49 @@ Plan modes:
 - **open_ended**: Run once, emit PLAN_COMPLETED with `needs_refresh=true`
 
 No uncontrolled infinite loops.
+
+### 6. Redaction
+
+Central redaction helper (`execution/redaction.py`) strips secrets from all outputs before they reach events, API responses, or agent-core outcome records.
+
+Redacted patterns:
+- `ghp_*`, `github_pat_*`, `sk-*`, `tskey-*`, Bearer tokens, Authorization headers
+- `password=`, `RDP_PASSWORD`, `TAILSCALE_AUTH_KEY`, `PAT` values, SSH private keys
+
+Allowed through:
+- `secret_name`, `secret_ref`, `$PAT` as a label
+
+## Execution Result Contract
+
+All executors return a normalized `ExecutionResult`:
+
+```python
+{
+    "status": "succeeded | failed | blocked | skipped | cancelled | needs_review",
+    "backend": "agentic | deterministic",
+    "summary": "string",
+    "output": {},
+    "error": "",
+    "files_touched": [],
+    "events": [],
+    "duration_ms": 0,
+    "redacted": true
+}
+```
+
+Executor events use normalized `ExecutionEvent`:
+
+```python
+{
+    "event_type": "action_progress | command_executed | file_read | file_edited | file_created | test_completed | agent_error",
+    "title": "short title",
+    "summary": "short user-visible summary",
+    "status": "running | completed | failed | blocked | skipped",
+    "metadata": {},
+    "redacted": true,
+    "source": "agentic | deterministic"
+}
+```
 
 ## Event Types
 
@@ -176,17 +231,18 @@ COMMIT_CREATED      — real commit succeeded (never faked)
 Production:
 ```
 WORKFLOW_BACKEND=hatchet
-EXECUTOR_BACKEND=openhands
+EXECUTOR_BACKEND=agentic
+AGENTIC_EXECUTOR_ENABLED=true
 LANGGRAPH_ENABLED=false
-ALLOW_FALLBACK_EXECUTOR=false
+ALLOW_DETERMINISTIC_EXECUTOR=false
 ALLOW_FALLBACK_COMPOSITE_ACTIONS=false
 ```
 
 Test:
 ```
 WORKFLOW_BACKEND=inprocess
-EXECUTOR_BACKEND=fallback
-ALLOW_FALLBACK_EXECUTOR=true
+EXECUTOR_BACKEND=deterministic
+ALLOW_DETERMINISTIC_EXECUTOR=true
 ```
 
 ## File Layout
@@ -200,17 +256,29 @@ control-plane/
 │   │   └── inprocess_adapter.py  — Dev/test asyncio adapter
 │   ├── execution/
 │   │   ├── base.py               — ExecutionAdapter ABC
-│   │   ├── openhands_adapter.py  — OpenHands backend
-│   │   ├── fallback_adapter.py   — Local fallback executor
-│   │   └── router.py             — ExecutionRouter
+│   │   ├── openhands_adapter.py  — Compatibility shim → AgenticExecutor
+│   │   ├── fallback_adapter.py   — Compatibility shim → DeterministicExecutor
+│   │   └── router.py             — ExecutionRouter (capability-aware)
 │   └── composite_action/
 │       ├── base.py               — CompositeActionAdapter ABC
 │       ├── langgraph_adapter.py  — LangGraph composite subflows
 │       └── router.py             — CompositeActionRouter
 ├── execution/
+│   ├── __init__.py               — Package init
+│   ├── agentic_executor.py       — AgenticExecutor (LLM tool-calling loop)
+│   ├── deterministic_executor.py — DeterministicExecutor (fast direct actions)
+│   ├── results.py                — ExecutionResult / ExecutionEvent contracts
+│   ├── redaction.py              — Central secret redaction
+│   ├── router.py                 — Canonical ExecutionRouter
+│   ├── prompt_handler.py         — End-to-end prompt orchestration
 │   └── runtime_validator.py      — Pre-execution platform validation
+├── executors/
+│   ├── base.py                   — TaskPacket / ExecutorResult
+│   ├── openhands_adapter.py      — Compatibility shim → AgenticExecutor
+│   ├── openhands_executor.py     — Compatibility shim → AgenticExecutor
+│   └── direct_executor.py        — Compatibility shim → AgenticExecutor
 ├── workflows/
-│   └── execute_agent_plan.py     — Plan executor (Hatchet workflow logic)
+│   └── execute_agent_plan.py     — PlanExecutor (Hatchet workflow logic)
 ├── sessions/
 │   ├── controller.py             — Wired to agent-core + WorkflowAdapter
 │   ├── routes.py                 — Async FastAPI endpoints

@@ -83,7 +83,7 @@ class CompositeActionRouter:
             )
 
         if self._allow_fallback and self._execution_router is not None:
-            # Route to OpenHands/fallback as a single high-level instruction
+            # Route to agentic/deterministic executor as a single high-level instruction
             start_ms = int(time.time() * 1000)
             result = await self._execution_router.execute_action(
                 session_id=session_id,
