@@ -25,12 +25,19 @@ import logging
 import os
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+# Dedicated thread pool for agent execution (avoids exhausting asyncio's default pool)
+_agent_executor = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("AGENT_POOL_SIZE", "8")),
+    thread_name_prefix="agent",
+)
 
 def _sessions_dir() -> Path:
     return Path(os.environ.get("SESSIONS_DIR", "/opt/workstation/sessions"))
@@ -339,7 +346,15 @@ async def _execute_via_openhands(
             pass
 
     if not worktree_path or not Path(worktree_path).exists():
-        worktree_path = "/opt/workstation/repos/agent-core"
+        # Fall back to DEFAULT_REPO_PATH env var, then error
+        worktree_path = os.environ.get("DEFAULT_REPO_PATH", "")
+        if not worktree_path or not Path(worktree_path).exists():
+            return {
+                "status": "failed",
+                "summary": "No valid workspace found for session. Set DEFAULT_REPO_PATH or create session with a repo.",
+                "files_edited": [],
+                "duration_seconds": 0,
+            }
 
     adapter = OpenHandsExecutorAdapter()
 
@@ -365,7 +380,7 @@ async def _execute_via_openhands(
     start = time.time()
     try:
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, adapter.run_task, session_id, packet)
+        result = await loop.run_in_executor(_agent_executor, adapter.run_task, session_id, packet)
         duration = time.time() - start
         # Get raw output from events (last executor_finished event)
         raw_output = ""
