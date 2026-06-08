@@ -51,6 +51,7 @@ class TaskPacket:
     staleness_warnings: list = field(default_factory=list)
     risk_level: str = "low"  # low, medium, high
     model: str = "deepseek-v4-flash"
+    execution_mode: str = "finite"  # finite | open_ended | loop
 
     def to_markdown(self) -> str:
         parts = []

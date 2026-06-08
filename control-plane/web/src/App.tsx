@@ -81,36 +81,72 @@ function EventTimeline({ events }: { events: SessionEvent[] }) {
   )
 }
 
+function getProgressLabel(events: any[]): { stage: string; detail: string; icon: string } {
+  if (!events || events.length === 0) return { stage: 'Starting', detail: 'Preparing...', icon: '\u23f3' }
+  const last = events[events.length - 1]
+  const et = last.event_type || ''
+  const msg = last.data?.message || ''
+  const tool = last.data?.tool || ''
+  
+  if (et === 'user_prompt_received') return { stage: 'Received', detail: 'Processing prompt...', icon: '\ud83d\udce8' }
+  if (et === 'routing_decision_made') return { stage: 'Routing', detail: msg.slice(0, 80), icon: '\ud83d\udee4\ufe0f' }
+  if (et === 'plan_requested') return { stage: 'Planning', detail: 'Requesting plan from agent-core...', icon: '\ud83e\udde0' }
+  if (et === 'plan_generated') return { stage: 'Planned', detail: 'Plan ready', icon: '\ud83d\udccb' }
+  if (et === 'action_started') return { stage: 'Starting executor', detail: msg, icon: '\u26a1' }
+  if (et === 'executor_started') return { stage: 'Executor ready', detail: msg, icon: '\ud83d\ude80' }
+  if (et === 'action_progress') {
+    if (tool) return { stage: 'Running: ' + tool, detail: last.data?.args_summary || '', icon: '\ud83d\udd27' }
+    if (msg.includes('iteration')) return { stage: msg, detail: '', icon: '\ud83d\udd04' }
+    return { stage: 'Executing', detail: msg.slice(0, 80), icon: '\u2699\ufe0f' }
+  }
+  if (et === 'executor_finished') return { stage: 'Finishing', detail: 'Collecting results...', icon: '\u2705' }
+  if (et === 'action_completed') return { stage: 'Complete', detail: '', icon: '\u2705' }
+  if (et === 'action_failed') return { stage: 'Failed', detail: msg.slice(0, 80), icon: '\u274c' }
+  if (et === 'action_blocked') return { stage: 'Blocked', detail: msg.slice(0, 80), icon: '\ud83d\udeab' }
+  return { stage: et.replace(/_/g, ' '), detail: msg.slice(0, 60), icon: '\u2022' }
+}
+
 function TaskResult({ entry }: { entry: ChatEntry }) {
   const th = entry.taskHandle
   if (!th) {
-    // Live progress mode — show events as they stream in
+    // Live progress mode - show events as they stream in
     if (entry.events && entry.events.length > 0) {
+      const progress = getProgressLabel(entry.events)
+      const toolEvents = entry.events.filter((ev: any) => ev.data?.tool)
+      const totalEvents = entry.events.length
       return (
         <div className="task-result task-progress">
-          <div className="task-header">
-            <span className="task-state" style={{ color: '#60a5fa' }}>working</span>
-            <span className="task-routing">{entry.content}</span>
+          <div className="progress-status">
+            <span className="progress-icon">{progress.icon}</span>
+            <span className="progress-stage">{progress.stage}</span>
+            {progress.detail && <span className="progress-detail">{progress.detail}</span>}
+            <span className="progress-count">{totalEvents} events</span>
           </div>
-          <div className="live-events">
-            {entry.events.map((ev: any, i: number) => (
-              <div key={i} className="live-event">
-                <span className="live-event-type">{ev.event_type}</span>
-                <span className="live-event-msg">{ev.data?.message || ''}</span>
-                {ev.data?.args_summary && <span className="live-event-args">{ev.data.args_summary}</span>}
-                {ev.data?.output && (ev.data?.type === 'tool_output' || ev.data?.type === 'plan_output') && (
-                  <details className="tool-output-details">
-                    <summary>{ev.data?.type === 'plan_output' ? 'Show agent-core plan' : 'Show output'}</summary>
-                    <pre className="tool-output">{ev.data.output}</pre>
-                  </details>
-                )}
-              </div>
-            ))}
+          <div className="progress-bar-container">
+            <div className="progress-bar-fill" />
           </div>
+          <details className="progress-events-toggle">
+            <summary>Show {totalEvents} events ({toolEvents.length} tool calls)</summary>
+            <div className="live-events">
+              {entry.events.map((ev: any, i: number) => (
+                <div key={i} className="live-event">
+                  <span className="live-event-type">{ev.event_type}</span>
+                  <span className="live-event-msg">{ev.data?.message || ''}</span>
+                  {ev.data?.args_summary && <span className="live-event-args">{ev.data.args_summary}</span>}
+                  {ev.data?.output && (ev.data?.type === 'tool_output' || ev.data?.type === 'plan_output') && (
+                    <details className="tool-output-details">
+                      <summary>{ev.data?.type === 'plan_output' ? 'Show agent-core plan' : 'Show output'}</summary>
+                      <pre className="tool-output">{ev.data.output}</pre>
+                    </details>
+                  )}
+                </div>
+              ))}
+            </div>
+          </details>
         </div>
       )
     }
-    return <div className="msg-text">{entry.content}</div>
+    return <div className="task-result task-progress"><div className="progress-status"><span className="progress-icon">{'\u23f3'}</span><span className="progress-stage">Starting</span><span className="progress-detail">Preparing...</span></div></div>
   }
 
   const stateColor = th.state === 'completed' ? '#4ade80' : th.state === 'blocked' ? '#fbbf24' : th.state === 'failed' ? '#f87171' : '#94a3b8'
@@ -374,6 +410,7 @@ export default function App() {
   const [chat, setChat] = useState<ChatEntry[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [executionMode, setExecutionMode] = useState<'finite' | 'open_ended' | 'loop'>('finite')
   const [health, setHealth] = useState<Health | null>(null)
   const [newSessionRepo, setNewSessionRepo] = useState('agent-core')
   const [showSidebar, setShowSidebar] = useState(false)
@@ -500,10 +537,27 @@ export default function App() {
       const res = await fetch(`${API}/sessions/${sessionId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instruction }),
+        body: JSON.stringify({ instruction, execution_mode: executionMode }),
       })
-      polling = false
       const taskHandle: TaskHandle = await res.json()
+
+      // If server returned "working", poll /chat/status until done
+      if (taskHandle.state === 'working') {
+        let done = false
+        while (!done) {
+          await new Promise(r => setTimeout(r, 2000))
+          try {
+            const statusRes = await fetch(`${API}/sessions/${sessionId}/chat/status`)
+            const statusData = await statusRes.json()
+            if (statusData.state !== 'working') {
+              done = true
+              Object.assign(taskHandle, statusData)
+            }
+          } catch {}
+        }
+      }
+
+      polling = false
 
       // Final events fetch
       let events: SessionEvent[] = []
@@ -638,18 +692,25 @@ export default function App() {
                   )}
                 </div>
               ))}
-              {sending && (
-                <div className="chat-entry chat-system">
-                  <div className="msg-bubble system-bubble">
-                    <div className="thinking">Thinking...</div>
-                  </div>
-                </div>
-              )}
+
               <div ref={chatEndRef} />
             </div>
 
             {/* Input */}
             <div className="chat-input-area">
+              <div className="mode-selector">
+                {(['finite', 'open_ended', 'loop'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    className={`mode-btn ${executionMode === mode ? 'mode-active' : ''}`}
+                    onClick={() => setExecutionMode(mode)}
+                    disabled={sending}
+                    title={mode === 'finite' ? 'Limited iterations (50 max)' : mode === 'open_ended' ? 'No limit - runs until agent finishes' : 'Continuous loop with checkpoints'}
+                  >
+                    {mode === 'finite' ? '\u23f1 Finite' : mode === 'open_ended' ? '\u267e Open' : '\ud83d\udd01 Loop'}
+                  </button>
+                ))}
+              </div>
               <div className="input-wrapper">
                 <input
                   className="chat-input"
@@ -665,7 +726,7 @@ export default function App() {
                 </button>
               </div>
               <div className="input-meta">
-                Session: <strong>{sessionId}</strong> | Press Enter to send
+                Session: <strong>{sessionId}</strong> | {executionMode === 'finite' ? '50 iterations max' : executionMode === 'open_ended' ? 'No iteration limit' : 'Continuous loop'} | Press Enter to send
               </div>
             </div>
           </div>
