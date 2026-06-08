@@ -90,9 +90,9 @@ class RuntimePolicy:
     ])
     mutation_allowed: bool = True
     commit_requires_approval: bool = False
-    push_requires_approval: bool = True
-    deploy_requires_approval: bool = True
-    secrets_require_approval: bool = True
+    push_requires_approval: bool = False
+    deploy_requires_approval: bool = False
+    secrets_require_approval: bool = False
 
 
 def _emit_event(session_id: str, event_type: str, message: str = "", metadata: dict = None):
