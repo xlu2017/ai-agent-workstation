@@ -1,17 +1,28 @@
 """
 agent-core HTTP client for jubilant-goggles.
 
-Calls agent-core for:
-  POST /actions/plan          — generate an advisory plan
-  POST /actions/validate-plan — deterministic plan validation
-  POST /actions/outcome       — record execution outcomes
-  POST /actions/recommend-next — stepwise next-action recommendation
-  GET  /actions               — fetch action catalog
-  POST /memory/search         — search memories
-  POST /context/search        — search context
+agent-core is an advisory service for memory, context, action knowledge,
+schema validation, planning, and next-action recommendations.
 
-Does NOT ask agent-core to:
-  execute, schedule, pause, cancel, commit, create worktrees/branches/PRs
+This client may call agent-core for:
+  POST /actions/plan           — generate an advisory plan
+  POST /actions/validate-plan  — deterministic advisory plan validation
+  POST /actions/recommend-next — advisory next-action recommendation
+  POST /actions/validate       — action contract validation
+  GET  /actions                — fetch action catalog
+  POST /memory/search          — search memories
+  POST /context/search         — search context
+
+This client must not ask agent-core to:
+  execute actions
+  schedule sessions
+  pause or cancel sessions
+  create worktrees, branches, commits, pushes, deploys, or PRs
+  perform runtime authorization
+
+Every response from agent-core must be treated as advisory. jubilant-goggles
+must still perform runtime policy checks, approval checks, path/command guards,
+executor authorization, and timeline/audit recording before doing anything real.
 """
 
 from __future__ import annotations
@@ -38,23 +49,8 @@ class PlanRequest:
     recent_outcomes: list[dict[str, Any]] = field(default_factory=list)
 
 
-@dataclass
-class OutcomeRecord:
-    session_id: str
-    action_name: str
-    params: dict[str, Any]
-    status: str  # succeeded, failed, skipped
-    output: dict[str, Any]
-    duration_ms: int
-    executor: str
-    rationale: str = ""
-    error: str = ""
-    files_touched: list[str] = field(default_factory=list)
-    test_result: str = ""
-
-
 class AgentCoreClient:
-    """HTTP client for agent-core API."""
+    """HTTP client for advisory agent-core APIs."""
 
     def __init__(
         self,
@@ -69,13 +65,13 @@ class AgentCoreClient:
         )
 
     async def get_actions(self) -> dict[str, Any]:
-        """GET /actions — fetch the action catalog."""
+        """Fetch advisory action catalog from agent-core."""
         resp = await self._client.get("/actions")
         resp.raise_for_status()
-        return resp.json()
+        return self._mark_advisory(resp.json())
 
     async def plan(self, request: PlanRequest) -> dict[str, Any]:
-        """POST /actions/plan — generate an LLM-first advisory plan."""
+        """Generate an advisory plan. The plan is not authorization."""
         payload = {
             "session_id": request.session_id,
             "repo_id": request.repo_id,
@@ -91,43 +87,33 @@ class AgentCoreClient:
             payload["recent_outcomes"] = request.recent_outcomes
         resp = await self._client.post("/actions/plan", json=payload)
         resp.raise_for_status()
-        return resp.json()
+        return self._mark_advisory(resp.json())
 
     async def validate_plan(
         self,
         allowed_actions: list[str],
         plan: dict[str, Any],
     ) -> dict[str, Any]:
-        """POST /actions/validate-plan — deterministic validation."""
+        """Validate plan shape and visible action membership only."""
         resp = await self._client.post(
             "/actions/validate-plan",
             json={"allowed_actions": allowed_actions, "plan": plan},
         )
         resp.raise_for_status()
-        return resp.json()
+        return self._mark_advisory(resp.json())
 
-    async def record_outcome(self, outcome: OutcomeRecord) -> dict[str, Any]:
-        """POST /actions/outcome — record what was actually executed."""
-        payload = {
-            "session_id": outcome.session_id,
-            "action_name": outcome.action_name,
-            "params": outcome.params,
-            "status": outcome.status,
-            "output": outcome.output,
-            "duration_ms": outcome.duration_ms,
-            "executor": outcome.executor,
-        }
-        if outcome.rationale:
-            payload["rationale"] = outcome.rationale
-        if outcome.error:
-            payload["error"] = outcome.error
-        if outcome.files_touched:
-            payload["files_touched"] = outcome.files_touched
-        if outcome.test_result:
-            payload["test_result"] = outcome.test_result
-        resp = await self._client.post("/actions/outcome", json=payload)
+    async def validate_action(
+        self,
+        action_name: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Validate an action contract. This does not authorize execution."""
+        resp = await self._client.post(
+            "/actions/validate",
+            json={"action_name": action_name, "params": params},
+        )
         resp.raise_for_status()
-        return resp.json()
+        return self._mark_advisory(resp.json())
 
     async def recommend_next(
         self,
@@ -137,7 +123,7 @@ class AgentCoreClient:
         session_id: str = "",
         repo_id: str = "",
     ) -> dict[str, Any]:
-        """POST /actions/recommend-next — stepwise recommendation."""
+        """Get an advisory next-action recommendation."""
         resp = await self._client.post(
             "/actions/recommend-next",
             json={
@@ -148,17 +134,12 @@ class AgentCoreClient:
             },
         )
         resp.raise_for_status()
-        return resp.json()
+        return self._mark_advisory(resp.json())
 
     async def search_memory(
         self, query: str, session_id: str = "", limit: int = 10
     ) -> dict[str, Any]:
-        """POST /memory/search — search memories in agent-core.
-
-        agent-core scopes memory with scope/scope_id rather than a top-level
-        session_id field. Passing session_id directly would either fail schema
-        parsing or produce an unscoped search depending on server strictness.
-        """
+        """Search memories in agent-core using its scope/scope_id contract."""
         payload: dict[str, Any] = {"query": query, "limit": limit}
         if session_id:
             payload["scope"] = "session"
@@ -166,7 +147,13 @@ class AgentCoreClient:
 
         resp = await self._client.post("/memory/search", json=payload)
         resp.raise_for_status()
-        return resp.json()
+        return self._mark_advisory(resp.json())
 
     async def close(self) -> None:
         await self._client.aclose()
+
+    @staticmethod
+    def _mark_advisory(payload: dict[str, Any]) -> dict[str, Any]:
+        payload.setdefault("advisory_only", True)
+        payload.setdefault("requires_platform_validation", True)
+        return payload
