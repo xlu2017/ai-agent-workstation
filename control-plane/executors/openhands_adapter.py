@@ -228,6 +228,21 @@ class OpenHandsExecutorAdapter(ExecutorAdapter):
     def __init__(self, client: OpenHandsClient | None = None):
         self.client = client or OpenHandsClient()
 
+    def is_available(self) -> bool:
+        """Check if OpenHands API is reachable."""
+        try:
+            url = f"{self.client.base_url}/health"
+            req = urllib.request.Request(url, method="GET")
+            urllib.request.urlopen(req, timeout=3)
+            return True
+        except Exception:
+            # Try conversation list as health check fallback
+            try:
+                self.client._request_first_success("GET", "/conversations")
+                return True
+            except Exception:
+                return False
+
     def run_task(self, session_id: str, packet: TaskPacket) -> TaskResult:
         start_time = time.time()
         session_dir = SESSIONS_DIR / session_id

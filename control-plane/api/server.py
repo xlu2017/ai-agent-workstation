@@ -356,7 +356,60 @@ class ChatMessage(BaseModel):
     executor: Optional[str] = None
 
 
-# NOTE: The remainder of this file contains existing chat/task routing helpers.
-# It is intentionally left in place by this cleanup commit. Future cleanup should
-# move chat routing into prompt_router/ and live-feed response generation into
-# live_feed/ without changing endpoint behavior.
+# --- Chat/Task endpoint (end-to-end prompt flow) ---
+
+@app.post("/api/sessions/{session_id}/chat")
+async def session_chat(session_id: str, body: ChatMessage):
+    """Submit a prompt for execution in a session.
+
+    Flow: route → policy check → advisory plan → execute via OpenHands → events.
+    """
+    from execution.prompt_handler import handle_prompt, TaskState
+    try:
+        result = await handle_prompt(
+            session_id=session_id,
+            instruction=body.instruction,
+            model=body.model or DEFAULT_MODEL,
+        )
+        status_code = 200
+        if result.state == TaskState.BLOCKED:
+            status_code = 202  # Accepted but blocked
+        elif result.state == TaskState.FAILED:
+            status_code = 500
+
+        return {
+            "task_id": result.task_id,
+            "session_id": result.session_id,
+            "state": result.state.value,
+            "message": result.message,
+            "routing_decision": result.routing_decision,
+            "plan_summary": result.plan_summary,
+            "error": result.error,
+            "events_path": result.events_path,
+            "metadata": result.metadata,
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Prompt handling failed: {e}") from e
+
+
+@app.get("/api/sessions/{session_id}/state")
+def get_session_state(session_id: str):
+    """Get truthful execution state for a session."""
+    from execution.prompt_handler import get_task_state
+    return get_task_state(session_id)
+
+
+@app.get("/api/sessions/{session_id}/events")
+def get_session_events(session_id: str, limit: int = 100):
+    """Get raw events from session's events.jsonl."""
+    events_path = SESSIONS_DIR / session_id / "events" / "events.jsonl"
+    if not events_path.exists():
+        return {"events": [], "total": 0}
+    events = []
+    for line in events_path.read_text().strip().split("\n"):
+        if line.strip():
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return {"events": events[-limit:], "total": len(events)}

@@ -49,6 +49,26 @@ class PlanRequest:
     recent_outcomes: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass
+class OutcomeRecord:
+    """Local outcome record for jubilant-goggles timeline tracking.
+
+    Outcomes are recorded in the live feed / status feed first.
+    Future: sync to agent-core trace store when POST /actions/outcome exists.
+    """
+
+    session_id: str
+    action_name: str
+    params: dict[str, Any]
+    status: str  # succeeded | failed | blocked | skipped
+    output: dict[str, Any] = field(default_factory=dict)
+    duration_ms: int = 0
+    executor: str = ""
+    rationale: str = ""
+    error: str = ""
+    files_touched: list[str] = field(default_factory=list)
+
+
 class AgentCoreClient:
     """HTTP client for advisory agent-core APIs."""
 
@@ -148,6 +168,22 @@ class AgentCoreClient:
         resp = await self._client.post("/memory/search", json=payload)
         resp.raise_for_status()
         return self._mark_advisory(resp.json())
+
+    async def record_outcome(self, outcome: OutcomeRecord) -> dict[str, Any]:
+        """Record an action outcome.
+
+        Currently records locally only. When agent-core exposes
+        POST /actions/outcome, this will forward the record for
+        trace/memory integration.
+        """
+        # TODO: POST to agent-core /actions/outcome when endpoint exists
+        return {
+            "recorded": True,
+            "local_only": True,
+            "session_id": outcome.session_id,
+            "action_name": outcome.action_name,
+            "status": outcome.status,
+        }
 
     async def close(self) -> None:
         await self._client.aclose()
