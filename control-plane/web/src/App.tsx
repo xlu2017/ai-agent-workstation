@@ -83,6 +83,9 @@ interface ChatEntry {
 }
 
 const API = '/api'
+const CONTROL_API = window.location.port === '5173'
+  ? `${window.location.protocol}//${window.location.hostname}:9877/api`
+  : API
 
 interface GuacamoleSession {
   authToken: string
@@ -427,6 +430,9 @@ interface ServiceInfo {
   update_supported?: boolean
   update_in_progress?: boolean
   last_update?: { commit: string; timestamp: string; status: string } | null
+  can_start?: boolean
+  can_stop?: boolean
+  can_restart?: boolean
 }
 
 function PortManager() {
@@ -438,7 +444,7 @@ function PortManager() {
   const [updateSuccess, setUpdateSuccess] = useState<Record<string, string>>({})
 
   const fetchServices = useCallback(() => {
-    fetch(`${API}/services`)
+    fetch(`${CONTROL_API}/services`)
       .then(r => r.json())
       .then(data => setServices(data.services || []))
       .catch(() => {})
@@ -451,22 +457,34 @@ function PortManager() {
     return () => clearInterval(id)
   }, [fetchServices])
 
+  const waitForServiceStatus = async (name: string, status: ServiceInfo['status'], attempts = 10) => {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const response = await fetch(`${CONTROL_API}/services`)
+      const data = await response.json()
+      const nextServices = data.services || []
+      setServices(nextServices)
+      if (nextServices.find((svc: ServiceInfo) => svc.name === name)?.status === status) {
+        return
+      }
+      await new Promise(r => setTimeout(r, 1000))
+    }
+  }
+
   const startService = async (name: string) => {
-    setActionLoading(name)
+    setActionLoading(`${name}:start`)
     try {
-      await fetch(`${API}/services/${name}/start`, { method: 'POST' })
-      await new Promise(r => setTimeout(r, 2000))
-      fetchServices()
+      await fetch(`${CONTROL_API}/services/${name}/start`, { method: 'POST' })
+      await waitForServiceStatus(name, 'running')
+      if (name === 'dashboard') window.location.reload()
     } catch {}
     setActionLoading(null)
   }
 
   const stopService = async (name: string) => {
-    setActionLoading(name)
+    setActionLoading(`${name}:stop`)
     try {
-      await fetch(`${API}/services/${name}/stop`, { method: 'POST' })
-      await new Promise(r => setTimeout(r, 1000))
-      fetchServices()
+      await fetch(`${CONTROL_API}/services/${name}/stop`, { method: 'POST' })
+      await waitForServiceStatus(name, 'stopped')
     } catch {}
     setActionLoading(null)
   }
@@ -476,7 +494,7 @@ function PortManager() {
     setUpdateError(prev => { const n = { ...prev }; delete n[name]; return n })
     setUpdateSuccess(prev => { const n = { ...prev }; delete n[name]; return n })
     try {
-      const res = await fetch(`${API}/v2/services/${name}/update-latest`, {
+      const res = await fetch(`${CONTROL_API}/v2/services/${name}/update-latest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ restart: true }),
@@ -495,13 +513,11 @@ function PortManager() {
   }
 
   const restartService = async (name: string) => {
-    setActionLoading(name)
+    setActionLoading(`${name}:restart`)
     try {
-      await fetch(`${API}/services/${name}/stop`, { method: 'POST' })
-      await new Promise(r => setTimeout(r, 1500))
-      await fetch(`${API}/services/${name}/start`, { method: 'POST' })
-      await new Promise(r => setTimeout(r, 2000))
-      fetchServices()
+      await fetch(`${CONTROL_API}/services/${name}/restart`, { method: 'POST' })
+      await waitForServiceStatus(name, 'running', name === 'control-plane' ? 15 : 10)
+      if (name === 'dashboard' || name === 'control-plane') window.location.reload()
     } catch {}
     setActionLoading(null)
   }
@@ -530,13 +546,15 @@ function PortManager() {
             {updateError[svc.name] && <div className="pm-update-msg pm-update-error">{updateError[svc.name]}</div>}
             {updateSuccess[svc.name] && <div className="pm-update-msg pm-update-success">{updateSuccess[svc.name]}</div>}
             <div className="pm-item-actions">
-              {actionLoading === svc.name ? (
+              {actionLoading?.startsWith(`${svc.name}:`) ? (
                 <span className="pm-busy">...</span>
               ) : svc.status === 'running' ? (
                 <>
-                  <button className="pm-btn pm-btn-restart" onClick={() => restartService(svc.name)} title="Restart">
-                    <RefreshCw size={12} />
-                  </button>
+                  {svc.can_restart !== false && (
+                    <button className="pm-btn pm-btn-restart" onClick={() => restartService(svc.name)} title="Restart">
+                      <RefreshCw size={12} />
+                    </button>
+                  )}
                   {svc.repo_backed && (
                     <button
                       className={`pm-btn pm-btn-update${updateLoading[svc.name] ? ' pm-btn-updating' : ''}`}
@@ -547,15 +565,19 @@ function PortManager() {
                       <Download size={12} className={updateLoading[svc.name] ? 'pm-spin' : ''} />
                     </button>
                   )}
-                  <button className="pm-btn pm-btn-stop" onClick={() => stopService(svc.name)} title="Stop">
-                    <Power size={12} />
-                  </button>
+                  {svc.can_stop !== false && (
+                    <button className="pm-btn pm-btn-stop" onClick={() => stopService(svc.name)} title="Stop">
+                      <Power size={12} />
+                    </button>
+                  )}
                 </>
               ) : (
                 <>
-                  <button className="pm-btn pm-btn-start" onClick={() => startService(svc.name)} title="Start">
-                    <Power size={12} />
-                  </button>
+                  {svc.can_start !== false && (
+                    <button className="pm-btn pm-btn-start" onClick={() => startService(svc.name)} title="Start">
+                      <Power size={12} />
+                    </button>
+                  )}
                   {svc.repo_backed && (
                     <button
                       className={`pm-btn pm-btn-update${updateLoading[svc.name] ? ' pm-btn-updating' : ''}`}
