@@ -9,8 +9,13 @@ not duplicate worktree/session filesystem behavior.
 
 import json
 import os
+import base64
+import socket
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 # Add control-plane root and CLI to path for imports
@@ -24,6 +29,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
+
+from api.service_updater import (
+    SERVICE_CONFIGS,
+    get_service_update_metadata,
+    update_service,
+)
 
 from sessions.session_manager import (
     SessionAlreadyExists,
@@ -58,6 +69,14 @@ def _get_openhands_url():
 OPENHANDS_URL = os.environ.get("OPENHANDS_URL") or _get_openhands_url()
 BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://localhost:9876")
 
+TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
+REMOTE_DESKTOP_ENV_FILE = Path(
+    os.environ.get(
+        "REMOTE_DESKTOP_ENV_FILE",
+        "/opt/workstation/repos/jubilant-goggles/ops/remote-desktop/.env",
+    )
+)
+
 app = FastAPI(title="Workstation Control Plane", version="0.1.0")
 
 app.add_middleware(
@@ -66,6 +85,92 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in TRUE_ENV_VALUES
+
+
+def _remote_desktop_file_env() -> dict[str, str]:
+    if not REMOTE_DESKTOP_ENV_FILE.exists():
+        return {}
+    values = {}
+    try:
+        lines = REMOTE_DESKTOP_ENV_FILE.read_text().splitlines()
+    except OSError:
+        return {}
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = value.strip().strip("'\"")
+    return values
+
+
+def _remote_desktop_env(name: str, default: str = "") -> str:
+    return os.environ.get(name) or _remote_desktop_file_env().get(name, default)
+
+
+def _remote_desktop_bool(name: str, default: bool = False) -> bool:
+    value = _remote_desktop_env(name)
+    if value == "":
+        return default
+    return value.strip().lower() in TRUE_ENV_VALUES
+
+
+def _remote_desktop_config():
+    return {
+        "enabled": _remote_desktop_bool("REMOTE_DESKTOP_ENABLED", False),
+        "provider": "guacamole",
+        "url": _remote_desktop_env("GUACAMOLE_URL", "/guacamole/"),
+        "rdp_host": _remote_desktop_env("RDP_HOST", "dev-server"),
+        "security": "tailscale_only",
+        "auto_login": _remote_desktop_bool("GUACAMOLE_AUTO_LOGIN_ENABLED", False),
+    }
+
+
+def _guacamole_client_identifier(connection_id: str, data_source: str) -> str:
+    raw_identifier = f"{connection_id}\0c\0{data_source}".encode()
+    return base64.b64encode(raw_identifier).decode().rstrip("=")
+
+
+def _request_guacamole_token(username: str, password: str):
+    guacamole_host = _remote_desktop_env("GUACAMOLE_HOST", "127.0.0.1")
+    guacamole_port = int(_remote_desktop_env("GUACAMOLE_PORT", "8080"))
+    token_url = f"http://{guacamole_host}:{guacamole_port}/guacamole/api/tokens"
+    data = urllib.parse.urlencode({"username": username, "password": password}).encode()
+    request = urllib.request.Request(
+        token_url,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        return json.loads(response.read().decode())
+
+
+def _check_tcp(host: str, port: int, timeout: float = 3.0):
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return {"status": "reachable"}
+    except OSError as exc:
+        return {"status": "unreachable", "error": str(exc)[:160]}
+
+
+def _check_http(url: str, timeout: float = 3.0):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return {"status": "reachable", "code": response.status}
+    except urllib.error.HTTPError as exc:
+        if exc.code < 500:
+            return {"status": "reachable", "code": exc.code}
+        return {"status": "unreachable", "code": exc.code, "error": str(exc)[:160]}
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {"status": "unreachable", "error": str(exc)[:160]}
 
 
 class SessionCreate(BaseModel):
@@ -187,6 +292,83 @@ def get_health():
         checks["active_ports"] = []
 
     return checks
+
+
+@app.get("/api/v2/remote-desktop/config")
+def get_remote_desktop_config():
+    return _remote_desktop_config()
+
+
+@app.post("/api/v2/remote-desktop/token")
+def create_remote_desktop_token():
+    config = _remote_desktop_config()
+    if not config["enabled"]:
+        raise HTTPException(409, "Remote desktop is not enabled")
+    if not config["auto_login"]:
+        raise HTTPException(409, "Guacamole auto-login is not enabled")
+
+    username = _remote_desktop_env("GUACAMOLE_USERNAME")
+    password = _remote_desktop_env("GUACAMOLE_PASSWORD")
+    if not username or not password:
+        raise HTTPException(500, "Guacamole credentials are not configured")
+
+    try:
+        token = _request_guacamole_token(username, password)
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(502, f"Unable to authenticate with Guacamole: {str(exc)[:160]}") from exc
+
+    data_source = token.get("dataSource", _remote_desktop_env("GUACAMOLE_DATA_SOURCE", "postgresql"))
+    connection_id = _remote_desktop_env("GUACAMOLE_CONNECTION_ID", "1")
+    client_id = _guacamole_client_identifier(connection_id, data_source)
+    guacamole_url = config["url"].rstrip("/")
+
+    return {
+        "authToken": token["authToken"],
+        "username": token.get("username", username),
+        "dataSource": data_source,
+        "availableDataSources": token.get("availableDataSources", [data_source]),
+        "connection_url": f"{guacamole_url}/#/client/{client_id}",
+    }
+
+
+@app.get("/api/v2/remote-desktop/health")
+def get_remote_desktop_health():
+    config = _remote_desktop_config()
+    guacamole_host = _remote_desktop_env("GUACAMOLE_HOST", "127.0.0.1")
+    guacamole_port = int(_remote_desktop_env("GUACAMOLE_PORT", "8080"))
+    guacamole_url = _remote_desktop_env(
+        "GUACAMOLE_HEALTH_URL",
+        f"http://{guacamole_host}:{guacamole_port}/guacamole/",
+    )
+    rdp_host = _remote_desktop_env("RDP_HOST", "dev-server")
+    rdp_port = int(_remote_desktop_env("RDP_PORT", "3389"))
+    guacd_host = _remote_desktop_env("GUACD_HOST")
+    guacd_port = int(_remote_desktop_env("GUACD_PORT", "4822"))
+
+    guacamole = _check_http(guacamole_url)
+    rdp = _check_tcp(rdp_host, rdp_port)
+    guacd = _check_tcp(guacd_host, guacd_port) if guacd_host else {"status": "not_configured"}
+
+    ok = guacamole["status"] == "reachable" and rdp["status"] == "reachable"
+    if guacd_host:
+        ok = ok and guacd["status"] == "reachable"
+
+    return {
+        "ok": ok,
+        "enabled": config["enabled"],
+        "provider": "guacamole",
+        "guacamole": guacamole["status"],
+        "guacamole_url": guacamole_url,
+        "guacd": guacd["status"],
+        "rdp": rdp["status"],
+        "rdp_host": rdp_host,
+        "rdp_port": rdp_port,
+        "details": {
+            "guacamole": guacamole,
+            "guacd": guacd,
+            "rdp": rdp,
+        },
+    }
 
 
 # --- Logs ---
@@ -560,11 +742,11 @@ def list_services():
     """List known services with port, status, and PID."""
     import subprocess as sp
     services = [
-        {"name": "agent-core", "port": 3210, "description": "Advisory memory/planning"},
-        {"name": "litellm", "port": 4000, "description": "LLM proxy gateway"},
-        {"name": "control-plane", "port": 9877, "description": "FastAPI orchestrator"},
-        {"name": "openhands", "port": 3000, "description": "Execution runtime (Docker)"},
-        {"name": "dashboard", "port": 5173, "description": "Web UI (Vite dev)"},
+        {"name": "agent-core", "port": 3210, "description": "Advisory memory/planning", "can_start": True, "can_stop": True, "can_restart": True},
+        {"name": "litellm", "port": 4000, "description": "LLM proxy gateway", "can_start": True, "can_stop": True, "can_restart": True},
+        {"name": "control-plane", "port": 9877, "description": "FastAPI orchestrator", "can_start": True, "can_stop": False, "can_restart": True},
+        {"name": "openhands", "port": 3000, "description": "Execution runtime (Docker)", "can_start": True, "can_stop": True, "can_restart": True},
+        {"name": "dashboard", "port": 5173, "description": "Web UI (Vite dev)", "can_start": True, "can_stop": True, "can_restart": True},
     ]
     # Check which ports are actually listening
     try:
@@ -597,24 +779,125 @@ def list_services():
                     svc["docker"] = True
     except Exception:
         pass
+    # Enrich with update metadata for repo-backed services
+    update_meta = get_service_update_metadata()
+    for svc in services:
+        meta = update_meta.get(svc["name"], {})
+        svc["repo_backed"] = meta.get("repo_backed", False)
+        svc["update_supported"] = meta.get("update_supported", False)
+        svc["update_in_progress"] = meta.get("update_in_progress", False)
+        svc["last_update"] = meta.get("last_update")
     return {"services": services}
+
+
+class UpdateLatestBody(BaseModel):
+    restart: bool = True
+
+
+@app.post("/api/v2/services/{service_name}/update-latest")
+async def update_service_latest(service_name: str, body: UpdateLatestBody = UpdateLatestBody()):
+    """Fetch the latest code from GitHub for a repo-backed service."""
+    if service_name not in SERVICE_CONFIGS:
+        raise HTTPException(404, {"ok": False, "service": service_name, "error": {"code": "UNKNOWN_SERVICE", "message": f"Service '{service_name}' is not configured for updates."}})
+    result = await update_service(service_name, restart=body.restart)
+    if not result.ok:
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "service": result.service, "error": result.error},
+        )
+    return {
+        "ok": True,
+        "service": result.service,
+        "branch": result.branch,
+        "commit_before": result.commit_before,
+        "commit_after": result.commit_after,
+        "updated": result.updated,
+        "restart_attempted": result.restart_attempted,
+        "restart_succeeded": result.restart_succeeded,
+        "message": result.message,
+    }
+
+
+def _service_commands():
+    return {
+        "agent-core": {
+            "port": 3210,
+            "start": "cd /opt/workstation/repos/agent-core && nohup node dist/index.js > /opt/workstation/logs/agent-core.log 2>&1 &",
+        },
+        "litellm": {
+            "port": 4000,
+            "start": "nohup litellm --config /opt/workstation/litellm-config.yaml --port 4000 > /opt/workstation/logs/litellm.log 2>&1 &",
+        },
+        "control-plane": {
+            "port": 9877,
+            "start": "cd /opt/workstation/repos/jubilant-goggles/control-plane && nohup /home/agent/.local/bin/uvicorn api.server:app --host 0.0.0.0 --port 9877 --reload > /opt/workstation/logs/control-plane.log 2>&1 &",
+        },
+        "openhands": {
+            "port": 3000,
+            "start": "docker run -d --name openhands --network host -v /opt/workstation/repos:/opt/workspace -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/all-hands-ai/openhands:latest",
+            "docker": True,
+        },
+        "dashboard": {
+            "port": 5173,
+            "start": "cd /opt/workstation/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
+        },
+    }
+
+
+def _port_listening(port: int) -> bool:
+    return _check_tcp("127.0.0.1", port, timeout=0.5)["status"] == "reachable"
+
+
+def _wait_for_port(port: int, desired: bool, timeout: float = 10.0) -> bool:
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _port_listening(port) is desired:
+            return True
+        time.sleep(0.25)
+    return _port_listening(port) is desired
+
+
+def _start_service_process(name: str):
+    import subprocess as sp
+    services = _service_commands()
+    if name not in services:
+        return {"error": f"Unknown service: {name}", "started": False}
+    service = services[name]
+    port = service["port"]
+    if _port_listening(port):
+        return {"message": f"{name} already running", "started": True}
+    sp.run(service["start"], shell=True, timeout=10)
+    started = _wait_for_port(port, True, timeout=15)
+    return {"message": f"Started {name}" if started else f"Start requested for {name}", "started": started}
+
+
+def _stop_service_process(name: str):
+    import subprocess as sp
+    services = _service_commands()
+    if name not in services:
+        return {"error": f"Unknown service: {name}", "stopped": False}
+    if name == "control-plane":
+        return {"error": "Use restart for control-plane; stop is disabled from the dashboard", "stopped": False}
+    service = services[name]
+    port = service["port"]
+    if service.get("docker"):
+        try:
+            sp.run(["docker", "stop", name], timeout=15)
+            sp.run(["docker", "rm", name], timeout=5)
+        except Exception as exc:
+            return {"error": str(exc), "stopped": False}
+    else:
+        sp.run(f"fuser -k {port}/tcp", shell=True, timeout=5)
+    stopped = _wait_for_port(port, False, timeout=10)
+    return {"message": f"Stopped {name} (port {port})" if stopped else f"Stop requested for {name}", "stopped": stopped}
 
 
 @app.post("/api/services/{name}/start")
 def start_service(name: str):
     """Start a known service."""
-    import subprocess as sp
-    commands = {
-        "agent-core": "cd /opt/workstation/repos/agent-core && nohup node dist/index.js > /opt/workstation/logs/agent-core.log 2>&1 &",
-        "litellm": "nohup litellm --config /opt/workstation/litellm-config.yaml --port 4000 > /opt/workstation/logs/litellm.log 2>&1 &",
-        "openhands": "docker run -d --name openhands --network host -v /opt/workstation/repos:/opt/workspace -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/all-hands-ai/openhands:latest",
-        "dashboard": "cd /opt/workstation/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
-    }
-    if name not in commands:
-        return {"error": f"Unknown service: {name}", "started": False}
     try:
-        sp.run(commands[name], shell=True, timeout=10)
-        return {"message": f"Started {name}", "started": True}
+        return _start_service_process(name)
     except Exception as e:
         return {"error": str(e), "started": False}
 
@@ -622,23 +905,39 @@ def start_service(name: str):
 @app.post("/api/services/{name}/stop")
 def stop_service(name: str):
     """Stop a known service by killing its port or docker container."""
-    import subprocess as sp
-    ports = {"agent-core": 3210, "litellm": 4000, "openhands": 3000, "dashboard": 5173}
-    if name == "openhands":
-        try:
-            sp.run(["docker", "stop", "openhands"], timeout=15)
-            sp.run(["docker", "rm", "openhands"], timeout=5)
-            return {"message": "Stopped openhands container", "stopped": True}
-        except Exception as e:
-            return {"error": str(e), "stopped": False}
-    if name not in ports:
-        return {"error": f"Unknown service: {name}", "stopped": False}
-    port = ports[name]
     try:
-        sp.run(f"fuser -k {port}/tcp", shell=True, timeout=5)
-        return {"message": f"Stopped {name} (port {port})", "stopped": True}
+        return _stop_service_process(name)
     except Exception as e:
         return {"error": str(e), "stopped": False}
+
+
+@app.post("/api/services/{name}/restart")
+def restart_service(name: str):
+    """Restart a known service from the control-plane process."""
+    import subprocess as sp
+    services = _service_commands()
+    if name not in services:
+        return {"error": f"Unknown service: {name}", "restarted": False}
+    if name == "control-plane":
+        command = (
+            "sleep 1; "
+            "fuser -k 9877/tcp; "
+            "sleep 1; "
+            "cd /opt/workstation/repos/jubilant-goggles/control-plane && "
+            "nohup /home/agent/.local/bin/uvicorn api.server:app --host 0.0.0.0 --port 9877 --reload "
+            "> /opt/workstation/logs/control-plane.log 2>&1 &"
+        )
+        sp.Popen(["/bin/sh", "-c", command], stdout=sp.DEVNULL, stderr=sp.DEVNULL, start_new_session=True)
+        return {"message": "Restarting control-plane", "restarted": True}
+    stop_result = _stop_service_process(name)
+    if not stop_result.get("stopped"):
+        return {"error": stop_result.get("error", f"Unable to stop {name}"), "restarted": False}
+    start_result = _start_service_process(name)
+    return {
+        "message": f"Restarted {name}" if start_result.get("started") else start_result.get("message", f"Restart requested for {name}"),
+        "restarted": bool(start_result.get("started")),
+        "details": {"stop": stop_result, "start": start_result},
+    }
 
 
 @app.post("/api/open-file-manager")

@@ -32,7 +32,12 @@
 │  ┌────────────┐  ┌───────────┐  ┌────────────────────────┐    │
 │  │   Chrome   │  │   xRDP    │  │    UI-Bridge Service    │    │
 │  │  + DevTools│  │   :3389   │  │      :9876              │    │
-│  └────────────┘  └───────────┘  └────────────────────────┘    │
+│  └────────────┘  └─────┬─────┘  └────────────────────────┘    │
+│                        │                                        │
+│  ┌─────────────────────┴───────────────────────────────────┐   │
+│  │  Apache Guacamole webapp :8080 -> guacd -> xRDP          │   │
+│  │  Browser route: /remote-desktop and /guacamole/ proxy    │   │
+│  └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │  Ubuntu 24.04 LTS · Tailscale · chrony                  │   │
@@ -50,6 +55,8 @@
 | Control Plane | API + dashboard | 9877 | No |
 | Chrome | Browser for agents, DevTools | 9222 (debug) | No |
 | xRDP | Remote desktop access | 3389 | No |
+| Guacamole | Browser remote desktop gateway | 8080 / `/guacamole/` | Yes |
+| guacd | Native remote desktop proxy daemon | 4822 internal | Yes |
 | UI-Bridge | Source map resolution | 9876 | No |
 | Node Exporter | System metrics | 9100 | No |
 | BorgBackup | Encrypted backups | — | No |
@@ -96,11 +103,13 @@ Public Internet → Provider firewall → no public admin ingress by default
 Tailnet admin device → Tailscale ACLs/grants → workstation tailnet IP
                                                 ├── :22   Tailscale SSH
                                                 ├── :3389 xRDP, if enabled by policy
+                                                ├── :8080 Guacamole, if enabled by policy
                                                 ├── :9877 Control Plane, if enabled by policy
                                                 ├── :4000 LiteLLM, if enabled by policy
                                                 └── :3000/3010+ OpenHands, if enabled by policy
 
 Local-only / SSH-forwarded access               ├── :4000 LiteLLM
+                                                ├── :8080 Guacamole webapp
                                                 ├── :9100 Node Exporter
                                                 └── :9876 UI-Bridge
 ```
