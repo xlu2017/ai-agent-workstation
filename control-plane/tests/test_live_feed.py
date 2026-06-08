@@ -362,48 +362,53 @@ class TestSessionController:
         assert child["session"]["session_type"] == "child_session"
         assert child["session"]["parent_session_id"] == parent_id
 
-    def test_handle_prompt_records_events(self):
+    @pytest.mark.asyncio
+    async def test_handle_prompt_records_events(self):
         from sessions.controller import CreateSessionRequest, PromptRequest
         from live_feed.events import EventStore
         result = self.ctrl.create_session(CreateSessionRequest(prompt="initial"))
         sid = result["session"]["session_id"]
-        self.ctrl.handle_prompt(sid, PromptRequest(prompt="also check tests"))
+        await self.ctrl.handle_prompt(sid, PromptRequest(prompt="also check tests"))
         store = EventStore(self.tmpdir)
         events = store.get_events(sid)
         types = [e["event_type"] for e in events]
         assert "user_prompt_received" in types
         assert "routing_decision_made" in types
 
-    def test_handle_control_pause(self):
+    @pytest.mark.asyncio
+    async def test_handle_control_pause(self):
         from sessions.controller import CreateSessionRequest, ControlRequest
         from sessions.models import SessionStore, SessionStatus
         result = self.ctrl.create_session(CreateSessionRequest(prompt="task"))
         sid = result["session"]["session_id"]
-        ctrl_result = self.ctrl.handle_control(sid, ControlRequest(command="pause"))
+        ctrl_result = await self.ctrl.handle_control(sid, ControlRequest(command="pause"))
         assert ctrl_result["status"] == "paused"
         store = SessionStore(self.tmpdir)
         s = store.get(sid)
         assert s.status == SessionStatus.PAUSED
 
-    def test_handle_control_resume(self):
+    @pytest.mark.asyncio
+    async def test_handle_control_resume(self):
         from sessions.controller import CreateSessionRequest, ControlRequest
         result = self.ctrl.create_session(CreateSessionRequest(prompt="task"))
         sid = result["session"]["session_id"]
-        self.ctrl.handle_control(sid, ControlRequest(command="pause"))
-        ctrl_result = self.ctrl.handle_control(sid, ControlRequest(command="resume"))
+        await self.ctrl.handle_control(sid, ControlRequest(command="pause"))
+        ctrl_result = await self.ctrl.handle_control(sid, ControlRequest(command="resume"))
         assert ctrl_result["status"] == "resumed"
 
-    def test_handle_control_cancel(self):
+    @pytest.mark.asyncio
+    async def test_handle_control_cancel(self):
         from sessions.controller import CreateSessionRequest, ControlRequest
         from sessions.models import SessionStore, SessionStatus
         result = self.ctrl.create_session(CreateSessionRequest(prompt="task"))
         sid = result["session"]["session_id"]
-        self.ctrl.handle_control(sid, ControlRequest(command="cancel"))
+        await self.ctrl.handle_control(sid, ControlRequest(command="cancel"))
         store = SessionStore(self.tmpdir)
         s = store.get(sid)
         assert s.status == SessionStatus.CANCELLED
 
-    def test_prompt_stop_triggers_interrupt(self):
+    @pytest.mark.asyncio
+    async def test_prompt_stop_triggers_interrupt(self):
         from sessions.controller import CreateSessionRequest, PromptRequest
         from sessions.models import SessionStore, SessionStatus
         result = self.ctrl.create_session(CreateSessionRequest(prompt="task"))
@@ -411,10 +416,11 @@ class TestSessionController:
         # Set to editing so plan status = running
         store = SessionStore(self.tmpdir)
         store.update_status(sid, SessionStatus.EDITING)
-        prompt_result = self.ctrl.handle_prompt(sid, PromptRequest(prompt="stop"))
+        prompt_result = await self.ctrl.handle_prompt(sid, PromptRequest(prompt="stop"))
         assert prompt_result.get("status") in ("paused", "cancelled")
 
-    def test_prompt_spawns_child_for_new_task(self):
+    @pytest.mark.asyncio
+    async def test_prompt_spawns_child_for_new_task(self):
         from sessions.controller import CreateSessionRequest, PromptRequest
         from sessions.models import SessionStore, SessionStatus
         result = self.ctrl.create_session(CreateSessionRequest(
@@ -423,7 +429,7 @@ class TestSessionController:
         sid = result["session"]["session_id"]
         store = SessionStore(self.tmpdir)
         store.update_status(sid, SessionStatus.EDITING)
-        prompt_result = self.ctrl.handle_prompt(
+        prompt_result = await self.ctrl.handle_prompt(
             sid, PromptRequest(prompt="new task: migrate auth to OAuth")
         )
         assert "child_session" in prompt_result or "routing" in prompt_result
