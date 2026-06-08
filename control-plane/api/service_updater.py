@@ -28,6 +28,9 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Path of the running control-plane process (used to detect self-updates)
+_CONTROL_PLANE_REPO_PATH = str(Path(__file__).resolve().parent.parent.parent)
+
 # ---------------------------------------------------------------------------
 # Service configuration (static allowlist)
 # ---------------------------------------------------------------------------
@@ -323,6 +326,52 @@ def set_update_status(service_name: str, status: dict):
 def clear_update_status(service_name: str):
     with _update_status_lock:
         _update_status.pop(service_name, None)
+
+
+def is_self_update(service_name: str) -> bool:
+    """Return True if updating this service would modify the running control-plane's own repo.
+
+    When uvicorn runs with --reload, modifying files in the repo triggers an
+    automatic server restart, which kills the in-flight HTTP response and causes
+    a 'Network error' on the frontend.  For self-updates we defer the actual
+    git work to a background thread so the response is sent first.
+    """
+    config = SERVICE_CONFIGS.get(service_name)
+    if config is None:
+        return False
+    return str(Path(config["path"]).resolve()) == _CONTROL_PLANE_REPO_PATH
+
+
+def _background_update(service_name: str, restart: bool) -> None:
+    """Run the update in a background thread (fire-and-forget for self-updates)."""
+    try:
+        result = _do_update(service_name, restart)
+        status = {
+            "in_progress": False,
+            "last_update": {
+                "commit": result.commit_after,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": "success" if result.ok else "failed",
+                "message": result.message or (result.error or {}).get("message", ""),
+            },
+        }
+        set_update_status(service_name, status)
+    except Exception as exc:
+        set_update_status(service_name, {
+            "in_progress": False,
+            "last_update": {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": "failed",
+                "message": _sanitize(str(exc)),
+            },
+        })
+
+
+def schedule_deferred_update(service_name: str, restart: bool = True) -> None:
+    """Schedule a self-update to run after the HTTP response is sent."""
+    set_update_status(service_name, {"in_progress": True, "started": datetime.now(timezone.utc).isoformat()})
+    t = threading.Thread(target=_background_update, args=(service_name, restart), daemon=True)
+    t.start()
 
 
 async def update_service(service_name: str, restart: bool = True) -> UpdateResult:

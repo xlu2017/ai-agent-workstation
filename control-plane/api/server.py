@@ -33,6 +33,8 @@ from typing import Optional
 from api.service_updater import (
     SERVICE_CONFIGS,
     get_service_update_metadata,
+    is_self_update,
+    schedule_deferred_update,
     update_service,
 )
 
@@ -797,9 +799,28 @@ class UpdateLatestBody(BaseModel):
 
 @app.post("/api/v2/services/{service_name}/update-latest")
 async def update_service_latest(service_name: str, body: UpdateLatestBody = UpdateLatestBody()):
-    """Fetch the latest code from GitHub for a repo-backed service."""
+    """Fetch the latest code from GitHub for a repo-backed service.
+
+    For services whose repo path is the same as the running control-plane
+    (self-updates), the git fetch/reset would modify files that uvicorn's
+    --reload watcher is monitoring, killing the server mid-response.  In
+    that case we defer the update to a background thread and return an
+    immediate 202 so the response reaches the browser before the reload.
+    The frontend can poll GET /api/services to check completion status.
+    """
     if service_name not in SERVICE_CONFIGS:
         raise HTTPException(404, {"ok": False, "service": service_name, "error": {"code": "UNKNOWN_SERVICE", "message": f"Service '{service_name}' is not configured for updates."}})
+
+    # Self-update: defer to background so the response isn't killed by reload
+    if is_self_update(service_name):
+        schedule_deferred_update(service_name, restart=body.restart)
+        return {
+            "ok": True,
+            "service": service_name,
+            "deferred": True,
+            "message": f"{service_name} update started in background. The server will reload automatically.",
+        }
+
     result = await update_service(service_name, restart=body.restart)
     if not result.ok:
         return JSONResponse(
