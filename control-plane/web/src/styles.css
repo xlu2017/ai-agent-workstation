@@ -341,13 +341,29 @@ body {
 .event-msg { color: var(--text-dim); font-size: 12px; }
 .event-time { color: var(--text-dim); font-size: 10px; opacity: 0.7; }
 
-/* Thinking */
-.thinking {
-  color: var(--text-dim);
-  font-size: 13px;
-  animation: pulse 1.5s ease-in-out infinite;
+/* Progress status */
+.progress-status { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
+.progress-icon { font-size: 18px; line-height: 1; }
+.progress-stage { font-weight: 600; font-size: 14px; color: var(--text-primary, #1e293b); }
+.progress-detail { font-size: 13px; color: var(--text-dim, #64748b); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-count { font-size: 11px; color: var(--text-dim, #94a3b8); font-family: monospace; white-space: nowrap; }
+.progress-bar-container { height: 3px; background: var(--border, #e2e8f0); border-radius: 2px; overflow: hidden; margin: 2px 0 6px; }
+.progress-bar-fill { height: 100%; background: linear-gradient(90deg, #6366f1, #818cf8); border-radius: 2px; animation: progress-slide 2s ease-in-out infinite; width: 40%; }
+@keyframes progress-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+.progress-events-toggle { margin: 4px 0; }
+.progress-events-toggle > summary { cursor: pointer; font-size: 12px; color: #6366f1; font-weight: 500; padding: 2px 0; user-select: none; }
+.progress-events-toggle > summary:hover { color: #4f46e5; }
+
+/* Mode selector */
+.mode-selector { display: flex; gap: 6px; margin-bottom: 8px; }
+.mode-btn {
+  padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border, #e2e8f0);
+  background: var(--bg-card, #fff); color: var(--text-dim, #64748b);
+  font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s;
 }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.mode-btn:hover:not(:disabled) { border-color: #6366f1; color: #6366f1; }
+.mode-btn.mode-active { background: #6366f1; color: white; border-color: #6366f1; }
+.mode-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Input area */
 .chat-input-area {

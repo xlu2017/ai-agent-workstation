@@ -1,3 +1,4 @@
+import asyncio
 #!/usr/bin/env python3
 """
 Control Plane API — FastAPI server wrapping shared control-plane services.
@@ -20,7 +21,7 @@ sys.path.insert(0, str(CONTROL_PLANE_ROOT / "cli"))
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -355,42 +356,126 @@ class ChatMessage(BaseModel):
     instruction: str
     model: Optional[str] = None
     executor: Optional[str] = None
+    execution_mode: Optional[str] = "finite"  # finite | open_ended | loop
 
 
 # --- Chat/Task endpoint (end-to-end prompt flow) ---
+
+# Background task tracking
+_running_tasks: dict[str, asyncio.Task] = {}
 
 @app.post("/api/sessions/{session_id}/chat")
 async def session_chat(session_id: str, body: ChatMessage):
     """Submit a prompt for execution in a session.
 
     Flow: route → policy check → advisory plan → execute via OpenHands → events.
+    Runs execution in background so event polling works during execution.
     """
     from execution.prompt_handler import handle_prompt, TaskState
-    try:
-        result = await handle_prompt(
-            session_id=session_id,
-            instruction=body.instruction,
-            model=body.model or DEFAULT_MODEL,
-        )
-        status_code = 200
-        if result.state == TaskState.BLOCKED:
-            status_code = 202  # Accepted but blocked
-        elif result.state == TaskState.FAILED:
-            status_code = 500
+    import uuid as _uuid
 
-        return {
-            "task_id": result.task_id,
-            "session_id": result.session_id,
-            "state": result.state.value,
-            "message": result.message,
-            "routing_decision": result.routing_decision,
-            "plan_summary": result.plan_summary,
-            "error": result.error,
-            "events_path": result.events_path,
-            "metadata": result.metadata,
-        }
-    except Exception as e:
-        raise HTTPException(500, f"Prompt handling failed: {e}") from e
+    task_id = f"task-{_uuid.uuid4().hex[:12]}"
+
+    # Reject concurrent requests for the same session
+    existing = _running_tasks.get(session_id)
+    if existing and not existing.done():
+        return JSONResponse(
+            status_code=409,
+            content={"error": "A task is already running for this session", "session_id": session_id},
+        )
+
+    async def _run_in_background():
+        try:
+            result = await handle_prompt(
+                session_id=session_id,
+                instruction=body.instruction,
+                model=body.model or DEFAULT_MODEL,
+                execution_mode=body.execution_mode or "finite",
+            )
+            return result
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return None
+
+    bg_task = asyncio.create_task(_run_in_background())
+    _running_tasks[session_id] = bg_task
+
+    # Wait briefly to capture initial events (routing, planning)
+    await asyncio.sleep(0.5)
+
+    # If task completed quickly, return full result
+    if bg_task.done():
+        result = bg_task.result()
+        if result:
+            return {
+                "task_id": result.task_id,
+                "session_id": result.session_id,
+                "state": result.state.value,
+                "message": result.message,
+                "routing_decision": getattr(result, "routing_decision", ""),
+                "plan_summary": str(getattr(result, "plan_summary", ""))[:200],
+                "error": getattr(result, "error", ""),
+                "events_path": str(getattr(result, "events_path", "")),
+                "metadata": getattr(result, "metadata", {}),
+            }
+        return {"task_id": task_id, "session_id": session_id, "state": "failed", "message": "Execution error"}
+
+    # Task still running — return immediately so event polling can work
+    return {
+        "task_id": task_id,
+        "session_id": session_id,
+        "state": "working",
+        "message": "Execution started. Poll events for progress.",
+    }
+
+
+
+
+@app.get("/api/sessions/{session_id}/chat/status")
+async def session_chat_status(session_id: str):
+    """Check if background chat execution is complete."""
+    from execution.prompt_handler import TaskState
+    bg_task = _running_tasks.get(session_id)
+    if not bg_task:
+        return {"state": "unknown", "message": "No active task"}
+    if not bg_task.done():
+        return {"state": "working", "message": "Still executing..."}
+    result = bg_task.result()
+    _running_tasks.pop(session_id, None)
+    if not result:
+        return {"state": "failed", "message": "Execution error"}
+    return {
+        "task_id": result.task_id,
+        "session_id": result.session_id,
+        "state": result.state.value,
+        "message": result.message,
+        "routing_decision": getattr(result, "routing_decision", ""),
+        "plan_summary": str(getattr(result, "plan_summary", ""))[:200],
+        "error": getattr(result, "error", ""),
+    }
+
+@app.get("/api/sessions/{session_id}/events/stream")
+async def stream_session_events(session_id: str, after: int = 0):
+    """Stream events for a session via SSE. Returns new events since 'after' sequence number."""
+    import json as _json
+    events_file = SESSIONS_DIR / session_id / "events" / "events.jsonl"
+    events = []
+    if events_file.exists():
+        all_lines = events_file.read_text().strip().split("\n")
+        for idx, line in enumerate(all_lines):
+            if line.strip():
+                try:
+                    ev = _json.loads(line)
+                    # Use index as fallback sequence number
+                    seq = ev.get("sequence", idx + 1)
+                    if seq > after:
+                        ev["_seq"] = seq
+                        events.append(ev)
+                except Exception:
+                    continue
+    total = len(events) + after
+    return {"events": events, "total": total}
 
 
 @app.get("/api/sessions/{session_id}/events/stream")

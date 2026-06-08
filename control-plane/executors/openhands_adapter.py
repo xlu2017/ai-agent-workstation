@@ -29,6 +29,7 @@ import json
 import os
 import pty
 import select
+import shlex
 import signal
 import subprocess
 import time
@@ -48,7 +49,7 @@ from executors.base import ExecutorAdapter, TaskPacket, TaskResult, SESSIONS_DIR
 LITELLM_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
 LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", "sk-1234")
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-chat")
-MAX_ITERATIONS = int(os.environ.get("OPENHANDS_MAX_ITERATIONS", "30"))
+MAX_ITERATIONS = int(os.environ.get("OPENHANDS_MAX_ITERATIONS", "50"))
 MAX_OUTPUT_CHARS = 4000
 COMMAND_TIMEOUT = int(os.environ.get("COMMAND_TIMEOUT", "60"))
 PROTECTED_BRANCHES = {"main", "master", "develop", "production"}
@@ -584,7 +585,7 @@ class ToolExecutor:
 
         try:
             result = subprocess.run(
-                ["git"] + command.split(),
+                ["git"] + shlex.split(command),
                 cwd=self.workspace,
                 capture_output=True,
                 text=True,
@@ -686,7 +687,7 @@ class ToolExecutor:
                     str(resolved).startswith("/tmp")):
                 return f"BLOCKED: path '{path}' escapes workspace boundary"
         except Exception:
-            pass
+            return f"BLOCKED: cannot resolve path '{path}'"
         return fpath
 
     def _get_branch(self) -> str:
@@ -760,13 +761,15 @@ Working directory: {workspace}
 
 ## Rules
 1. Work ONLY within the workspace directory.
-2. Be efficient — read files before editing, check what exists first.
-3. Use edit_file for targeted changes (preferred over write_file for existing files).
-4. Run tests after making changes to verify correctness.
-5. Call finish() when the task is complete or when you determine it cannot be done.
-6. If something fails, try an alternative approach before giving up.
-7. Do NOT push to remote. Do NOT modify protected branches (main/master/develop).
-8. Commit your changes to the current branch when task is complete.
+2. Be efficient — read only the files you need, then START WRITING CODE IMMEDIATELY.
+3. Do NOT read every file before acting. Read 2-3 key files, then implement. Read more only when stuck.
+4. Use edit_file for targeted changes (preferred over write_file for existing files).
+5. Run tests after making changes to verify correctness.
+6. Call finish() when the task is complete or when you determine it cannot be done.
+7. If something fails, try an alternative approach before giving up.
+8. Do NOT push to remote. Do NOT modify protected branches (main/master/develop).
+9. Commit your changes to the current branch when task is complete.
+10. BIAS TOWARD ACTION: After reading context, write code. Do not endlessly read files.
 
 ## Current Branch
 {branch}
@@ -789,10 +792,32 @@ def _prune_messages(messages: list[dict], max_chars: int = 200000) -> None:
             old_len = len(content)
             msg["content"] = content[:200] + "\n... [truncated to fit context] ...\n" + content[-200:]
             total -= (old_len - len(msg["content"]))
-    # If still over, remove middle messages
+    # If still over, remove oldest assistant+tool groups (keep system + first user)
     while total > max_chars and len(messages) > 4:
-        removed = messages.pop(2)
-        total -= len(str(removed.get("content", "") or ""))
+        idx = 2
+        if idx >= len(messages):
+            break
+        msg = messages[idx]
+        # Remove the message and track size reduction
+        removed_size = len(str(msg.get("content", "") or ""))
+        messages.pop(idx)
+        # If we removed an assistant message with tool_calls, also remove its paired tool responses
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            tool_call_ids = {tc.get("id") for tc in msg["tool_calls"] if isinstance(tc, dict)}
+            while idx < len(messages) and messages[idx].get("role") == "tool":
+                if messages[idx].get("tool_call_id") in tool_call_ids:
+                    orphan = messages.pop(idx)
+                    removed_size += len(str(orphan.get("content", "") or ""))
+                else:
+                    break
+        # If we removed a tool message, find and clean up its parent's tool_call entry
+        elif msg.get("role") == "tool" and msg.get("tool_call_id"):
+            orphan_id = msg["tool_call_id"]
+            for prev in messages[:idx]:
+                if prev.get("role") == "assistant" and prev.get("tool_calls"):
+                    prev["tool_calls"] = [tc for tc in prev["tool_calls"]
+                                          if tc.get("id") != orphan_id]
+        total -= removed_size
 
 
 def _run_agent_loop(
@@ -800,6 +825,7 @@ def _run_agent_loop(
     workspace: str,
     model: str = DEFAULT_MODEL,
     max_iterations: int = MAX_ITERATIONS,
+    execution_mode: str = "finite",
     event_callback=None,
     plan_context: str = "",
 ) -> tuple[str, str, list[str], int, int, list[str]]:
@@ -826,9 +852,15 @@ def _run_agent_loop(
     status = "completed"
     summary = ""
 
-    for iteration in range(max_iterations):
+    effective_limit = max_iterations if execution_mode == "finite" else 999999
+    for iteration in range(effective_limit):
         if event_callback:
-            event_callback("action_progress", f"Agent iteration {iteration + 1}/{max_iterations}", {
+            if execution_mode == "finite":
+                iter_label = f"{iteration + 1}/{max_iterations}"
+            else:
+                mode_name = "open-ended" if execution_mode == "open_ended" else "loop"
+                iter_label = f"{iteration + 1} ({mode_name})"
+            event_callback("action_progress", f"Agent iteration {iter_label}", {
                 "iteration": iteration + 1,
                 "tools_used": len(executor.commands_run),
                 "files_edited": len(executor.files_edited),
@@ -913,8 +945,12 @@ def _run_agent_loop(
             })
 
     else:
-        summary = f"Reached max iterations ({max_iterations}) without calling finish"
-        status = "needs_review"
+        if execution_mode == "finite":
+            summary = f"Reached max iterations ({max_iterations}) without calling finish"
+            status = "needs_review"
+        else:
+            summary = f"Completed after {effective_limit} iterations (mode: {execution_mode})"
+            status = "completed"
 
     return (status, summary, executor.files_edited,
             executor.tests_passed, executor.tests_failed, executor.commands_run)
@@ -1049,6 +1085,7 @@ class OpenHandsExecutorAdapter(ExecutorAdapter):
                 instruction=packet.to_markdown(),
                 workspace=workspace,
                 model=packet.model or DEFAULT_MODEL,
+                execution_mode=getattr(packet, 'execution_mode', 'finite'),
                 event_callback=event_callback,
                 plan_context=plan_context,
             )

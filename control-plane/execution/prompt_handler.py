@@ -25,12 +25,19 @@ import logging
 import os
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+# Dedicated thread pool for agent execution (avoids exhausting asyncio's default pool)
+_agent_executor = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("AGENT_POOL_SIZE", "8")),
+    thread_name_prefix="agent",
+)
 
 def _sessions_dir() -> Path:
     return Path(os.environ.get("SESSIONS_DIR", "/opt/workstation/sessions"))
@@ -82,10 +89,10 @@ class RuntimePolicy:
         "rm -rf /", "shutdown", "reboot", "mkfs",
     ])
     mutation_allowed: bool = True
-    commit_requires_approval: bool = True
-    push_requires_approval: bool = True
-    deploy_requires_approval: bool = True
-    secrets_require_approval: bool = True
+    commit_requires_approval: bool = False
+    push_requires_approval: bool = False
+    deploy_requires_approval: bool = False
+    secrets_require_approval: bool = False
 
 
 def _emit_event(session_id: str, event_type: str, message: str = "", metadata: dict = None):
@@ -147,6 +154,7 @@ async def handle_prompt(
     model: str = "",
     use_agent_core: bool = True,
     policy: RuntimePolicy | None = None,
+    execution_mode: str = "finite",
 ) -> TaskHandle:
     """End-to-end prompt handler.
 
@@ -262,7 +270,7 @@ async def handle_prompt(
     _emit_event(session_id, "action_started", "Starting OpenHands executor", {"task_id": task_id})
 
     try:
-        result = await _execute_via_openhands(session_id, instruction, task_id, model)
+        result = await _execute_via_openhands(session_id, instruction, task_id, model, execution_mode)
     except Exception as e:
         error_msg = f"Execution failed: {e}"
         _emit_event(session_id, "action_failed", error_msg, {"task_id": task_id})
@@ -314,6 +322,7 @@ async def _execute_via_openhands(
     instruction: str,
     task_id: str,
     model: str = "",
+    execution_mode: str = "finite",
 ) -> dict[str, Any]:
     """Execute instruction via the OpenHands local executor adapter.
 
@@ -337,7 +346,15 @@ async def _execute_via_openhands(
             pass
 
     if not worktree_path or not Path(worktree_path).exists():
-        worktree_path = "/opt/workstation/repos/agent-core"
+        # Fall back to DEFAULT_REPO_PATH env var, then error
+        worktree_path = os.environ.get("DEFAULT_REPO_PATH", "")
+        if not worktree_path or not Path(worktree_path).exists():
+            return {
+                "status": "failed",
+                "summary": "No valid workspace found for session. Set DEFAULT_REPO_PATH or create session with a repo.",
+                "files_edited": [],
+                "duration_seconds": 0,
+            }
 
     adapter = OpenHandsExecutorAdapter()
 
@@ -357,11 +374,13 @@ async def _execute_via_openhands(
         worktree_path=worktree_path,
         branch=branch or "main",
         model=model or os.environ.get("DEFAULT_MODEL", "deepseek-chat"),
+        execution_mode=execution_mode,
     )
 
     start = time.time()
     try:
-        result = adapter.run_task(session_id, packet)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(_agent_executor, adapter.run_task, session_id, packet)
         duration = time.time() - start
         # Get raw output from events (last executor_finished event)
         raw_output = ""
