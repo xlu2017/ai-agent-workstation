@@ -9,6 +9,7 @@ Handles:
 This module owns the decision layer. It delegates to:
   - prompt_router for routing decisions
   - agent_core_client for plan generation/validation/outcome recording
+  - WorkflowAdapter for durable plan execution (Hatchet/inprocess)
   - live_feed/events for event logging
   - sessions/models for session persistence
 """
@@ -25,8 +26,10 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 
+from adapters.workflow.base import WorkflowAdapter
+from agent_core_client.client import AgentCoreClient, PlanRequest
 from live_feed.events import EventStore, EventType, create_event
-from prompt_router.router import RoutingInput, RoutingOutput, route_prompt
+from prompt_router.router import RoutingDecision, RoutingInput, RoutingOutput, route_prompt
 from sessions.models import Session, SessionStatus, SessionStore, SessionType
 
 
@@ -66,15 +69,24 @@ class ControlRequest(BaseModel):
 
 
 class SessionController:
-    """Orchestrates session lifecycle and prompt routing."""
+    """Orchestrates session lifecycle and prompt routing.
+
+    Now integrates with:
+      - AgentCoreClient for plan generation/validation
+      - WorkflowAdapter for durable plan execution
+    """
 
     def __init__(
         self,
         sessions_dir: str | Path = "/opt/workstation/sessions",
+        agent_core_client: AgentCoreClient | None = None,
+        workflow_adapter: WorkflowAdapter | None = None,
     ):
         self.session_store = SessionStore(sessions_dir)
         self.event_store = EventStore(sessions_dir)
         self.sessions_dir = Path(sessions_dir)
+        self.agent_core_client = agent_core_client
+        self.workflow_adapter = workflow_adapter
 
     def create_session(self, request: CreateSessionRequest) -> dict[str, Any]:
         """Create a new session."""
@@ -131,16 +143,17 @@ class SessionController:
             "message": f"Session {session.session_id} created.",
         }
 
-    def handle_prompt(
+    async def handle_prompt(
         self, session_id: str, request: PromptRequest
     ) -> dict[str, Any]:
         """Handle a prompt submitted while work may be running.
 
+        Flow:
         1. Record user_prompt_received event
         2. Load session state
         3. Route prompt
         4. Record routing_decision_made event
-        5. Return routing decision
+        5. Execute routing decision (may call agent-core + start workflow)
         """
         session = self.session_store.get(session_id)
         if session is None:
@@ -189,11 +202,11 @@ class SessionController:
         )
 
         # 5. Execute the routing decision
-        result = self._execute_routing_decision(session, routing_output, request.prompt)
+        result = await self._execute_routing_decision(session, routing_output, request.prompt)
 
         return result
 
-    def handle_control(
+    async def handle_control(
         self, session_id: str, request: ControlRequest
     ) -> dict[str, Any]:
         """Handle a control command (pause/resume/cancel/commit)."""
@@ -206,6 +219,8 @@ class SessionController:
         if command == "pause":
             session.status = SessionStatus.PAUSED
             self.session_store.save(session)
+            if self.workflow_adapter:
+                await self.workflow_adapter.pause(session_id)
             self.event_store.append(
                 create_event(EventType.PLAN_PAUSED, session_id)
             )
@@ -214,6 +229,8 @@ class SessionController:
         elif command == "resume":
             session.status = SessionStatus.EDITING
             self.session_store.save(session)
+            if self.workflow_adapter:
+                await self.workflow_adapter.resume(session_id)
             self.event_store.append(
                 create_event(EventType.PLAN_RESUMED, session_id)
             )
@@ -222,49 +239,165 @@ class SessionController:
         elif command == "cancel":
             session.status = SessionStatus.CANCELLED
             self.session_store.save(session)
+            if self.workflow_adapter:
+                await self.workflow_adapter.cancel(session_id)
             self.event_store.append(
                 create_event(EventType.PLAN_CANCELLED, session_id)
             )
             return {"status": "cancelled", "message": "Session cancelled."}
 
         elif command == "commit_checkpoint":
-            self.event_store.append(
-                create_event(
-                    EventType.COMMIT_CREATED,
-                    session_id,
-                    trigger="user_request",
-                )
-            )
+            # Do not emit COMMIT_CREATED without a real commit.
+            # Request a commit via the workflow if available.
             return {
                 "status": "commit_requested",
-                "message": "Commit checkpoint requested. Platform will commit validated changes.",
+                "message": "Commit checkpoint requested; pending platform validation.",
             }
 
         return {"error": f"Unknown control command: {command}"}
 
-    def _infer_plan_status(self, session: Session) -> str:
-        """Infer plan status from session status."""
-        status_map = {
-            SessionStatus.EDITING: "running",
-            SessionStatus.VALIDATING: "running",
-            SessionStatus.PLANNING: "running",
-            SessionStatus.PAUSED: "paused",
-            SessionStatus.COMPLETED: "completed",
-            SessionStatus.CANCELLED: "completed",
-            SessionStatus.FAILED: "completed",
-        }
-        return status_map.get(session.status, "none")
+    async def _request_and_start_plan(
+        self,
+        session: Session,
+        prompt: str,
+        mode_preference: str = "finite",
+    ) -> dict[str, Any]:
+        """Request a plan from agent-core, validate it, and start the workflow.
 
-    def _get_current_action(self, session_id: str) -> str:
-        """Get the most recent action_started event."""
-        evt = self.event_store.get_latest_event(
-            session_id, EventType.ACTION_STARTED
+        Flow:
+          1. Emit PLAN_REQUESTED
+          2. Call AgentCoreClient.plan()
+          3. If not ok: emit PLAN_VALIDATION_FAILED, return error
+          4. Call AgentCoreClient.validate_plan()
+          5. If invalid: emit PLAN_VALIDATION_FAILED, return error
+          6. Emit PLAN_GENERATED
+          7. Call WorkflowAdapter.start_plan()
+          8. Emit PLAN_STARTED
+          9. Return plan + workflow result
+        """
+        session_id = session.session_id
+
+        if self.agent_core_client is None:
+            return {"error": "agent-core client not configured"}
+
+        if self.workflow_adapter is None:
+            return {"error": "workflow adapter not configured"}
+
+        # 1. Emit PLAN_REQUESTED
+        self.session_store.update_status(session_id, SessionStatus.PLANNING)
+        self.event_store.append(
+            create_event(
+                EventType.PLAN_REQUESTED, session_id,
+                prompt=prompt,
+                mode_preference=mode_preference,
+            )
         )
-        if evt:
-            return evt.get("data", {}).get("action_name", "")
-        return ""
 
-    def _execute_routing_decision(
+        # 2. Call agent-core for plan
+        try:
+            plan_request = PlanRequest(
+                session_id=session_id,
+                repo_id=session.repo_id,
+                prompt=prompt,
+                allowed_actions=session.allowed_actions,
+                mode_preference=mode_preference,
+            )
+            plan_response = await self.agent_core_client.plan(plan_request)
+        except Exception as e:
+            self.event_store.append(
+                create_event(
+                    EventType.PLAN_VALIDATION_FAILED, session_id,
+                    error=str(e),
+                    source="agent_core_plan",
+                )
+            )
+            self.session_store.update_status(session_id, SessionStatus.FAILED)
+            return {"error": f"agent-core plan request failed: {e}"}
+
+        # 3. Check plan response
+        if not plan_response.get("ok", False):
+            error_msg = plan_response.get("error", "Plan generation failed")
+            self.event_store.append(
+                create_event(
+                    EventType.PLAN_VALIDATION_FAILED, session_id,
+                    error=error_msg,
+                    source="agent_core_plan_response",
+                )
+            )
+            self.session_store.update_status(session_id, SessionStatus.FAILED)
+            return {"error": error_msg, "plan_response": plan_response}
+
+        plan = plan_response.get("plan", {})
+
+        # 4. Validate plan with agent-core
+        try:
+            validation = await self.agent_core_client.validate_plan(
+                session.allowed_actions, plan
+            )
+        except Exception as e:
+            self.event_store.append(
+                create_event(
+                    EventType.PLAN_VALIDATION_FAILED, session_id,
+                    error=str(e),
+                    source="agent_core_validate",
+                )
+            )
+            self.session_store.update_status(session_id, SessionStatus.FAILED)
+            return {"error": f"agent-core validation failed: {e}"}
+
+        # 5. Check validation
+        if not validation.get("valid", False):
+            errors = validation.get("errors", [])
+            self.event_store.append(
+                create_event(
+                    EventType.PLAN_VALIDATION_FAILED, session_id,
+                    errors=errors,
+                    source="agent_core_validate_response",
+                )
+            )
+            self.session_store.update_status(session_id, SessionStatus.FAILED)
+            return {"error": "Plan validation failed", "validation_errors": errors}
+
+        # 6. Emit PLAN_GENERATED
+        self.event_store.append(
+            create_event(
+                EventType.PLAN_GENERATED, session_id,
+                plan=plan,
+                warnings=plan_response.get("warnings", []),
+            )
+        )
+
+        # 7. Start workflow
+        context = {
+            "repo_id": session.repo_id,
+            "worktree_id": session.worktree_id,
+            "allowed_actions": session.allowed_actions,
+        }
+        try:
+            workflow_result = await self.workflow_adapter.start_plan(
+                session_id, plan, context
+            )
+        except Exception as e:
+            self.session_store.update_status(session_id, SessionStatus.FAILED)
+            return {"error": f"Workflow start failed: {e}"}
+
+        # 8. Emit PLAN_STARTED
+        self.event_store.append(
+            create_event(
+                EventType.PLAN_STARTED, session_id,
+                backend=workflow_result.get("backend", ""),
+                workflow_run_id=workflow_result.get("workflow_run_id", ""),
+            )
+        )
+        self.session_store.update_status(session_id, SessionStatus.EDITING)
+
+        return {
+            "plan": plan,
+            "workflow": workflow_result,
+            "message": "Plan generated and workflow started.",
+        }
+
+    async def _execute_routing_decision(
         self,
         session: Session,
         routing: RoutingOutput,
@@ -274,7 +407,7 @@ class SessionController:
         decision = routing.decision
 
         if decision == RoutingDecision.INTERRUPT_CURRENT:
-            return self.handle_control(
+            return await self.handle_control(
                 session.session_id,
                 ControlRequest(command=routing.control_command or "pause"),
             )
@@ -297,9 +430,16 @@ class SessionController:
                     prompt=prompt,
                 )
             )
+            # Request and start plan for child session
+            child_id = child_result["session"]["session_id"]
+            child_session = self.session_store.get(child_id)
+            plan_result = {}
+            if child_session and self.agent_core_client and self.workflow_adapter:
+                plan_result = await self._request_and_start_plan(child_session, prompt)
             return {
                 "routing": routing.to_dict(),
                 "child_session": child_result["session"],
+                "plan": plan_result,
                 "message": "Started a child session because this is a separate task.",
             }
 
@@ -310,9 +450,16 @@ class SessionController:
                     session_type="root_session",
                 )
             )
+            # Request and start plan for new session
+            new_id = new_result["session"]["session_id"]
+            new_session = self.session_store.get(new_id)
+            plan_result = {}
+            if new_session and self.agent_core_client and self.workflow_adapter:
+                plan_result = await self._request_and_start_plan(new_session, prompt)
             return {
                 "routing": routing.to_dict(),
                 "new_session": new_result["session"],
+                "plan": plan_result,
                 "message": "Started a new session for this task.",
             }
 
@@ -323,15 +470,42 @@ class SessionController:
             }
 
         # APPEND_TO_CURRENT or MODIFY_CURRENT_PLAN
+        # These now trigger plan generation and workflow start
+        plan_result = {}
+        if self.agent_core_client and self.workflow_adapter:
+            mode = "finite"
+            if decision == RoutingDecision.MODIFY_CURRENT_PLAN:
+                mode = "finite"  # Modification creates a new finite plan
+            plan_result = await self._request_and_start_plan(session, prompt, mode)
+
         return {
             "routing": routing.to_dict(),
             "session_id": session.session_id,
+            "plan": plan_result,
             "message": _user_message(decision),
         }
 
+    def _infer_plan_status(self, session: Session) -> str:
+        """Infer plan status from session status."""
+        status_map = {
+            SessionStatus.EDITING: "running",
+            SessionStatus.VALIDATING: "running",
+            SessionStatus.PLANNING: "running",
+            SessionStatus.PAUSED: "paused",
+            SessionStatus.COMPLETED: "completed",
+            SessionStatus.CANCELLED: "completed",
+            SessionStatus.FAILED: "completed",
+        }
+        return status_map.get(session.status, "none")
 
-# Import here to avoid circular import
-from prompt_router.router import RoutingDecision
+    def _get_current_action(self, session_id: str) -> str:
+        """Get the most recent action_started event."""
+        evt = self.event_store.get_latest_event(
+            session_id, EventType.ACTION_STARTED
+        )
+        if evt:
+            return evt.get("data", {}).get("action_name", "")
+        return ""
 
 
 def _user_message(decision: RoutingDecision) -> str:

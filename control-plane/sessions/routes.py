@@ -52,6 +52,12 @@ def _get_controller() -> SessionController:
     return _controller
 
 
+def set_controller(ctrl: SessionController) -> None:
+    """Allow injecting a configured controller (e.g., with agent-core + workflow)."""
+    global _controller
+    _controller = ctrl
+
+
 def _get_concurrency() -> ConcurrencyManager:
     global _concurrency
     if _concurrency is None:
@@ -112,7 +118,7 @@ async def submit_prompt(
     interrupt_current, spawn_child_session, spawn_new_session, or queue.
     """
     ctrl = _get_controller()
-    result = ctrl.handle_prompt(session_id, body)
+    result = await ctrl.handle_prompt(session_id, body)
     if "error" in result:
         raise HTTPException(404, result["error"])
     return result
@@ -126,7 +132,7 @@ async def control_session(
 ) -> dict[str, Any]:
     """Send a control command: pause, resume, cancel, commit_checkpoint."""
     ctrl = _get_controller()
-    result = ctrl.handle_control(session_id, body)
+    result = await ctrl.handle_control(session_id, body)
     if "error" in result:
         raise HTTPException(404 if "not found" in result["error"] else 400, result["error"])
     return result
@@ -192,7 +198,8 @@ async def get_events(
     limit: int = Query(100, le=1000),
 ) -> dict[str, Any]:
     """Get events for a session (non-streaming, paginated)."""
-    store = EventStore(str(SESSIONS_DIR))
+    ctrl = _get_controller()
+    store = ctrl.event_store
     type_filter = None
     if event_type:
         try:

@@ -140,9 +140,11 @@ class SessionStore:
             sessions.append(s)
         return sessions
 
-    def update_status(self, session_id: str, status: SessionStatus) -> Session | None:
+    def update_status(self, session_id: str, status: SessionStatus | str) -> Session | None:
         session = self.get(session_id)
         if session is None:
             return None
+        if isinstance(status, str):
+            status = SessionStatus(status)
         session.status = status
         return self.save(session)
