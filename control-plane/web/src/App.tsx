@@ -58,6 +58,7 @@ interface RemoteDesktopConfig {
   url: string
   rdp_host: string
   security: string
+  auto_login: boolean
 }
 
 interface RemoteDesktopHealth {
@@ -83,6 +84,14 @@ interface ChatEntry {
 
 const API = '/api'
 
+interface GuacamoleSession {
+  authToken: string
+  username: string
+  dataSource: string
+  availableDataSources: string[]
+  connection_url: string
+}
+
 function StatusDot({ status }: { status: string }) {
   const color = status === 'healthy' ? '#4ade80' : status === 'unhealthy' ? '#f87171' : '#fbbf24'
   return <Circle size={8} fill={color} stroke={color} style={{ marginRight: 6 }} />
@@ -93,6 +102,8 @@ function RemoteDesktopPage() {
   const [remoteHealth, setRemoteHealth] = useState<RemoteDesktopHealth | null>(null)
   const [error, setError] = useState('')
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [frameSrc, setFrameSrc] = useState('')
+  const [autoLoginStatus, setAutoLoginStatus] = useState('')
   const frameShellRef = useRef<HTMLDivElement>(null)
 
   const refresh = useCallback(() => {
@@ -132,6 +143,45 @@ function RemoteDesktopPage() {
 
     frameShell.requestFullscreen().catch(err => setError((err as Error).message))
   }, [])
+
+  const startGuacamoleSession = useCallback(() => {
+    if (!config?.enabled) return
+    if (!config.auto_login) {
+      setFrameSrc(config.url)
+      setAutoLoginStatus('')
+      return
+    }
+
+    setAutoLoginStatus('Signing in to Guacamole...')
+    fetch(`${API}/v2/remote-desktop/token`, { method: 'POST' })
+      .then(async response => {
+        if (!response.ok) {
+          const message = await response.text()
+          throw new Error(message || 'Unable to sign in to Guacamole')
+        }
+        return response.json() as Promise<GuacamoleSession>
+      })
+      .then(session => {
+        localStorage.setItem('GUAC_AUTH', JSON.stringify({
+          authToken: session.authToken,
+          username: session.username,
+          dataSource: session.dataSource,
+          availableDataSources: session.availableDataSources,
+        }))
+        setFrameSrc(session.connection_url || config.url)
+        setAutoLoginStatus('Signed in')
+      })
+      .catch(err => {
+        setAutoLoginStatus(`Auto-login failed: ${(err as Error).message}`)
+        setFrameSrc(config.url)
+      })
+  }, [config?.auto_login, config?.enabled, config?.url])
+
+  useEffect(() => {
+    if (config?.enabled) {
+      startGuacamoleSession()
+    }
+  }, [config?.auto_login, config?.enabled, config?.url, startGuacamoleSession])
 
   if (error) {
     return (
@@ -194,19 +244,32 @@ docker compose -f ops/remote-desktop/docker-compose.guacamole.yml up -d`}</pre>
       ) : (
         <div ref={frameShellRef} className={`remote-frame-shell ${isFullscreen ? 'remote-frame-shell-fullscreen' : ''}`}>
           <div className="remote-frame-toolbar">
-            <span>Apache Guacamole</span>
-            <button className="btn-refresh" onClick={toggleFullscreen}>
-              {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-              {isFullscreen ? 'Exit Full Screen' : 'Full Screen'}
-            </button>
+            <div className="remote-frame-title">
+              <span>Apache Guacamole</span>
+              {autoLoginStatus && <small>{autoLoginStatus}</small>}
+            </div>
+            <div className="remote-frame-actions">
+              <button className="btn-refresh" onClick={startGuacamoleSession}>
+                <RefreshCw size={14} />
+                Reconnect
+              </button>
+              <button className="btn-refresh" onClick={toggleFullscreen}>
+                {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                {isFullscreen ? 'Exit Full Screen' : 'Full Screen'}
+              </button>
+            </div>
           </div>
-          <iframe
-            title="Apache Guacamole Remote Desktop"
-            src={config.url}
-            className="remote-frame"
-            allow="fullscreen; clipboard-read; clipboard-write"
-            allowFullScreen
-          />
+          {frameSrc ? (
+            <iframe
+              title="Apache Guacamole Remote Desktop"
+              src={frameSrc}
+              className="remote-frame"
+              allow="fullscreen; clipboard-read; clipboard-write"
+              allowFullScreen
+            />
+          ) : (
+            <div className="remote-frame-loading">Opening remote desktop...</div>
+          )}
         </div>
       )}
     </div>
