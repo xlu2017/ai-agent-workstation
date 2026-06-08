@@ -742,11 +742,11 @@ def list_services():
     """List known services with port, status, and PID."""
     import subprocess as sp
     services = [
-        {"name": "agent-core", "port": 3210, "description": "Advisory memory/planning"},
-        {"name": "litellm", "port": 4000, "description": "LLM proxy gateway"},
-        {"name": "control-plane", "port": 9877, "description": "FastAPI orchestrator"},
-        {"name": "openhands", "port": 3000, "description": "Execution runtime (Docker)"},
-        {"name": "dashboard", "port": 5173, "description": "Web UI (Vite dev)"},
+        {"name": "agent-core", "port": 3210, "description": "Advisory memory/planning", "can_start": True, "can_stop": True, "can_restart": True},
+        {"name": "litellm", "port": 4000, "description": "LLM proxy gateway", "can_start": True, "can_stop": True, "can_restart": True},
+        {"name": "control-plane", "port": 9877, "description": "FastAPI orchestrator", "can_start": True, "can_stop": False, "can_restart": True},
+        {"name": "openhands", "port": 3000, "description": "Execution runtime (Docker)", "can_start": True, "can_stop": True, "can_restart": True},
+        {"name": "dashboard", "port": 5173, "description": "Web UI (Vite dev)", "can_start": True, "can_stop": True, "can_restart": True},
     ]
     # Check which ports are actually listening
     try:
@@ -818,21 +818,86 @@ async def update_service_latest(service_name: str, body: UpdateLatestBody = Upda
     }
 
 
+def _service_commands():
+    return {
+        "agent-core": {
+            "port": 3210,
+            "start": "cd /opt/workstation/repos/agent-core && nohup node dist/index.js > /opt/workstation/logs/agent-core.log 2>&1 &",
+        },
+        "litellm": {
+            "port": 4000,
+            "start": "nohup litellm --config /opt/workstation/litellm-config.yaml --port 4000 > /opt/workstation/logs/litellm.log 2>&1 &",
+        },
+        "control-plane": {
+            "port": 9877,
+            "start": "cd /opt/workstation/repos/jubilant-goggles/control-plane && nohup /home/agent/.local/bin/uvicorn api.server:app --host 0.0.0.0 --port 9877 --reload > /opt/workstation/logs/control-plane.log 2>&1 &",
+        },
+        "openhands": {
+            "port": 3000,
+            "start": "docker run -d --name openhands --network host -v /opt/workstation/repos:/opt/workspace -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/all-hands-ai/openhands:latest",
+            "docker": True,
+        },
+        "dashboard": {
+            "port": 5173,
+            "start": "cd /opt/workstation/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
+        },
+    }
+
+
+def _port_listening(port: int) -> bool:
+    return _check_tcp("127.0.0.1", port, timeout=0.5)["status"] == "reachable"
+
+
+def _wait_for_port(port: int, desired: bool, timeout: float = 10.0) -> bool:
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _port_listening(port) is desired:
+            return True
+        time.sleep(0.25)
+    return _port_listening(port) is desired
+
+
+def _start_service_process(name: str):
+    import subprocess as sp
+    services = _service_commands()
+    if name not in services:
+        return {"error": f"Unknown service: {name}", "started": False}
+    service = services[name]
+    port = service["port"]
+    if _port_listening(port):
+        return {"message": f"{name} already running", "started": True}
+    sp.run(service["start"], shell=True, timeout=10)
+    started = _wait_for_port(port, True, timeout=15)
+    return {"message": f"Started {name}" if started else f"Start requested for {name}", "started": started}
+
+
+def _stop_service_process(name: str):
+    import subprocess as sp
+    services = _service_commands()
+    if name not in services:
+        return {"error": f"Unknown service: {name}", "stopped": False}
+    if name == "control-plane":
+        return {"error": "Use restart for control-plane; stop is disabled from the dashboard", "stopped": False}
+    service = services[name]
+    port = service["port"]
+    if service.get("docker"):
+        try:
+            sp.run(["docker", "stop", name], timeout=15)
+            sp.run(["docker", "rm", name], timeout=5)
+        except Exception as exc:
+            return {"error": str(exc), "stopped": False}
+    else:
+        sp.run(f"fuser -k {port}/tcp", shell=True, timeout=5)
+    stopped = _wait_for_port(port, False, timeout=10)
+    return {"message": f"Stopped {name} (port {port})" if stopped else f"Stop requested for {name}", "stopped": stopped}
+
+
 @app.post("/api/services/{name}/start")
 def start_service(name: str):
     """Start a known service."""
-    import subprocess as sp
-    commands = {
-        "agent-core": "cd /opt/workstation/repos/agent-core && nohup node dist/index.js > /opt/workstation/logs/agent-core.log 2>&1 &",
-        "litellm": "nohup litellm --config /opt/workstation/litellm-config.yaml --port 4000 > /opt/workstation/logs/litellm.log 2>&1 &",
-        "openhands": "docker run -d --name openhands --network host -v /opt/workstation/repos:/opt/workspace -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/all-hands-ai/openhands:latest",
-        "dashboard": "cd /opt/workstation/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
-    }
-    if name not in commands:
-        return {"error": f"Unknown service: {name}", "started": False}
     try:
-        sp.run(commands[name], shell=True, timeout=10)
-        return {"message": f"Started {name}", "started": True}
+        return _start_service_process(name)
     except Exception as e:
         return {"error": str(e), "started": False}
 
@@ -840,23 +905,39 @@ def start_service(name: str):
 @app.post("/api/services/{name}/stop")
 def stop_service(name: str):
     """Stop a known service by killing its port or docker container."""
-    import subprocess as sp
-    ports = {"agent-core": 3210, "litellm": 4000, "openhands": 3000, "dashboard": 5173}
-    if name == "openhands":
-        try:
-            sp.run(["docker", "stop", "openhands"], timeout=15)
-            sp.run(["docker", "rm", "openhands"], timeout=5)
-            return {"message": "Stopped openhands container", "stopped": True}
-        except Exception as e:
-            return {"error": str(e), "stopped": False}
-    if name not in ports:
-        return {"error": f"Unknown service: {name}", "stopped": False}
-    port = ports[name]
     try:
-        sp.run(f"fuser -k {port}/tcp", shell=True, timeout=5)
-        return {"message": f"Stopped {name} (port {port})", "stopped": True}
+        return _stop_service_process(name)
     except Exception as e:
         return {"error": str(e), "stopped": False}
+
+
+@app.post("/api/services/{name}/restart")
+def restart_service(name: str):
+    """Restart a known service from the control-plane process."""
+    import subprocess as sp
+    services = _service_commands()
+    if name not in services:
+        return {"error": f"Unknown service: {name}", "restarted": False}
+    if name == "control-plane":
+        command = (
+            "sleep 1; "
+            "fuser -k 9877/tcp; "
+            "sleep 1; "
+            "cd /opt/workstation/repos/jubilant-goggles/control-plane && "
+            "nohup /home/agent/.local/bin/uvicorn api.server:app --host 0.0.0.0 --port 9877 --reload "
+            "> /opt/workstation/logs/control-plane.log 2>&1 &"
+        )
+        sp.Popen(["/bin/sh", "-c", command], stdout=sp.DEVNULL, stderr=sp.DEVNULL, start_new_session=True)
+        return {"message": "Restarting control-plane", "restarted": True}
+    stop_result = _stop_service_process(name)
+    if not stop_result.get("stopped"):
+        return {"error": stop_result.get("error", f"Unable to stop {name}"), "restarted": False}
+    start_result = _start_service_process(name)
+    return {
+        "message": f"Restarted {name}" if start_result.get("started") else start_result.get("message", f"Restart requested for {name}"),
+        "restarted": bool(start_result.get("started")),
+        "details": {"stop": stop_result, "start": start_result},
+    }
 
 
 @app.post("/api/open-file-manager")
