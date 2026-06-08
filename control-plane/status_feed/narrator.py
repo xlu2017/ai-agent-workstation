@@ -100,42 +100,42 @@ class StatusNarrator:
                 return None
             return self._msg("message", "The agent sent an update.", detail=text, severity="info")
 
-        if event_type == "openhands_conversation_start":
+        if event_type == "executor_started":
             cid = self._clip(event.get("conversation_id", ""), 16)
             return self._msg(
                 "started",
-                "I started an OpenHands conversation for this session.",
-                detail=f"Conversation: {cid}",
+                "I started an executor session for this task.",
+                detail=f"Session: {cid}" if cid else None,
                 severity="info",
             )
 
-        if event_type == "openhands_status":
+        if event_type == "executor_status":
             status = str(event.get("status", "UNKNOWN")).upper()
-            return self._describe_openhands_status(status)
+            return self._describe_executor_status(status)
 
-        if event_type == "openhands_event":
-            return self._describe_openhands_event(session_id, event)
+        if event_type == "executor_event":
+            return self._describe_executor_event(session_id, event)
 
-        if event_type == "openhands_timeout":
+        if event_type == "executor_timeout":
             return self._msg(
                 "blocked",
-                "OpenHands did not finish before the run timeout.",
+                "The executor did not finish before the run timeout.",
                 detail=f"Timeout: {event.get('timeout_seconds', 'unknown')} seconds.",
                 severity="warning",
             )
 
-        if event_type == "openhands_error":
+        if event_type == "executor_error":
             return self._msg(
                 "error",
-                "OpenHands reported an execution error.",
+                "The executor reported an execution error.",
                 detail=self._clip(event.get("error", ""), 300),
                 severity="error",
             )
 
-        if event_type == "openhands_final_response_error":
+        if event_type == "executor_final_response_error":
             return self._msg(
                 "warning",
-                "I could not fetch the final OpenHands response, but the task state is still recorded.",
+                "I could not fetch the final executor response, but the task state is still recorded.",
                 detail=self._clip(event.get("error", ""), 240),
                 severity="warning",
             )
@@ -212,25 +212,25 @@ class StatusNarrator:
 
         return self._msg("editing", text, detail=detail, severity=severity, reason_source=reason_source)
 
-    def _describe_openhands_status(self, status: str) -> dict[str, Any] | None:
+    def _describe_executor_status(self, status: str) -> dict[str, Any] | None:
         if status == "UNKNOWN":
             return None
         mapping = {
-            "IDLE": ("waiting", "OpenHands is idle and ready for the next instruction.", "info"),
-            "RUNNING": ("working", "OpenHands is actively working on the task.", "info"),
-            "FINISHED": ("finished", "OpenHands finished its run. I am checking the result.", "success"),
-            "PAUSED": ("paused", "OpenHands is paused.", "warning"),
-            "ERROR": ("error", "OpenHands ended with an error.", "error"),
-            "STUCK": ("blocked", "OpenHands appears to be stuck.", "warning"),
-            "TIMEOUT": ("blocked", "OpenHands reached the run timeout.", "warning"),
+            "IDLE": ("waiting", "The executor is idle and ready for the next instruction.", "info"),
+            "RUNNING": ("working", "The executor is actively working on the task.", "info"),
+            "FINISHED": ("finished", "The executor finished its run. I am checking the result.", "success"),
+            "PAUSED": ("paused", "The executor is paused.", "warning"),
+            "ERROR": ("error", "The executor ended with an error.", "error"),
+            "STUCK": ("blocked", "The executor appears to be stuck.", "warning"),
+            "TIMEOUT": ("blocked", "The executor reached the run timeout.", "warning"),
         }
-        phase, text, severity = mapping.get(status, ("working", f"OpenHands status is {status}.", "info"))
+        phase, text, severity = mapping.get(status, ("working", f"Executor status is {status}.", "info"))
         return self._msg(phase, text, severity=severity)
 
-    def _describe_openhands_event(self, session_id: str, event: dict[str, Any]) -> dict[str, Any] | None:
+    def _describe_executor_event(self, session_id: str, event: dict[str, Any]) -> dict[str, Any] | None:
         summary = event.get("summary") if isinstance(event.get("summary"), dict) else {}
         raw = event.get("raw") if isinstance(event.get("raw"), dict) else {}
-        kind = str(summary.get("kind") or "OpenHands event")
+        kind = str(summary.get("kind") or "executor event")
         source = summary.get("source")
 
         if "MessageEvent" in kind:
@@ -239,52 +239,52 @@ class StatusNarrator:
             if text:
                 return self._msg(
                     "message",
-                    f"OpenHands sent a {role} message.",
+                    f"The executor sent a {role} message.",
                     detail=self._clip(text, 300),
                     severity="info",
                     reason_source="agent_message",
                 )
-            return self._msg("message", f"OpenHands sent a {role} message.", severity="info")
+            return self._msg("message", f"The executor sent a {role} message.", severity="info")
 
         if "ActionEvent" in kind:
             tool = str(summary.get("tool_name") or summary.get("action") or self._recursive_find(raw, ("tool_name", "name", "tool")) or "a tool")
             path = self._recursive_find(raw, ("path", "file", "file_path", "target_file"))
             reason = self._extract_reason(raw)
-            reason_source = "explicit_openhands_event" if reason else None
+            reason_source = "explicit_executor_event" if reason else None
             if not reason:
                 reason, reason_source = self._find_recent_reason(session_id)
 
             if self._looks_like_edit_tool(tool) or path:
                 if path and reason:
-                    prefix = "because" if reason_source == "explicit_openhands_event" else "based on"
+                    prefix = "because" if reason_source == "explicit_executor_event" else "based on"
                     return self._msg(
                         "editing",
-                        f"OpenHands is editing {self._clip(path, 180)} {prefix} {self._clip(reason, 240)}.",
+                        f"The executor is editing {self._clip(path, 180)} {prefix} {self._clip(reason, 240)}.",
                         severity="info",
                         reason_source=reason_source,
                     )
                 if path:
                     return self._msg(
                         "editing",
-                        f"OpenHands is editing {self._clip(path, 180)}.",
+                        f"The executor is editing {self._clip(path, 180)}.",
                         detail="I could not find an explicit or recent rationale for this edit.",
                         severity="info",
                     )
                 if reason:
                     return self._msg(
                         "editing",
-                        f"OpenHands is making an edit based on {self._clip(reason, 240)}.",
+                        f"The executor is making an edit based on {self._clip(reason, 240)}.",
                         severity="info",
                         reason_source=reason_source,
                     )
 
-            return self._msg("working", f"OpenHands is using {tool}.", severity="info")
+            return self._msg("working", f"The executor is using {tool}.", severity="info")
 
         if "ObservationEvent" in kind:
             observation = summary.get("observation")
             return self._msg(
                 "observing",
-                "OpenHands received a tool result.",
+                "The executor received a tool result.",
                 detail=self._clip(observation, 240) if observation else None,
                 severity="info",
             )
@@ -292,7 +292,7 @@ class StatusNarrator:
         if "Error" in kind or summary.get("error") or summary.get("detail"):
             return self._msg(
                 "error",
-                "OpenHands reported an error event.",
+                "The executor reported an error event.",
                 detail=self._clip(summary.get("error") or summary.get("detail") or "", 300),
                 severity="error",
             )
@@ -386,11 +386,11 @@ class StatusNarrator:
                 return str(event["thought"]), "recent_agent_thought"
             if event_type == "agent_message" and event.get("text"):
                 return str(event["text"]), "recent_agent_message"
-            if event_type == "openhands_event":
+            if event_type == "executor_event":
                 summary = event.get("summary") if isinstance(event.get("summary"), dict) else {}
                 text = summary.get("text")
                 if text:
-                    return str(text), "recent_openhands_message"
+                    return str(text), "recent_executor_message"
             if event_type == "task_start" and event.get("instruction") and task_instruction is None:
                 task_instruction = str(event["instruction"])
 

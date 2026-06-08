@@ -2,9 +2,9 @@
 Tests for ExecutionAdapter implementations and ExecutionRouter.
 
 Covers:
-  9. ExecutionRouter selects OpenHands when configured
-  10. ExecutionRouter selects fallback only when explicitly allowed
-  11. FallbackExecutor grep/read_file/run_tests/summarize_diff work in temp repo
+  9. ExecutionRouter selects agentic executor when configured
+  10. ExecutionRouter selects deterministic executor only when explicitly allowed
+  11. DeterministicExecutor grep/read_file/run_tests/summarize_diff work in temp repo
 """
 
 import os
@@ -19,7 +19,7 @@ CONTROL_PLANE_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(CONTROL_PLANE_ROOT))
 
 
-class TestFallbackExecutorAdapter:
+class TestDeterministicExecutorAdapter:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         self.wt = Path(self.tmpdir)
@@ -51,7 +51,7 @@ class TestFallbackExecutorAdapter:
             {"pattern": "hello"}, {},
         )
         assert result["status"] == "succeeded"
-        assert result["backend"] == "fallback"
+        assert result["backend"] == "deterministic"
         assert result["output"]["count"] > 0
 
     @pytest.mark.asyncio
@@ -136,37 +136,37 @@ class TestFallbackExecutorAdapter:
 
 
 class TestExecutionRouter:
-    def test_fallback_when_allowed(self):
+    def test_deterministic_when_allowed(self):
         from adapters.execution.router import ExecutionRouter
         router = ExecutionRouter(
-            executor_backend="fallback",
-            allow_fallback=True,
+            executor_backend="deterministic",
+            allow_deterministic=True,
         )
-        assert router.backend_name == "fallback"
+        assert router.backend_name == "deterministic"
 
-    def test_openhands_when_configured(self):
+    def test_agentic_when_configured(self):
         from adapters.execution.router import ExecutionRouter
-        router = ExecutionRouter(executor_backend="openhands")
-        assert router.backend_name == "openhands"
+        router = ExecutionRouter(executor_backend="agentic")
+        assert router.backend_name == "agentic"
 
     def test_no_backend_raises(self):
         from adapters.execution.router import ExecutionRouter
         router = ExecutionRouter(
             executor_backend="",
-            openhands_enabled=False,
-            allow_fallback=False,
+            agentic_enabled=False,
+            allow_deterministic=False,
         )
         with pytest.raises(RuntimeError, match="No execution backend configured"):
             router._get_adapter()
 
-    def test_openhands_enabled_default(self):
+    def test_agentic_enabled_default(self):
         from adapters.execution.router import ExecutionRouter
-        router = ExecutionRouter(openhands_enabled=True)
-        assert router.backend_name == "openhands"
+        router = ExecutionRouter(agentic_enabled=True)
+        assert router.backend_name == "agentic"
 
-    def test_allow_fallback_default(self):
+    def test_allow_deterministic_default(self):
         from adapters.execution.router import ExecutionRouter
         router = ExecutionRouter(
-            openhands_enabled=False, allow_fallback=True
+            agentic_enabled=False, allow_deterministic=True
         )
-        assert router.backend_name == "fallback"
+        assert router.backend_name == "deterministic"

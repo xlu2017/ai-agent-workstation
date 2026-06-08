@@ -18,6 +18,6 @@ from platform_queue.models import PlatformTaskInput, PlatformTaskOutput
     retries=0,
 )
 def platform_session_task(input: PlatformTaskInput, ctx: Context) -> PlatformTaskOutput:
-    """Run one platform session task through OpenHands or the direct executor."""
+    """Run one platform session task through the agentic or deterministic executor."""
 
     return run_platform_task(input)
