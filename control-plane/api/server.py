@@ -478,6 +478,29 @@ async def stream_session_events(session_id: str, after: int = 0):
     return {"events": events, "total": total}
 
 
+@app.get("/api/sessions/{session_id}/events/stream")
+async def stream_session_events(session_id: str, after: int = 0):
+    """Stream events for a session via SSE. Returns new events since 'after' sequence number."""
+    import json as _json
+    events_file = SESSIONS_DIR / session_id / "events" / "events.jsonl"
+    events = []
+    if events_file.exists():
+        all_lines = events_file.read_text().strip().split("\n")
+        for idx, line in enumerate(all_lines):
+            if line.strip():
+                try:
+                    ev = _json.loads(line)
+                    # Use index as fallback sequence number
+                    seq = ev.get("sequence", idx + 1)
+                    if seq > after:
+                        ev["_seq"] = seq
+                        events.append(ev)
+                except Exception:
+                    continue
+    total = len(events) + after
+    return {"events": events, "total": total}
+
+
 @app.get("/api/sessions/{session_id}/state")
 def get_session_state(session_id: str):
     """Get truthful execution state for a session."""
