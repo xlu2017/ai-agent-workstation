@@ -15,6 +15,7 @@ def _client():
 
 def test_remote_desktop_config_hides_secrets(monkeypatch):
     monkeypatch.setenv("REMOTE_DESKTOP_ENABLED", "true")
+    monkeypatch.setenv("GUACAMOLE_AUTO_LOGIN_ENABLED", "true")
     monkeypatch.setenv("GUACAMOLE_URL", "/guacamole/")
     monkeypatch.setenv("RDP_HOST", "dev-server")
     monkeypatch.setenv("RDP_USERNAME", "agent")
@@ -30,10 +31,50 @@ def test_remote_desktop_config_hides_secrets(monkeypatch):
         "url": "/guacamole/",
         "rdp_host": "dev-server",
         "security": "tailscale_only",
+        "auto_login": True,
     }
     assert "RDP_PASSWORD" not in response.text
     assert "do-not-return" not in response.text
     assert "agent" not in response.text
+
+
+def test_remote_desktop_token_hides_credentials(monkeypatch):
+    monkeypatch.setenv("REMOTE_DESKTOP_ENABLED", "true")
+    monkeypatch.setenv("GUACAMOLE_AUTO_LOGIN_ENABLED", "true")
+    monkeypatch.setenv("GUACAMOLE_URL", "/guacamole/")
+    monkeypatch.setenv("GUACAMOLE_USERNAME", "guacadmin")
+    monkeypatch.setenv("GUACAMOLE_PASSWORD", "do-not-return")
+    monkeypatch.setenv("GUACAMOLE_CONNECTION_ID", "1")
+
+    token = {
+        "authToken": "token-value",
+        "username": "guacadmin",
+        "dataSource": "postgresql",
+        "availableDataSources": ["postgresql"],
+    }
+    with patch("api.server._request_guacamole_token", return_value=token):
+        response = _client().post("/api/v2/remote-desktop/token")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data == {
+        "authToken": "token-value",
+        "username": "guacadmin",
+        "dataSource": "postgresql",
+        "availableDataSources": ["postgresql"],
+        "connection_url": "/guacamole/#/client/MQBjAHBvc3RncmVzcWw",
+    }
+    assert "GUACAMOLE_PASSWORD" not in response.text
+    assert "do-not-return" not in response.text
+
+
+def test_remote_desktop_token_rejects_when_auto_login_disabled(monkeypatch):
+    monkeypatch.setenv("REMOTE_DESKTOP_ENABLED", "true")
+    monkeypatch.setenv("GUACAMOLE_AUTO_LOGIN_ENABLED", "false")
+
+    response = _client().post("/api/v2/remote-desktop/token")
+
+    assert response.status_code == 409
 
 
 def test_remote_desktop_config_disabled_by_default(monkeypatch):
@@ -85,4 +126,5 @@ def test_dashboard_route_renders_disabled_instructions():
     assert "routePath === '/remote-desktop'" in content
     assert "Remote desktop is disabled" in content
     assert "REMOTE_DESKTOP_ENABLED=true" in content
+    assert "remote-desktop/token" in content
     assert "docker-compose.guacamole.yml" in content

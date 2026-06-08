@@ -9,10 +9,12 @@ not duplicate worktree/session filesystem behavior.
 
 import json
 import os
+import base64
 import socket
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -62,6 +64,12 @@ OPENHANDS_URL = os.environ.get("OPENHANDS_URL") or _get_openhands_url()
 BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://localhost:9876")
 
 TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
+REMOTE_DESKTOP_ENV_FILE = Path(
+    os.environ.get(
+        "REMOTE_DESKTOP_ENV_FILE",
+        "/opt/workstation/repos/jubilant-goggles/ops/remote-desktop/.env",
+    )
+)
 
 app = FastAPI(title="Workstation Control Plane", version="0.1.0")
 
@@ -80,14 +88,63 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in TRUE_ENV_VALUES
 
 
+def _remote_desktop_file_env() -> dict[str, str]:
+    if not REMOTE_DESKTOP_ENV_FILE.exists():
+        return {}
+    values = {}
+    try:
+        lines = REMOTE_DESKTOP_ENV_FILE.read_text().splitlines()
+    except OSError:
+        return {}
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = value.strip().strip("'\"")
+    return values
+
+
+def _remote_desktop_env(name: str, default: str = "") -> str:
+    return os.environ.get(name) or _remote_desktop_file_env().get(name, default)
+
+
+def _remote_desktop_bool(name: str, default: bool = False) -> bool:
+    value = _remote_desktop_env(name)
+    if value == "":
+        return default
+    return value.strip().lower() in TRUE_ENV_VALUES
+
+
 def _remote_desktop_config():
     return {
-        "enabled": _env_bool("REMOTE_DESKTOP_ENABLED", False),
+        "enabled": _remote_desktop_bool("REMOTE_DESKTOP_ENABLED", False),
         "provider": "guacamole",
-        "url": os.environ.get("GUACAMOLE_URL", "/guacamole/"),
-        "rdp_host": os.environ.get("RDP_HOST", "dev-server"),
+        "url": _remote_desktop_env("GUACAMOLE_URL", "/guacamole/"),
+        "rdp_host": _remote_desktop_env("RDP_HOST", "dev-server"),
         "security": "tailscale_only",
+        "auto_login": _remote_desktop_bool("GUACAMOLE_AUTO_LOGIN_ENABLED", False),
     }
+
+
+def _guacamole_client_identifier(connection_id: str, data_source: str) -> str:
+    raw_identifier = f"{connection_id}\0c\0{data_source}".encode()
+    return base64.b64encode(raw_identifier).decode().rstrip("=")
+
+
+def _request_guacamole_token(username: str, password: str):
+    guacamole_host = _remote_desktop_env("GUACAMOLE_HOST", "127.0.0.1")
+    guacamole_port = int(_remote_desktop_env("GUACAMOLE_PORT", "8080"))
+    token_url = f"http://{guacamole_host}:{guacamole_port}/guacamole/api/tokens"
+    data = urllib.parse.urlencode({"username": username, "password": password}).encode()
+    request = urllib.request.Request(
+        token_url,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        return json.loads(response.read().decode())
 
 
 def _check_tcp(host: str, port: int, timeout: float = 3.0):
@@ -236,19 +293,51 @@ def get_remote_desktop_config():
     return _remote_desktop_config()
 
 
+@app.post("/api/v2/remote-desktop/token")
+def create_remote_desktop_token():
+    config = _remote_desktop_config()
+    if not config["enabled"]:
+        raise HTTPException(409, "Remote desktop is not enabled")
+    if not config["auto_login"]:
+        raise HTTPException(409, "Guacamole auto-login is not enabled")
+
+    username = _remote_desktop_env("GUACAMOLE_USERNAME")
+    password = _remote_desktop_env("GUACAMOLE_PASSWORD")
+    if not username or not password:
+        raise HTTPException(500, "Guacamole credentials are not configured")
+
+    try:
+        token = _request_guacamole_token(username, password)
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(502, f"Unable to authenticate with Guacamole: {str(exc)[:160]}") from exc
+
+    data_source = token.get("dataSource", _remote_desktop_env("GUACAMOLE_DATA_SOURCE", "postgresql"))
+    connection_id = _remote_desktop_env("GUACAMOLE_CONNECTION_ID", "1")
+    client_id = _guacamole_client_identifier(connection_id, data_source)
+    guacamole_url = config["url"].rstrip("/")
+
+    return {
+        "authToken": token["authToken"],
+        "username": token.get("username", username),
+        "dataSource": data_source,
+        "availableDataSources": token.get("availableDataSources", [data_source]),
+        "connection_url": f"{guacamole_url}/#/client/{client_id}",
+    }
+
+
 @app.get("/api/v2/remote-desktop/health")
 def get_remote_desktop_health():
     config = _remote_desktop_config()
-    guacamole_host = os.environ.get("GUACAMOLE_HOST", "127.0.0.1")
-    guacamole_port = int(os.environ.get("GUACAMOLE_PORT", "8080"))
-    guacamole_url = os.environ.get(
+    guacamole_host = _remote_desktop_env("GUACAMOLE_HOST", "127.0.0.1")
+    guacamole_port = int(_remote_desktop_env("GUACAMOLE_PORT", "8080"))
+    guacamole_url = _remote_desktop_env(
         "GUACAMOLE_HEALTH_URL",
         f"http://{guacamole_host}:{guacamole_port}/guacamole/",
     )
-    rdp_host = os.environ.get("RDP_HOST", "dev-server")
-    rdp_port = int(os.environ.get("RDP_PORT", "3389"))
-    guacd_host = os.environ.get("GUACD_HOST")
-    guacd_port = int(os.environ.get("GUACD_PORT", "4822"))
+    rdp_host = _remote_desktop_env("RDP_HOST", "dev-server")
+    rdp_port = int(_remote_desktop_env("RDP_PORT", "3389"))
+    guacd_host = _remote_desktop_env("GUACD_HOST")
+    guacd_port = int(_remote_desktop_env("GUACD_PORT", "4822"))
 
     guacamole = _check_http(guacamole_url)
     rdp = _check_tcp(rdp_host, rdp_port)
