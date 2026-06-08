@@ -30,6 +30,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
+from api.service_updater import (
+    SERVICE_CONFIGS,
+    get_service_update_metadata,
+    update_service,
+)
+
 from sessions.session_manager import (
     SessionAlreadyExists,
     SessionCreateRequest,
@@ -773,7 +779,43 @@ def list_services():
                     svc["docker"] = True
     except Exception:
         pass
+    # Enrich with update metadata for repo-backed services
+    update_meta = get_service_update_metadata()
+    for svc in services:
+        meta = update_meta.get(svc["name"], {})
+        svc["repo_backed"] = meta.get("repo_backed", False)
+        svc["update_supported"] = meta.get("update_supported", False)
+        svc["update_in_progress"] = meta.get("update_in_progress", False)
+        svc["last_update"] = meta.get("last_update")
     return {"services": services}
+
+
+class UpdateLatestBody(BaseModel):
+    restart: bool = True
+
+
+@app.post("/api/v2/services/{service_name}/update-latest")
+async def update_service_latest(service_name: str, body: UpdateLatestBody = UpdateLatestBody()):
+    """Fetch the latest code from GitHub for a repo-backed service."""
+    if service_name not in SERVICE_CONFIGS:
+        raise HTTPException(404, {"ok": False, "service": service_name, "error": {"code": "UNKNOWN_SERVICE", "message": f"Service '{service_name}' is not configured for updates."}})
+    result = await update_service(service_name, restart=body.restart)
+    if not result.ok:
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "service": result.service, "error": result.error},
+        )
+    return {
+        "ok": True,
+        "service": result.service,
+        "branch": result.branch,
+        "commit_before": result.commit_before,
+        "commit_after": result.commit_after,
+        "updated": result.updated,
+        "restart_attempted": result.restart_attempted,
+        "restart_succeeded": result.restart_succeeded,
+        "message": result.message,
+    }
 
 
 @app.post("/api/services/{name}/start")
