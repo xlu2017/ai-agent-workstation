@@ -2,6 +2,18 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Menu, Send, ChevronLeft, Folder, GitBranch, Plus, X, Circle, CheckCircle, AlertCircle, Clock, ArrowUp, Power, RefreshCw, Server } from 'lucide-react'
 
+// crypto.randomUUID() requires a secure context (HTTPS or localhost).
+// When accessed via HTTP + IP (e.g. http://100.119.21.55:5173/), it's unavailable.
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
+
 interface TaskHandle {
   task_id: string
   session_id: string
@@ -448,7 +460,7 @@ export default function App() {
     if (data.id) {
       setSessionId(data.id)
       setChat([{
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         role: 'system',
         content: `Session created: ${data.id} (repo: ${data.repo_path})`,
         timestamp: new Date().toISOString(),
@@ -467,7 +479,7 @@ export default function App() {
       const evData = await evRes.json()
       if (evData.events?.length > 0) {
         setChat([{
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           role: 'system',
           content: `Resumed session: ${id} (${evData.total} events)`,
           timestamp: new Date().toISOString(),
@@ -475,14 +487,14 @@ export default function App() {
         }])
       } else {
         setChat([{
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           role: 'system',
           content: `Selected session: ${id}`,
           timestamp: new Date().toISOString(),
         }])
       }
     } catch {
-      setChat([{ id: crypto.randomUUID(), role: 'system', content: `Selected session: ${id}`, timestamp: new Date().toISOString() }])
+      setChat([{ id: generateUUID(), role: 'system', content: `Selected session: ${id}`, timestamp: new Date().toISOString() }])
     }
   }
 
@@ -493,7 +505,7 @@ export default function App() {
     setSending(true)
 
     const userEntry: ChatEntry = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       role: 'user',
       content: instruction,
       timestamp: new Date().toISOString(),
@@ -501,7 +513,7 @@ export default function App() {
     setChat(prev => [...prev, userEntry])
 
     // Show live progress entry immediately
-    const progressId = crypto.randomUUID()
+    const progressId = generateUUID()
     const progressEntry: ChatEntry = {
       id: progressId,
       role: 'system',
