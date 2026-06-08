@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Menu, Send, ChevronLeft, Folder, GitBranch, Plus, X, Circle, CheckCircle, AlertCircle, Clock, ArrowUp, Power, RefreshCw, Server } from 'lucide-react'
+import { Menu, Send, ChevronLeft, Folder, GitBranch, Plus, X, Circle, CheckCircle, AlertCircle, Clock, ArrowUp, Power, RefreshCw, Server, Monitor } from 'lucide-react'
 
 // crypto.randomUUID() requires a secure context (HTTPS or localhost).
 // When accessed via HTTP + IP (e.g. http://<tailscale-ip>:5173/), it's unavailable.
@@ -52,6 +52,25 @@ interface Health {
   active_ports: number[]
 }
 
+interface RemoteDesktopConfig {
+  enabled: boolean
+  provider: string
+  url: string
+  rdp_host: string
+  security: string
+}
+
+interface RemoteDesktopHealth {
+  ok: boolean
+  enabled: boolean
+  provider: string
+  guacamole: string
+  guacd: string
+  rdp: string
+  rdp_host: string
+  rdp_port: number
+}
+
 interface ChatEntry {
   id: string
   role: 'user' | 'system'
@@ -67,6 +86,100 @@ const API = '/api'
 function StatusDot({ status }: { status: string }) {
   const color = status === 'healthy' ? '#4ade80' : status === 'unhealthy' ? '#f87171' : '#fbbf24'
   return <Circle size={8} fill={color} stroke={color} style={{ marginRight: 6 }} />
+}
+
+function RemoteDesktopPage() {
+  const [config, setConfig] = useState<RemoteDesktopConfig | null>(null)
+  const [remoteHealth, setRemoteHealth] = useState<RemoteDesktopHealth | null>(null)
+  const [error, setError] = useState('')
+
+  const refresh = useCallback(() => {
+    fetch(`${API}/v2/remote-desktop/config`)
+      .then(r => r.json())
+      .then(setConfig)
+      .catch(err => setError((err as Error).message))
+
+    fetch(`${API}/v2/remote-desktop/health`)
+      .then(r => r.json())
+      .then(setRemoteHealth)
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refresh()
+    const id = setInterval(refresh, 10000)
+    return () => clearInterval(id)
+  }, [refresh])
+
+  if (error) {
+    return (
+      <div className="remote-desktop-page">
+        <div className="remote-card">
+          <h2>Remote Desktop</h2>
+          <p className="remote-error">Unable to load remote desktop config: {error}</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!config) {
+    return <div className="remote-desktop-page"><div className="remote-card">Loading remote desktop status...</div></div>
+  }
+
+  const guacamoleStatus = remoteHealth?.guacamole || 'unknown'
+  const rdpStatus = remoteHealth?.rdp || 'unknown'
+  const overallStatus = config.enabled ? (remoteHealth?.ok ? 'ready' : 'degraded') : 'disabled'
+
+  return (
+    <div className="remote-desktop-page">
+      <div className="remote-header">
+        <div>
+          <h2>Remote Desktop</h2>
+          <p>Browser access is proxied through Apache Guacamole to xRDP on the private network.</p>
+        </div>
+        <button className="btn-refresh" onClick={refresh}><RefreshCw size={14} /> Refresh</button>
+      </div>
+
+      <div className="remote-status-grid">
+        <div className="remote-status-card">
+          <span className="remote-label">Connection</span>
+          <strong className={`remote-status remote-status-${overallStatus}`}>{overallStatus}</strong>
+        </div>
+        <div className="remote-status-card">
+          <span className="remote-label">Guacamole</span>
+          <strong>{guacamoleStatus}</strong>
+        </div>
+        <div className="remote-status-card">
+          <span className="remote-label">xRDP target</span>
+          <strong>{rdpStatus}</strong>
+          <small>{remoteHealth?.rdp_host || config.rdp_host}:{remoteHealth?.rdp_port || 3389}</small>
+        </div>
+        <div className="remote-status-card">
+          <span className="remote-label">Security</span>
+          <strong>{config.security.replace('_', ' ')}</strong>
+        </div>
+      </div>
+
+      {!config.enabled ? (
+        <div className="remote-card remote-disabled">
+          <h3>Remote desktop is disabled</h3>
+          <p>Set <code>REMOTE_DESKTOP_ENABLED=true</code>, start the Guacamole stack, and keep Guacamole/xRDP reachable only over Tailscale or an authenticated same-origin dashboard proxy.</p>
+          <pre>{`cd ~/jubilant-goggles
+cp ops/remote-desktop/.env.example ops/remote-desktop/.env
+# edit ops/remote-desktop/.env with the RDP password locally
+docker compose -f ops/remote-desktop/docker-compose.guacamole.yml up -d`}</pre>
+        </div>
+      ) : (
+        <div className="remote-frame-shell">
+          <iframe
+            title="Apache Guacamole Remote Desktop"
+            src={config.url}
+            className="remote-frame"
+          />
+        </div>
+      )}
+    </div>
+  )
 }
 
 function EventTimeline({ events }: { events: SessionEvent[] }) {
@@ -429,7 +542,19 @@ export default function App() {
   const [showBrowser, setShowBrowser] = useState(true)
   const [showPortManager, setShowPortManager] = useState(true)
   const [pickerLoading, setPickerLoading] = useState(false)
+  const [routePath, setRoutePath] = useState(window.location.pathname)
   const chatEndRef = useRef<HTMLDivElement>(null)
+
+  const navigate = useCallback((path: string) => {
+    window.history.pushState({}, '', path)
+    setRoutePath(path)
+  }, [])
+
+  useEffect(() => {
+    const handlePopState = () => setRoutePath(window.location.pathname)
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
 
   // Fetch health
   useEffect(() => {
@@ -620,9 +745,13 @@ export default function App() {
           <button className="sidebar-toggle" onClick={() => setShowSidebar(!showSidebar)}>
             <Menu size={20} />
           </button>
-          <h1 className="logo" onClick={() => { setSessionId(null); setChat([]) }} style={{ cursor: 'pointer' }}>Control Plane</h1>
+          <h1 className="logo" onClick={() => { navigate('/'); setSessionId(null); setChat([]) }} style={{ cursor: 'pointer' }}>Control Plane</h1>
         </div>
         <div className="header-right">
+          <button className="nav-link" onClick={() => navigate('/remote-desktop')}>
+            <Monitor size={14} />
+            Remote Desktop
+          </button>
           {health && (
             <div className="health-strip">
               <StatusDot status={health.agent_core?.status || 'unknown'} /><span>agent-core</span>
@@ -664,7 +793,9 @@ export default function App() {
 
       {/* Main chat area */}
       <main className="main">
-        {!sessionId ? (
+        {routePath === '/remote-desktop' ? (
+          <RemoteDesktopPage />
+        ) : !sessionId ? (
           <div className="welcome">
             <h2>Workstation Agent</h2>
             <p>Create or select a session to start working.</p>
