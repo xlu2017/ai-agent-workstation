@@ -16,14 +16,13 @@ Does NOT ask agent-core to:
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
-AGENT_CORE_URL = os.environ.get("AGENT_CORE_URL", "http://localhost:3100")
+AGENT_CORE_URL = os.environ.get("AGENT_CORE_URL", "http://localhost:3210")
 AGENT_CORE_TIMEOUT = float(os.environ.get("AGENT_CORE_TIMEOUT", "30"))
 
 
@@ -154,11 +153,18 @@ class AgentCoreClient:
     async def search_memory(
         self, query: str, session_id: str = "", limit: int = 10
     ) -> dict[str, Any]:
-        """POST /memory/search — search memories in agent-core."""
-        resp = await self._client.post(
-            "/memory/search",
-            json={"query": query, "session_id": session_id, "limit": limit},
-        )
+        """POST /memory/search — search memories in agent-core.
+
+        agent-core scopes memory with scope/scope_id rather than a top-level
+        session_id field. Passing session_id directly would either fail schema
+        parsing or produce an unscoped search depending on server strictness.
+        """
+        payload: dict[str, Any] = {"query": query, "limit": limit}
+        if session_id:
+            payload["scope"] = "session"
+            payload["scope_id"] = session_id
+
+        resp = await self._client.post("/memory/search", json=payload)
         resp.raise_for_status()
         return resp.json()
 
