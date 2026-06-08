@@ -9,8 +9,11 @@ not duplicate worktree/session filesystem behavior.
 
 import json
 import os
+import socket
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 # Add control-plane root and CLI to path for imports
@@ -58,6 +61,8 @@ def _get_openhands_url():
 OPENHANDS_URL = os.environ.get("OPENHANDS_URL") or _get_openhands_url()
 BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://localhost:9876")
 
+TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
+
 app = FastAPI(title="Workstation Control Plane", version="0.1.0")
 
 app.add_middleware(
@@ -66,6 +71,43 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in TRUE_ENV_VALUES
+
+
+def _remote_desktop_config():
+    return {
+        "enabled": _env_bool("REMOTE_DESKTOP_ENABLED", False),
+        "provider": "guacamole",
+        "url": os.environ.get("GUACAMOLE_URL", "/guacamole/"),
+        "rdp_host": os.environ.get("RDP_HOST", "dev-server"),
+        "security": "tailscale_only",
+    }
+
+
+def _check_tcp(host: str, port: int, timeout: float = 3.0):
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return {"status": "reachable"}
+    except OSError as exc:
+        return {"status": "unreachable", "error": str(exc)[:160]}
+
+
+def _check_http(url: str, timeout: float = 3.0):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return {"status": "reachable", "code": response.status}
+    except urllib.error.HTTPError as exc:
+        if exc.code < 500:
+            return {"status": "reachable", "code": exc.code}
+        return {"status": "unreachable", "code": exc.code, "error": str(exc)[:160]}
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {"status": "unreachable", "error": str(exc)[:160]}
 
 
 class SessionCreate(BaseModel):
@@ -187,6 +229,51 @@ def get_health():
         checks["active_ports"] = []
 
     return checks
+
+
+@app.get("/api/v2/remote-desktop/config")
+def get_remote_desktop_config():
+    return _remote_desktop_config()
+
+
+@app.get("/api/v2/remote-desktop/health")
+def get_remote_desktop_health():
+    config = _remote_desktop_config()
+    guacamole_host = os.environ.get("GUACAMOLE_HOST", "127.0.0.1")
+    guacamole_port = int(os.environ.get("GUACAMOLE_PORT", "8080"))
+    guacamole_url = os.environ.get(
+        "GUACAMOLE_HEALTH_URL",
+        f"http://{guacamole_host}:{guacamole_port}/guacamole/",
+    )
+    rdp_host = os.environ.get("RDP_HOST", "dev-server")
+    rdp_port = int(os.environ.get("RDP_PORT", "3389"))
+    guacd_host = os.environ.get("GUACD_HOST")
+    guacd_port = int(os.environ.get("GUACD_PORT", "4822"))
+
+    guacamole = _check_http(guacamole_url)
+    rdp = _check_tcp(rdp_host, rdp_port)
+    guacd = _check_tcp(guacd_host, guacd_port) if guacd_host else {"status": "not_configured"}
+
+    ok = guacamole["status"] == "reachable" and rdp["status"] == "reachable"
+    if guacd_host:
+        ok = ok and guacd["status"] == "reachable"
+
+    return {
+        "ok": ok,
+        "enabled": config["enabled"],
+        "provider": "guacamole",
+        "guacamole": guacamole["status"],
+        "guacamole_url": guacamole_url,
+        "guacd": guacd["status"],
+        "rdp": rdp["status"],
+        "rdp_host": rdp_host,
+        "rdp_port": rdp_port,
+        "details": {
+            "guacamole": guacamole,
+            "guacd": guacd,
+            "rdp": rdp,
+        },
+    }
 
 
 # --- Logs ---
