@@ -6,14 +6,14 @@ Flow:
   2. Route via prompt_router (LLM or heuristic)
   3. Validate session state and runtime policy
   4. Call agent-core for advisory planning (optional)
-  5. Execute via OpenHands runtime adapter
+  5. Execute via agentic executor
   6. Record events to live feed
   7. Return task handle with truthful state
 
 This module ties together:
   - prompt_router.router (routing decisions)
   - agent_core_client.client (advisory planning)
-  - executors.openhands_adapter (execution)
+  - execution.agentic_executor (execution)
   - live_feed.events (event recording)
   - execution.runtime_validator (policy checks)
 """
@@ -44,7 +44,7 @@ def _sessions_dir() -> Path:
 
 
 SESSIONS_DIR = _sessions_dir()
-OPENHANDS_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
+LITELLM_PROXY_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
 
 
 class TaskState(str, Enum):
@@ -162,7 +162,7 @@ async def handle_prompt(
     2. Route the prompt
     3. Check runtime policy
     4. Optionally call agent-core for advisory plan
-    5. Execute via OpenHands
+    5. Execute via agentic executor
     6. Return task handle with truthful state
     """
     task_id = f"task-{uuid.uuid4().hex[:12]}"
@@ -266,11 +266,11 @@ async def handle_prompt(
             logger.info("agent-core advisory planning unavailable: %s", e)
             # Non-fatal: proceed without plan
 
-    # 5. Execute via OpenHands
-    _emit_event(session_id, "action_started", "Starting OpenHands executor", {"task_id": task_id})
+    # 5. Execute via agentic executor
+    _emit_event(session_id, "action_started", "Starting executor", {"task_id": task_id})
 
     try:
-        result = await _execute_via_openhands(session_id, instruction, task_id, model, execution_mode)
+        result = await _execute_via_agentic(session_id, instruction, task_id, model, execution_mode)
     except Exception as e:
         error_msg = f"Execution failed: {e}"
         _emit_event(session_id, "action_failed", error_msg, {"task_id": task_id})
@@ -298,7 +298,7 @@ async def handle_prompt(
     _emit_event(session_id, event_type, result.get("summary", ""), {
         "task_id": task_id,
         "files_edited": result.get("files_edited", []),
-        "executor": "openhands",
+        "executor": "agentic",
     })
 
     return TaskHandle(
@@ -311,25 +311,25 @@ async def handle_prompt(
         events_path=str(_sessions_dir() / session_id / "events" / "events.jsonl"),
         metadata={
             "files_edited": result.get("files_edited", []),
-            "executor": "openhands",
+            "executor": "agentic",
             "duration_seconds": result.get("duration_seconds", 0),
         },
     )
 
 
-async def _execute_via_openhands(
+async def _execute_via_agentic(
     session_id: str,
     instruction: str,
     task_id: str,
     model: str = "",
     execution_mode: str = "finite",
 ) -> dict[str, Any]:
-    """Execute instruction via the OpenHands local executor adapter.
+    """Execute instruction via the AgenticExecutor.
 
-    Uses vendored OpenHands SDK concepts with LLM tool-calling loop.
+    Uses LLM tool-calling loop to inspect, edit, and run commands.
     Executes directly on host filesystem — no Docker runtime needed.
     """
-    from executors.openhands_adapter import OpenHandsExecutorAdapter
+    from execution.agentic_executor import AgenticExecutor
 
     session_dir = _sessions_dir() / session_id
     meta_path = session_dir / "meta.json"
@@ -356,7 +356,7 @@ async def _execute_via_openhands(
                 "duration_seconds": 0,
             }
 
-    adapter = OpenHandsExecutorAdapter()
+    adapter = AgenticExecutor()
 
     if not adapter.is_available():
         return {
