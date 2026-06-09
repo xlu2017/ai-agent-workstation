@@ -244,6 +244,28 @@ async def handle_prompt(
             message="Prompt queued — session is busy",
         )
 
+    # 2a. Emit initial status message and task decomposition
+    try:
+        from worklog.transcript import generate_status_message, generate_task_decomposition
+        status_msg = generate_status_message(instruction, task_class, direct_action)
+        _emit_event(session_id, "task_started", status_msg, {
+            "task_id": task_id,
+            "task_class": task_class,
+            "instruction_preview": instruction[:200],
+        })
+
+        # Emit task decomposition for code-fix / implementation prompts
+        if task_class != "desktop_control" and not direct_action:
+            tasks = generate_task_decomposition(instruction, task_class)
+            if tasks:
+                _emit_event(session_id, "task_created", f"Created {len(tasks)} Tasks", {
+                    "task_id": task_id,
+                    "count": len(tasks),
+                    "tasks": [t["title"] for t in tasks],
+                })
+    except Exception as e:
+        logger.debug("Status message generation failed (non-fatal): %s", e)
+
     # 2b. Mutation guard: desktop_control tasks must not modify files or commit
     if task_class == "desktop_control":
         policy.mutation_allowed = False
@@ -346,18 +368,72 @@ async def handle_prompt(
 
     # 6. Determine final state
     final_state = TaskState.COMPLETED
-    if result.get("status") == "blocked":
+    result_status = result.get("status", "completed")
+    if result_status == "blocked":
         final_state = TaskState.BLOCKED
-    elif result.get("status") == "failed":
+    elif result_status == "failed":
         final_state = TaskState.FAILED
-    elif result.get("status") == "needs_review":
+    elif result_status == "needs_review":
         final_state = TaskState.NEEDS_REVIEW
+    elif result_status == "cancelled":
+        _emit_event(session_id, "task_cancelled", "Stopped by user", {
+            "task_id": task_id,
+            "reason": "user_interrupt",
+        })
+        return TaskHandle(
+            task_id=task_id,
+            session_id=session_id,
+            state=TaskState.COMPLETED,
+            routing_decision=decision_val,
+            plan_summary=plan_summary,
+            message="Stopped by user",
+            events_path=str(_sessions_dir() / session_id / "events" / "events.jsonl"),
+        )
 
+    # Emit diff_summarized if files were edited
+    files_edited = result.get("files_edited", [])
+    if files_edited:
+        additions = result.get("additions", 0)
+        deletions = result.get("deletions", 0)
+        _emit_event(session_id, "diff_summarized", f"+{additions} -{deletions}", {
+            "task_id": task_id,
+            "additions": additions,
+            "deletions": deletions,
+            "files": files_edited,
+        })
+
+    # Emit validation_completed with truthful status
+    tests_passed = result.get("tests_passed", 0)
+    tests_failed = result.get("tests_failed", 0)
+    validation_status = "not_run"
+    if tests_passed > 0 or tests_failed > 0:
+        if tests_failed > 0 and tests_passed > 0:
+            validation_status = "partial"
+        elif tests_failed > 0:
+            validation_status = "failed"
+        else:
+            validation_status = "passed"
+        _emit_event(session_id, "validation_completed", f"Validation: {validation_status}", {
+            "task_id": task_id,
+            "status": validation_status,
+            "tests_passed": tests_passed,
+            "tests_failed": tests_failed,
+        })
+
+    # Emit action/task completion
     event_type = "action_completed" if final_state == TaskState.COMPLETED else "action_failed"
     _emit_event(session_id, event_type, result.get("summary", ""), {
         "task_id": task_id,
-        "files_edited": result.get("files_edited", []),
+        "files_edited": files_edited,
         "executor": "agentic",
+    })
+
+    # Emit task_completed for transcript aggregation
+    _emit_event(session_id, "task_completed", result.get("summary", "Execution complete"), {
+        "task_id": task_id,
+        "status": result_status,
+        "files_edited": files_edited,
+        "validation": validation_status,
     })
 
     return TaskHandle(
