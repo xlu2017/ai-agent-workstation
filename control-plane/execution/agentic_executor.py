@@ -43,6 +43,10 @@ MAX_OUTPUT_CHARS = 4000
 COMMAND_TIMEOUT = int(os.environ.get("AGENTIC_EXECUTOR_COMMAND_TIMEOUT", "60"))
 PROTECTED_BRANCHES = {"main", "master", "develop", "production"}
 
+# Global cancellation registry: sessions that have been interrupted.
+# Checked each iteration so thread-based execution stops promptly.
+_cancelled_sessions: set[str] = {}
+
 
 # ============================================================
 # TOOL DEFINITIONS — OpenAI function-calling schema
@@ -293,6 +297,16 @@ class ToolExecutor:
             if branch in PROTECTED_BRANCHES:
                 return f"BLOCKED: cannot push to protected branch '{branch}'"
 
+        # Duplicate commit guard for bash git commit commands
+        if "git commit" in command:
+            try:
+                from execution.commit_guard import check_duplicate_tree
+                is_dup, dup_detail = check_duplicate_tree(self.workspace)
+                if is_dup:
+                    return f"BLOCKED: {dup_detail}"
+            except Exception:
+                pass
+
         try:
             result = subprocess.run(
                 ["bash", "-c", command],
@@ -539,6 +553,17 @@ class ToolExecutor:
             branch = self._get_branch()
             if branch in PROTECTED_BRANCHES:
                 return f"BLOCKED: cannot modify protected branch '{branch}'"
+
+        # Duplicate commit guard: check tree hash before committing
+        if command.strip().startswith("commit"):
+            try:
+                # Stage first if 'git add' was run separately
+                from execution.commit_guard import check_duplicate_tree
+                is_dup, dup_detail = check_duplicate_tree(self.workspace)
+                if is_dup:
+                    return f"BLOCKED: {dup_detail}"
+            except Exception:
+                pass  # Non-fatal — proceed with commit
 
         full_cmd = f"git {command}"
         self.commands_run.append(full_cmd[:200])
@@ -789,6 +814,7 @@ def _run_agent_loop(
     max_iterations: int = MAX_ITERATIONS,
     event_callback: Any = None,
     plan_context: str = "",
+    session_id: str = "",
 ) -> tuple[str, str, list[str], int, int, list[str]]:
     """Run the LLM tool-calling agent loop.
 
@@ -810,6 +836,12 @@ def _run_agent_loop(
     summary = ""
 
     for iteration in range(max_iterations):
+        # Check cancellation flag (set by interrupt endpoint)
+        if session_id in _cancelled_sessions:
+            _cancelled_sessions.discard(session_id)
+            return ("cancelled", "Stopped by user", executor.files_edited,
+                    executor.tests_passed, executor.tests_failed, executor.commands_run)
+
         if event_callback:
             event_callback(
                 "action_progress",
@@ -854,6 +886,12 @@ def _run_agent_loop(
         messages.append(assistant_msg)
 
         for tool_call in message.get("tool_calls", []):
+            # Check cancellation before each tool execution
+            if session_id in _cancelled_sessions:
+                _cancelled_sessions.discard(session_id)
+                return ("cancelled", "Stopped by user", executor.files_edited,
+                        executor.tests_passed, executor.tests_failed, executor.commands_run)
+
             fn = tool_call.get("function", {})
             tool_name = fn.get("name", "")
             tool_call_id = tool_call.get("id", str(uuid.uuid4()))
@@ -933,6 +971,7 @@ class AgenticExecutor(ExecutionAdapter):
         action_name: str,
         params: dict[str, Any],
         context: dict[str, Any],
+        event_sink: Any = None,
     ) -> ExecutionResult:
         start_ms = int(time.time() * 1000)
         events: list[ExecutionEvent] = []
@@ -972,6 +1011,11 @@ class AgenticExecutor(ExecutionAdapter):
                 source="agentic",
             )
             events.append(evt)
+            if event_sink:
+                try:
+                    event_sink(event_type, message, metadata)
+                except Exception:
+                    pass
 
         event_callback("action_progress", f"Agentic executor starting: {action_name}", {
             "workspace": worktree_path,
@@ -989,6 +1033,7 @@ class AgenticExecutor(ExecutionAdapter):
                 max_iterations=MAX_ITERATIONS,
                 event_callback=event_callback,
                 plan_context=plan_context,
+                session_id=session_id,
             )
         except Exception as e:
             event_callback("agent_error", f"Agent loop crashed: {e}")
@@ -1072,7 +1117,7 @@ class AgenticExecutor(ExecutionAdapter):
         except Exception:
             return ""
 
-    def run_task(self, session_id: str, packet: Any) -> Any:
+    def run_task(self, session_id: str, packet: Any, event_sink: Any = None) -> Any:
         """Bridge from the legacy TaskPacket/TaskResult interface.
 
         Translates a TaskPacket (from executors/base.py) into an
@@ -1101,6 +1146,7 @@ class AgenticExecutor(ExecutionAdapter):
                     action_name=action_name,
                     params=params,
                     context=context,
+                    event_sink=event_sink,
                 )
             )
         finally:
