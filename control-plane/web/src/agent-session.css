@@ -2188,14 +2188,153 @@
 }
 .as-right-expand-btn:hover { color: var(--as-text); background: var(--as-panel); }
 
-/* ── Worklog panel ── */
+/* ── Worklog panel / Transcript ── */
 .as-worklog-panel {
-  padding: 0;
+  padding: 8px 0;
 }
 
-.as-worklog-item {
+.wl-headline {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--as-text);
+  line-height: 1.4;
+}
+
+.wl-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px 10px;
+  font-size: 12px;
+  color: var(--as-muted);
   border-bottom: 1px solid var(--as-border-soft);
 }
+
+.wl-duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wl-diff-stat {
+  display: inline-flex;
+  gap: 6px;
+  font-family: var(--as-font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+}
+
+.wl-additions { color: #3fb950; }
+.wl-deletions { color: #f85149; }
+
+.wl-tasks-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Transcript items */
+.wl-transcript-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--as-muted);
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-wrap: wrap;
+}
+
+.wl-transcript-item:hover {
+  background: var(--as-hover);
+}
+
+.wl-item-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.wl-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--as-text);
+  font-size: 12px;
+}
+
+.wl-item-duration {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--as-muted);
+  font-family: var(--as-font-mono, 'JetBrains Mono', monospace);
+}
+
+.wl-item-ok-icon { color: #3fb950; flex-shrink: 0; }
+.wl-item-fail-icon { color: #f85149; flex-shrink: 0; }
+
+.wl-item-failed .wl-item-label { color: #f85149; }
+.wl-item-cancelled .wl-item-label { color: var(--as-muted); font-style: italic; }
+
+/* Expanded details */
+.wl-item-details {
+  width: 100%;
+  padding: 4px 0 4px 24px;
+  font-size: 11px;
+  color: var(--as-muted);
+}
+
+.wl-detail-cmd {
+  display: block;
+  background: var(--as-panel);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: var(--as-font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  word-break: break-all;
+  margin-bottom: 4px;
+}
+
+.wl-detail-path {
+  display: block;
+  font-family: var(--as-font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.wl-detail-tasks {
+  margin: 4px 0;
+  padding-left: 16px;
+  list-style: disc;
+}
+
+.wl-detail-tasks li {
+  font-size: 11px;
+  color: var(--as-muted);
+  margin-bottom: 2px;
+}
+
+.wl-detail-exit {
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+/* Validation summary */
+.wl-validation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-top: 1px solid var(--as-border-soft);
+  margin-top: 4px;
+}
+
+.wl-validation-passed { color: #3fb950; }
+.wl-validation-failed { color: #f85149; }
+.wl-validation-partial { color: #d29922; }
 
 /* ── Spinner animation ── */
 @keyframes as-spin {
