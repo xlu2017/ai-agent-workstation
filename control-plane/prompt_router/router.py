@@ -66,15 +66,26 @@ class RoutingOutput:
     target_session_id: str = ""
     requires_user_confirmation: bool = False
     control_command: str = ""
+    # Deterministic classifier fields
+    task_class: str = ""           # "desktop_control", "code_implementation", ""
+    direct_action: str = ""        # "open_terminal", "open_browser", etc.
+    classification_confidence: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "decision": self.decision.value,
             "rationale": self.rationale,
             "target_session_id": self.target_session_id,
             "requires_user_confirmation": self.requires_user_confirmation,
             "control_command": self.control_command,
         }
+        if self.task_class:
+            d["task_class"] = self.task_class
+        if self.direct_action:
+            d["direct_action"] = self.direct_action
+        if self.classification_confidence > 0:
+            d["classification_confidence"] = self.classification_confidence
+        return d
 
 
 # ── Control command detection (fast path, no LLM) ────────────────
@@ -116,7 +127,7 @@ Given a user prompt and the current session state, classify the prompt into exac
 
 ## Guidelines
 
-- If the plan is not running (status: none/completed), prefer **append_to_current** — there's nothing to modify or interrupt.
+- If no plan is active (status: none/completed), use **append_to_current** — treat the prompt as a new task.
 - Short follow-ups like "also do X" or "don't forget Y" during an active plan are **modify_current_plan** if they change what the plan should do, or **append_to_current** if they're just additional context.
 - "New task:", "different task:", "work on another thing" → **spawn_child_session** if same repo, **spawn_new_session** if different/unspecified repo.
 - If the user is asking about a completely different project/repo → **spawn_new_session**.
@@ -346,12 +357,13 @@ def _handle_control(input: RoutingInput, control_cmd: str) -> RoutingOutput:
 
 
 async def route_prompt_async(input: RoutingInput) -> RoutingOutput:
-    """Route a user prompt using LLM classification with heuristic fallback.
+    """Route a user prompt.
 
     Flow:
-    1. Check for control commands (regex fast path — no LLM needed)
-    2. Call LLM for classification
-    3. If LLM unavailable or fails, fall back to heuristics
+    1. Check for control commands (regex fast path)
+    2. Deterministic fuzzy classifier for direct platform actions
+    3. LLM classification (ambiguity resolver, not primary path)
+    4. Heuristic fallback
     """
     prompt = input.prompt.strip()
 
@@ -360,12 +372,60 @@ async def route_prompt_async(input: RoutingInput) -> RoutingOutput:
     if control_cmd:
         return _handle_control(input, control_cmd)
 
-    # 2. Try LLM routing
+    # 2. Deterministic direct-action classifier — primary fast path
+    from prompt_router.deterministic_classifier import (
+        AMBIGUOUS_THRESHOLD,
+        classify_direct_action,
+        should_execute_directly,
+    )
+
+    classification = classify_direct_action(prompt)
+
+    if not classification.is_code_intent and should_execute_directly(classification):
+        logger.info(
+            "Deterministic route: %s (%.2f) for '%s'",
+            classification.action_name,
+            classification.confidence,
+            prompt[:80],
+        )
+        return RoutingOutput(
+            decision=RoutingDecision.APPEND_TO_CURRENT,
+            rationale=(
+                f"[deterministic] Direct action: {classification.action_name} "
+                f"(confidence={classification.confidence:.2f})"
+            ),
+            target_session_id=input.session_id,
+            task_class=classification.task_class,
+            direct_action=classification.action_name,
+            classification_confidence=classification.confidence,
+        )
+
+    # If code-intent was detected, skip LLM for routing — go straight to heuristic
+    # (the prompt is clearly about implementation, not a direct desktop action)
+    if classification.is_code_intent:
+        logger.debug(
+            "Code-intent detected ('%s') for '%s' — using heuristic route",
+            classification.negative_match,
+            prompt[:80],
+        )
+        result = _heuristic_route(input)
+        result.task_class = "code_implementation"
+        return result
+
+    # If medium confidence, let LLM disambiguate
+    if classification.confidence >= AMBIGUOUS_THRESHOLD:
+        logger.debug(
+            "Ambiguous classification: %s (%.2f) — trying LLM",
+            classification.action_name,
+            classification.confidence,
+        )
+
+    # 3. Try LLM routing (demoted to ambiguity resolver)
     llm_result = await _call_llm_router(input)
     if llm_result is not None:
         return llm_result
 
-    # 3. Heuristic fallback
+    # 4. Heuristic fallback
     return _heuristic_route(input)
 
 

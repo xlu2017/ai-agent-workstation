@@ -95,187 +95,7 @@ function SessionTopBar({ title, model }: { title: string; model: string }) {
   )
 }
 
-/* Workspace Sidebar — persistent left nav per spec 3 */
-interface SidebarSession {
-  id: string
-  status: string
-  repo_path: string
-  created_at: string
-  title?: string
-}
 
-function WorkspaceSidebar({
-  sessions,
-  activeSessionId,
-  workspaceName,
-  onNavigate,
-  collapsed,
-  onToggle,
-}: {
-  sessions: SidebarSession[]
-  activeSessionId: string
-  workspaceName: string
-  onNavigate?: (sessionId: string) => void
-  collapsed: boolean
-  onToggle: () => void
-}) {
-  const [search, setSearch] = useState('')
-  const [navActive, setNavActive] = useState('sessions')
-
-  const navItems = [
-    { key: 'sessions', label: 'Sessions', icon: <Layers size={16} /> },
-    { key: 'ask', label: 'Ask', icon: <MessageSquare size={16} /> },
-    { key: 'wiki', label: 'Wiki', icon: <BookOpen size={16} /> },
-    { key: 'review', label: 'Review', icon: <Eye size={16} /> },
-    { key: 'automations', label: 'Automations', icon: <Sparkles size={16} />, badge: 'Beta' },
-  ]
-
-  const filteredSessions = sessions.filter(s => {
-    if (!search) return true
-    const label = s.title || s.repo_path?.split('/').pop() || s.id
-    return label.toLowerCase().includes(search.toLowerCase())
-  })
-
-  const relativeTime = (iso: string) => {
-    const diff = Date.now() - new Date(iso).getTime()
-    const mins = Math.floor(diff / 60000)
-    if (mins < 1) return 'just now'
-    if (mins < 60) return `${mins}m ago`
-    const hrs = Math.floor(mins / 60)
-    if (hrs < 24) return `${hrs}h ago`
-    const days = Math.floor(hrs / 24)
-    return `${days}d ago`
-  }
-
-  if (collapsed) {
-    return (
-      <div className="as-sidebar as-sidebar-collapsed">
-        <button className="as-sidebar-toggle" onClick={onToggle} title="Expand sidebar">
-          <ChevronRight size={16} />
-        </button>
-        <div className="as-sidebar-collapsed-nav">
-          {navItems.map(n => (
-            <button
-              key={n.key}
-              className={`as-sidebar-icon-btn ${navActive === n.key ? 'active' : ''}`}
-              onClick={() => { setNavActive(n.key); onToggle() }}
-              title={n.label}
-            >
-              {n.icon}
-            </button>
-          ))}
-        </div>
-        <div className="as-sidebar-collapsed-footer">
-          <button className="as-sidebar-icon-btn" title="Settings"><Settings size={16} /></button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="as-sidebar">
-      {/* Workspace header */}
-      <div className="as-sidebar-header">
-        <div className="as-workspace-id">
-          <div className="as-workspace-avatar">
-            {workspaceName.charAt(0).toUpperCase()}
-          </div>
-          <span className="as-workspace-name">{workspaceName}</span>
-          <ChevronDown size={14} className="as-workspace-chevron" />
-        </div>
-        <button className="as-sidebar-toggle" onClick={onToggle} title="Collapse sidebar">
-          <ChevronLeft size={16} />
-        </button>
-      </div>
-
-      {/* Primary nav */}
-      <nav className="as-sidebar-nav">
-        {navItems.map(n => (
-          <button
-            key={n.key}
-            className={`as-nav-item ${navActive === n.key ? 'active' : ''}`}
-            onClick={() => setNavActive(n.key)}
-          >
-            {n.icon}
-            <span>{n.label}</span>
-            {n.badge && <span className="as-nav-badge">{n.badge}</span>}
-          </button>
-        ))}
-      </nav>
-
-      {/* Sessions list */}
-      <div className="as-sidebar-sessions">
-        <div className="as-sessions-header">
-          <span className="as-sessions-label">Recent</span>
-          <div className="as-sessions-actions">
-            <button className="as-sidebar-icon-btn" title="Search" onClick={() => {}}>
-              <Search size={14} />
-            </button>
-            <button className="as-sidebar-icon-btn" title="New session">
-              <Plus size={14} />
-            </button>
-            <button className="as-sidebar-icon-btn" title="More">
-              <MoreHorizontal size={14} />
-            </button>
-          </div>
-        </div>
-
-        {/* Search input */}
-        <div className="as-sessions-search">
-          <Search size={12} />
-          <input
-            className="as-sessions-search-input"
-            placeholder="Search sessions..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-
-        <div className="as-sessions-list">
-          {filteredSessions.map(s => {
-            const label = s.title || s.repo_path?.split('/').pop() || s.id
-            const isActive = s.id === activeSessionId
-            const isLive = s.status === 'running'
-            return (
-              <div
-                key={s.id}
-                className={`as-session-row ${isActive ? 'active' : ''}`}
-                onClick={() => onNavigate?.(s.id)}
-              >
-                <div className="as-session-row-top">
-                  <span className="as-session-name">{truncate(label, 28)}</span>
-                  {isLive && <span className="as-live-dot" />}
-                </div>
-                <div className="as-session-row-meta">
-                  <span className="as-session-time">{relativeTime(s.created_at)}</span>
-                  {s.repo_path && (
-                    <span className="as-session-repo">
-                      <GitBranch size={10} />
-                      {s.repo_path.split('/').pop()}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-          {filteredSessions.length === 0 && (
-            <div className="as-sessions-empty">No sessions found.</div>
-          )}
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="as-sidebar-footer">
-        <button className="as-nav-item">
-          <Settings size={16} />
-          <span>Settings</span>
-        </button>
-        <button className="as-sidebar-icon-btn" title="Export"><Download size={16} /></button>
-        <button className="as-sidebar-icon-btn" title="Help"><HelpCircle size={16} /></button>
-      </div>
-    </div>
-  )
-}
 
 /* Repo pill */
 function RepoAttachmentPill({ owner, repo }: { owner: string; repo: string }) {
@@ -893,27 +713,165 @@ interface ArtifactTab {
   label: string
   prNumber?: number
   filePath?: string
+  closeable?: boolean
 }
 
-/* Artifact tab strip */
-function ArtifactTabStrip({ tabs, activeIndex, onSelect }: {
-  tabs: ArtifactTab[]; activeIndex: number; onSelect: (i: number) => void
+// ─── timeline data model ──────────────────────────────────────────────────
+
+interface SessionTimelinePoint {
+  id: string
+  sessionId: string
+  timestamp: string
+  offsetMs: number
+  kind: 'prompt' | 'action' | 'desktop_state' | 'desktop_snapshot' | 'worklog' | 'change' | 'pr' | 'error' | 'status'
+  title: string
+  summary?: string
+  url?: string
+  prompt?: string
+  desktopActive: boolean
+  hasDesktopSnapshot?: boolean
+  worklogEventId?: string
+  changeWindowId?: string
+  artifactTab?: 'desktop' | 'worklog' | 'changes' | 'pr' | 'file'
+  metadata?: Record<string, unknown>
+}
+
+interface SessionTimelineSegment {
+  id: string
+  startOffsetMs: number
+  endOffsetMs: number
+  desktopActive: boolean
+  eventCount: number
+}
+
+const SECRET_PATTERNS = [
+  /\b(ghp_[A-Za-z0-9]{36,})\b/,
+  /\b(gho_[A-Za-z0-9]{36,})\b/,
+  /\b(glpat-[A-Za-z0-9-]{20,})\b/,
+  /\b(sk-[A-Za-z0-9]{20,})\b/,
+  /\bBearer\s+[A-Za-z0-9._-]{20,}/i,
+  /\b(AKIA[A-Z0-9]{16})\b/,
+  /tskey-[A-Za-z0-9-]+/,
+  /-----BEGIN\s+\w+\s+PRIVATE\s+KEY-----/,
+  /password\s*[:=]\s*\S+/i,
+]
+
+function redactSecrets(text: string): string {
+  let result = text
+  for (const pat of SECRET_PATTERNS) {
+    result = result.replace(new RegExp(pat.source, 'gi'), '[redacted]')
+  }
+  return result
+}
+
+function buildTimelineFromEvents(events: SessionEvent[], sessionId: string): { points: SessionTimelinePoint[]; segments: SessionTimelineSegment[] } {
+  const points: SessionTimelinePoint[] = []
+  const startTime = events.length > 0 ? new Date(events[0].timestamp).getTime() : Date.now()
+  let desktopActive = false
+
+  for (const ev of events) {
+    const ts = new Date(ev.timestamp).getTime()
+    const offsetMs = ts - startTime
+    const d = ev.data || {}
+    let kind: SessionTimelinePoint['kind'] = 'status'
+    let title = ev.event_type.replace(/_/g, ' ')
+    let prompt: string | undefined
+    let url: string | undefined
+    let artifactTab: SessionTimelinePoint['artifactTab']
+
+    switch (ev.event_type) {
+      case 'user_prompt_received':
+        kind = 'prompt'; title = d.message || 'User prompt'; prompt = d.message; break
+      case 'action_started': case 'action_progress': case 'action_completed':
+        kind = 'action'; title = d.tool ? `${d.tool}` : title
+        if (d.tool === 'browser_action') { url = d.url; desktopActive = true }
+        break
+      case 'action_failed': case 'plan_validation_failed':
+        kind = 'error'; title = d.message || 'Error'; break
+      case 'pr_created': case 'pr_merged':
+        kind = 'pr'; title = `PR #${d.pr_number || ''}`; artifactTab = 'pr'; break
+      case 'commit_created': case 'branch_pushed': case 'git_action':
+        kind = 'change'; artifactTab = 'changes'; break
+      default:
+        break
+    }
+
+    points.push({
+      id: ev.event_id || `tp-${points.length}`,
+      sessionId,
+      timestamp: ev.timestamp,
+      offsetMs,
+      kind,
+      title: redactSecrets(title),
+      summary: d.args_summary ? redactSecrets(truncate(d.args_summary, 100)) : undefined,
+      url,
+      prompt: prompt ? redactSecrets(truncate(prompt, 120)) : undefined,
+      desktopActive,
+      artifactTab,
+      metadata: { event_type: ev.event_type },
+    })
+  }
+
+  // Build segments
+  const segments: SessionTimelineSegment[] = []
+  const totalDuration = points.length > 0 ? points[points.length - 1].offsetMs : 1
+  const segCount = Math.min(40, Math.max(5, Math.ceil(points.length / 3)))
+  const segDuration = totalDuration / segCount || 1
+
+  for (let i = 0; i < segCount; i++) {
+    const segStart = i * segDuration
+    const segEnd = (i + 1) * segDuration
+    const segPoints = points.filter(p => p.offsetMs >= segStart && p.offsetMs < segEnd)
+    const hasDesktop = segPoints.some(p => p.desktopActive)
+    segments.push({
+      id: `seg-${i}`,
+      startOffsetMs: segStart,
+      endOffsetMs: segEnd,
+      desktopActive: hasDesktop,
+      eventCount: segPoints.length,
+    })
+  }
+
+  return { points, segments }
+}
+
+/* Artifact tab strip — closeable tabs */
+function ArtifactTabStrip({ tabs, activeIndex, onSelect, onClose }: {
+  tabs: ArtifactTab[]; activeIndex: number; onSelect: (i: number) => void; onClose?: (i: number) => void
 }) {
   return (
     <div className="as-tab-strip">
       {tabs.map((tab, i) => (
-        <button
+        <div
           key={i}
           className={`as-tab ${i === activeIndex ? 'as-tab-active' : ''}`}
           onClick={() => onSelect(i)}
+          role="tab"
+          aria-selected={i === activeIndex}
+          aria-label={tab.label}
         >
           {tab.kind === 'pr' && <GitPullRequest size={12} />}
           {tab.kind === 'desktop' && <Monitor size={12} />}
           {tab.kind === 'file' && <File size={12} />}
           {tab.kind === 'recording' && <Video size={12} />}
+          {tab.kind === 'worklog' && <Hash size={12} />}
+          {tab.kind === 'changes' && <FileText size={12} />}
           <span>{tab.label}</span>
-        </button>
+          {tab.closeable !== false && onClose && (
+            <button
+              className="as-tab-close"
+              onClick={e => { e.stopPropagation(); onClose(i) }}
+              aria-label={`Close ${tab.label}`}
+              title={`Close ${tab.label}`}
+            >
+              <X size={10} />
+            </button>
+          )}
+        </div>
       ))}
+      <button className="as-tab as-tab-add" title="Add tab" aria-label="Add tab">
+        <Plus size={12} />
+      </button>
     </div>
   )
 }
@@ -1028,44 +986,118 @@ function ChangesPanel({ files, timeFilter, onClearFilter }: {
   )
 }
 
-/* Timeline scrubber minimap */
-interface TimelineSegment {
-  startTime: string; endTime: string; eventType: string; density: number
-}
-
-function TimelineScrubber({ segments, onJumpToEnd, onJumpToDesktop }: {
-  segments: TimelineSegment[]
-  onJumpToEnd?: () => void
-  onJumpToDesktop?: () => void
+/* Timeline scrubber — full replay bar */
+function TimelineScrubber({
+  points, segments, selectedPointId, followLive,
+  onSelectPoint, onPrev, onNext, onGoLive, onGoEnd,
+}: {
+  points: SessionTimelinePoint[]; segments: SessionTimelineSegment[]
+  selectedPointId?: string; followLive: boolean
+  onSelectPoint: (point: SessionTimelinePoint) => void
+  onPrev: () => void; onNext: () => void
+  onGoLive: () => void; onGoEnd: () => void
 }) {
+  const [hoverPoint, setHoverPoint] = useState<SessionTimelinePoint | null>(null)
+  const [hoverX, setHoverX] = useState(0)
+  const trackRef = useRef<HTMLDivElement>(null)
+  const totalDuration = segments.length > 0 ? segments[segments.length - 1].endOffsetMs : 1
+
+  const handleTrackClick = useCallback((e: React.MouseEvent) => {
+    if (!trackRef.current || points.length === 0) return
+    const rect = trackRef.current.getBoundingClientRect()
+    const pct = (e.clientX - rect.left) / rect.width
+    const targetOffset = pct * totalDuration
+    let nearest = points[0]
+    let bestDist = Math.abs(nearest.offsetMs - targetOffset)
+    for (const p of points) {
+      const dist = Math.abs(p.offsetMs - targetOffset)
+      if (dist < bestDist) { nearest = p; bestDist = dist }
+    }
+    onSelectPoint(nearest)
+  }, [points, totalDuration, onSelectPoint])
+
+  const handleTrackHover = useCallback((e: React.MouseEvent) => {
+    if (!trackRef.current || points.length === 0) return
+    const rect = trackRef.current.getBoundingClientRect()
+    const pct = (e.clientX - rect.left) / rect.width
+    setHoverX(e.clientX - rect.left)
+    const targetOffset = pct * totalDuration
+    let nearest = points[0]
+    let bestDist = Math.abs(nearest.offsetMs - targetOffset)
+    for (const p of points) {
+      const dist = Math.abs(p.offsetMs - targetOffset)
+      if (dist < bestDist) { nearest = p; bestDist = dist }
+    }
+    setHoverPoint(nearest)
+  }, [points, totalDuration])
+
   return (
     <div className="as-scrubber">
-      <button className="as-scrubber-btn" title="Previous">
+      <button className="as-scrubber-btn" title="Previous event" aria-label="Previous event" onClick={onPrev}>
         <ArrowLeft size={14} />
       </button>
-      <div className="as-scrubber-track">
-        {segments.map((seg, i) => (
-          <div
-            key={i}
-            className="as-scrubber-seg"
-            style={{ flex: seg.density, opacity: Math.min(1, 0.3 + seg.density * 0.3) }}
-            title={`${seg.eventType} (${timeAgo(seg.startTime)})`}
-          />
-        ))}
+
+      <div className="as-scrubber-track" ref={trackRef}
+        onClick={handleTrackClick}
+        onMouseMove={handleTrackHover}
+        onMouseLeave={() => setHoverPoint(null)}
+      >
+        {/* Segments */}
+        {segments.map(seg => {
+          const widthPct = ((seg.endOffsetMs - seg.startOffsetMs) / totalDuration) * 100
+          return (
+            <div
+              key={seg.id}
+              className={`as-scrubber-seg ${seg.desktopActive ? 'as-seg-active' : 'as-seg-inactive'}`}
+              style={{ width: `${widthPct}%` }}
+            />
+          )
+        })}
+
+        {/* Event markers */}
+        {points.filter(p => p.kind === 'prompt' || p.kind === 'action' || p.kind === 'error' || p.kind === 'pr').map(p => {
+          const leftPct = (p.offsetMs / totalDuration) * 100
+          const isSelected = p.id === selectedPointId
+          return (
+            <div
+              key={p.id}
+              className={`as-scrubber-marker ${isSelected ? 'as-marker-selected' : ''} as-marker-${p.kind}`}
+              style={{ left: `${leftPct}%` }}
+            />
+          )
+        })}
+
+        {/* Hover tooltip */}
+        {hoverPoint && (
+          <div className="as-scrubber-tooltip" style={{ left: hoverX }}>
+            <div className="as-tooltip-time">{new Date(hoverPoint.timestamp).toLocaleString()}</div>
+            <div className="as-tooltip-title">
+              {hoverPoint.kind === 'prompt' && hoverPoint.prompt
+                ? `Prompt: "${hoverPoint.prompt}"`
+                : hoverPoint.url || hoverPoint.title}
+            </div>
+            {hoverPoint.summary && <div className="as-tooltip-summary">{hoverPoint.summary}</div>}
+          </div>
+        )}
       </div>
-      <button className="as-scrubber-btn" title="Next">
+
+      <button className="as-scrubber-btn" title="Next event" aria-label="Next event" onClick={onNext}>
         <ArrowRight size={14} />
       </button>
-      {onJumpToDesktop && (
-        <button className="as-scrubber-btn" title="Go to live desktop" onClick={onJumpToDesktop}>
-          <Monitor size={14} />
+
+      {followLive ? (
+        <button className="as-scrubber-live" title="Live" aria-label="Live" onClick={onGoLive}>
+          <span className="as-live-pip" /> Live
+        </button>
+      ) : (
+        <button className="as-scrubber-btn as-scrubber-golive" title="Go to live desktop" aria-label="Go to live desktop" onClick={onGoLive}>
+          <Monitor size={14} /> Live
         </button>
       )}
-      {onJumpToEnd && (
-        <button className="as-scrubber-btn" title="Go to end" onClick={onJumpToEnd}>
-          <SkipForward size={14} />
-        </button>
-      )}
+
+      <button className="as-scrubber-btn" title="Go to end" aria-label="Go to end" onClick={onGoEnd}>
+        <SkipForward size={14} />
+      </button>
     </div>
   )
 }
@@ -1121,16 +1153,158 @@ function WorklogPanel({ events }: { events: SessionEvent[] }) {
   )
 }
 
-/* Right pane — artifact inspector */
-function RightPane({ events, sessionId }: { events: SessionEvent[]; sessionId: string }) {
+/* Guacamole Desktop view */
+function GuacamoleDesktopView({ followLive, selectedTime }: {
+  followLive: boolean; selectedTime?: string
+}) {
+  const [frameSrc, setFrameSrc] = useState('')
+  const [status, setStatus] = useState<'loading' | 'live' | 'unavailable' | 'historical'>('loading')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!followLive && selectedTime) {
+      setStatus('historical')
+      return
+    }
+    // Try to get Guacamole config and create session
+    fetch(`${CONTROL_API}/v2/remote-desktop/config`)
+      .then(r => r.json())
+      .then(config => {
+        if (!config.enabled) { setStatus('unavailable'); setError('Remote desktop is not enabled'); return }
+        if (config.auto_login) {
+          fetch(`${CONTROL_API}/v2/remote-desktop/token`, { method: 'POST' })
+            .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json() })
+            .then(session => {
+              localStorage.setItem('GUAC_AUTH', JSON.stringify({
+                authToken: session.authToken, username: session.username,
+                dataSource: session.dataSource, availableDataSources: session.availableDataSources,
+              }))
+              setFrameSrc(session.connection_url || config.url)
+              setStatus('live')
+            })
+            .catch(() => { setFrameSrc(config.url); setStatus('live') })
+        } else {
+          setFrameSrc(config.url)
+          setStatus('live')
+        }
+      })
+      .catch(() => { setStatus('unavailable'); setError('Unable to connect to remote desktop') })
+  }, [followLive, selectedTime])
+
+  if (status === 'loading') {
+    return (
+      <div className="as-desktop-view as-desktop-loading">
+        <Loader size={24} className="as-spin" />
+        <p>Connecting to remote desktop...</p>
+      </div>
+    )
+  }
+
+  if (status === 'historical') {
+    return (
+      <div className="as-desktop-view as-desktop-historical">
+        <Monitor size={48} className="as-desktop-icon-muted" />
+        <p>No desktop snapshot is available for this time.</p>
+        {selectedTime && <span className="as-desktop-time">{new Date(selectedTime).toLocaleString()}</span>}
+      </div>
+    )
+  }
+
+  if (status === 'unavailable') {
+    return (
+      <div className="as-desktop-view as-desktop-unavailable">
+        <Monitor size={48} className="as-desktop-icon-muted" />
+        <p>{error || 'Desktop is not available'}</p>
+        <button className="as-action-btn" onClick={() => {
+          if (typeof window !== 'undefined') window.open('/remote-desktop', '_blank')
+        }}>
+          <ExternalLink size={14} /> <span>Open Desktop</span>
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="as-desktop-view as-desktop-live">
+      {frameSrc ? (
+        <iframe
+          title="Remote Desktop"
+          src={frameSrc}
+          className="as-desktop-iframe"
+          allow="fullscreen; clipboard-read; clipboard-write"
+          allowFullScreen
+        />
+      ) : (
+        <div className="as-desktop-loading">
+          <Loader size={24} className="as-spin" />
+          <p>Opening remote desktop...</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* Resizable two-pane body: center (children) + right pane with drag divider */
+function ResizableBody({ events, sessionId, children }: {
+  events: SessionEvent[]; sessionId: string; children: React.ReactNode
+}) {
+  const [rightWidth, setRightWidth] = useState(420)
+  const [isDragging, setIsDragging] = useState(false)
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+    const startX = e.clientX
+    const startW = rightWidth
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = startX - ev.clientX
+      const newW = Math.max(120, startW + delta)
+      setRightWidth(newW)
+    }
+    const onUp = () => {
+      setIsDragging(false)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [rightWidth])
+
+  return (
+    <div className="as-body">
+      {children}
+      <div
+        className="as-resize-divider"
+        onMouseDown={onMouseDown}
+        title="Drag to resize"
+      />
+      <RightPane events={events} sessionId={sessionId} style={{ width: rightWidth }} />
+      {isDragging && <div style={{ position: 'fixed', inset: 0, zIndex: 9999, cursor: 'col-resize' }} />}
+    </div>
+  )
+}
+
+/* Right pane — artifact inspector with full timeline replay */
+function RightPane({ events, sessionId, style }: { events: SessionEvent[]; sessionId: string; style?: React.CSSProperties }) {
   const [activeTab, setActiveTab] = useState(0)
   const [collapsed, setCollapsed] = useState(false)
 
+  // Timeline replay state
+  const [selectedPointId, setSelectedPointId] = useState<string | undefined>(undefined)
+  const [selectedTime, setSelectedTime] = useState<string | undefined>(undefined)
+  const [followLive, setFollowLive] = useState(true)
+
   // Build tabs from events
-  const tabs = useMemo(() => {
+  const [closedTabs, setClosedTabs] = useState<Set<string>>(new Set())
+  const allTabs = useMemo(() => {
     const t: ArtifactTab[] = [
-      { kind: 'worklog', label: 'Worklog' },
-      { kind: 'changes', label: 'Changes' },
+      { kind: 'worklog', label: 'Worklog', closeable: true },
+      { kind: 'changes', label: 'Changes', closeable: true },
     ]
     const prNums = new Set<number>()
     const files = new Set<string>()
@@ -1139,7 +1313,7 @@ function RightPane({ events, sessionId }: { events: SessionEvent[]; sessionId: s
         const n = ev.data.pr_number
         if (!prNums.has(n)) {
           prNums.add(n)
-          t.push({ kind: 'pr', label: `PR #${n}`, prNumber: n })
+          t.push({ kind: 'pr', label: `PR #${n}`, prNumber: n, closeable: true })
         }
       }
       if (ev.event_type === 'action_progress' && ev.data?.path) {
@@ -1147,14 +1321,29 @@ function RightPane({ events, sessionId }: { events: SessionEvent[]; sessionId: s
         if (!files.has(fp)) {
           files.add(fp)
           if (files.size <= 3) {
-            t.push({ kind: 'file', label: fp.split('/').pop() || fp, filePath: fp })
+            t.push({ kind: 'file', label: fp.split('/').pop() || fp, filePath: fp, closeable: true })
           }
         }
       }
     }
-    t.push({ kind: 'desktop', label: 'Desktop' })
+    t.push({ kind: 'desktop', label: 'Desktop', closeable: true })
     return t
   }, [events])
+
+  const tabs = useMemo(() => allTabs.filter((_, i) => !closedTabs.has(String(i))), [allTabs, closedTabs])
+
+  const handleCloseTab = useCallback((visibleIndex: number) => {
+    // Map visible index back to allTabs index
+    let count = -1
+    for (let i = 0; i < allTabs.length; i++) {
+      if (!closedTabs.has(String(i))) count++
+      if (count === visibleIndex) {
+        setClosedTabs(prev => new Set(prev).add(String(i)))
+        if (visibleIndex <= activeTab && activeTab > 0) setActiveTab(activeTab - 1)
+        return
+      }
+    }
+  }, [allTabs, closedTabs, activeTab])
 
   // Build file change summaries from events for changes tab
   const fileChanges = useMemo(() => {
@@ -1177,28 +1366,76 @@ function RightPane({ events, sessionId }: { events: SessionEvent[]; sessionId: s
     return Object.values(changes)
   }, [events])
 
-  // Timeline segments for scrubber
-  const segments = useMemo(() => {
-    const segs: TimelineSegment[] = []
-    const chunkSize = Math.max(1, Math.floor(events.length / 30))
-    for (let i = 0; i < events.length; i += chunkSize) {
-      const chunk = events.slice(i, i + chunkSize)
-      if (chunk.length > 0) {
-        segs.push({
-          startTime: chunk[0].timestamp,
-          endTime: chunk[chunk.length - 1].timestamp,
-          eventType: chunk[0].event_type,
-          density: chunk.length / chunkSize,
-        })
-      }
+  // Build timeline data
+  const { points, segments } = useMemo(() => buildTimelineFromEvents(events, sessionId), [events, sessionId])
+
+  // Timeline navigation
+  const selectedIndex = useMemo(() => {
+    if (!selectedPointId) return -1
+    return points.findIndex(p => p.id === selectedPointId)
+  }, [points, selectedPointId])
+
+  const handleSelectPoint = useCallback((point: SessionTimelinePoint) => {
+    setSelectedPointId(point.id)
+    setSelectedTime(point.timestamp)
+    setFollowLive(false)
+  }, [])
+
+  const handlePrev = useCallback(() => {
+    if (points.length === 0) return
+    const significantPoints = points.filter(p => p.kind === 'prompt' || p.kind === 'action' || p.kind === 'error' || p.kind === 'pr')
+    if (significantPoints.length === 0) return
+    const currentIdx = selectedIndex >= 0
+      ? significantPoints.findIndex(p => p.offsetMs < points[selectedIndex].offsetMs)
+      : significantPoints.length - 1
+    const prevPoints = significantPoints.filter(p =>
+      selectedIndex >= 0 ? p.offsetMs < points[selectedIndex].offsetMs : true
+    )
+    if (prevPoints.length > 0) {
+      const prev = prevPoints[prevPoints.length - 1]
+      handleSelectPoint(prev)
     }
-    return segs
-  }, [events])
+  }, [points, selectedIndex, handleSelectPoint])
+
+  const handleNext = useCallback(() => {
+    if (points.length === 0) return
+    const significantPoints = points.filter(p => p.kind === 'prompt' || p.kind === 'action' || p.kind === 'error' || p.kind === 'pr')
+    const nextPoints = selectedIndex >= 0
+      ? significantPoints.filter(p => p.offsetMs > points[selectedIndex].offsetMs)
+      : significantPoints
+    if (nextPoints.length > 0) {
+      handleSelectPoint(nextPoints[0])
+    } else {
+      // At the end, go live
+      setFollowLive(true)
+      setSelectedPointId(undefined)
+      setSelectedTime(undefined)
+    }
+  }, [points, selectedIndex, handleSelectPoint])
+
+  const handleGoLive = useCallback(() => {
+    setFollowLive(true)
+    setSelectedPointId(undefined)
+    setSelectedTime(undefined)
+  }, [])
+
+  const handleGoEnd = useCallback(() => {
+    if (points.length > 0) {
+      const last = points[points.length - 1]
+      handleSelectPoint(last)
+    }
+  }, [points, handleSelectPoint])
+
+  // Changes time filter based on selected time
+  const changesTimeFilter = useMemo(() => {
+    if (followLive || !selectedTime) return undefined
+    return { startTime: events[0]?.timestamp || '', endTime: selectedTime }
+  }, [followLive, selectedTime, events])
 
   if (collapsed) {
     return (
       <div className="as-right-collapsed">
-        <button className="as-right-expand" onClick={() => setCollapsed(false)} title="Expand panel">
+        <button className="as-right-expand" onClick={() => setCollapsed(false)} title="Expand panel" aria-label="Expand panel">
           <ChevronLeft size={16} />
         </button>
       </div>
@@ -1206,29 +1443,34 @@ function RightPane({ events, sessionId }: { events: SessionEvent[]; sessionId: s
   }
 
   return (
-    <div className="as-right-pane">
+    <div className="as-right-pane" style={style}>
       <div className="as-right-header">
-        <ArtifactTabStrip tabs={tabs} activeIndex={activeTab} onSelect={setActiveTab} />
-        <button className="as-right-collapse" onClick={() => setCollapsed(true)} title="Collapse">
-          <ChevronRight size={14} />
-        </button>
+        <ArtifactTabStrip tabs={tabs} activeIndex={activeTab} onSelect={setActiveTab} onClose={handleCloseTab} />
+        <div className="as-right-header-actions">
+          <button className="as-right-expand-btn" title="Expand" aria-label="Expand"><ExternalLink size={14} /></button>
+          <button className="as-right-collapse" onClick={() => setCollapsed(true)} title="Collapse" aria-label="Collapse">
+            <ChevronRight size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="as-right-content">
         {tabs[activeTab]?.kind === 'worklog' && (
-          <WorklogPanel events={events} />
+          <>
+            {!followLive && selectedTime && (
+              <div className="as-time-filter">
+                <span>Showing worklog at {new Date(selectedTime).toLocaleTimeString()}</span>
+                <button className="as-time-filter-clear" onClick={handleGoLive}>Clear</button>
+              </div>
+            )}
+            <WorklogPanel events={events} />
+          </>
         )}
         {tabs[activeTab]?.kind === 'changes' && (
-          <ChangesPanel files={fileChanges} />
+          <ChangesPanel files={fileChanges} timeFilter={changesTimeFilter} onClearFilter={handleGoLive} />
         )}
         {tabs[activeTab]?.kind === 'desktop' && (
-          <div className="as-desktop-placeholder">
-            <Monitor size={48} />
-            <p>Live desktop view</p>
-            <button className="as-action-btn" onClick={() => {}}>
-              <Monitor size={14} /> <span>Go to live desktop</span>
-            </button>
-          </div>
+          <GuacamoleDesktopView followLive={followLive} selectedTime={selectedTime} />
         )}
         {tabs[activeTab]?.kind === 'pr' && (
           <div className="as-pr-placeholder">
@@ -1244,7 +1486,17 @@ function RightPane({ events, sessionId }: { events: SessionEvent[]; sessionId: s
         )}
       </div>
 
-      <TimelineScrubber segments={segments} />
+      <TimelineScrubber
+        points={points}
+        segments={segments}
+        selectedPointId={selectedPointId}
+        followLive={followLive}
+        onSelectPoint={handleSelectPoint}
+        onPrev={handlePrev}
+        onNext={handleNext}
+        onGoLive={handleGoLive}
+        onGoEnd={handleGoEnd}
+      />
     </div>
   )
 }
@@ -1797,12 +2049,10 @@ function FloatingGuideComposer({
 // ─── main page ───────────────────────────────────────────────────────────────
 
 export default function AgentSessionPage({
-  sessionId, model, onBack, sessions: externalSessions, onNavigateSession,
+  sessionId, model, onBack,
 }: {
   sessionId: string; model?: string; onBack?: () => void
-  sessions?: SidebarSession[]; onNavigateSession?: (id: string) => void
 }) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [events, setEvents] = useState<SessionEvent[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [liveStatus, setLiveStatus] = useState('')
@@ -1839,14 +2089,21 @@ export default function AgentSessionPage({
 
   // Poll events via SSE-like polling
   useEffect(() => {
+    // Clear stale data from previous session
+    setEvents([])
+    setIsRunning(false)
+    setLiveStatus('')
     pollingRef.current = true
     lastSeqRef.current = 0
+    let cancelled = false
 
     const poll = async () => {
-      while (pollingRef.current) {
+      while (pollingRef.current && !cancelled) {
         try {
           const res = await fetch(`${CONTROL_API}/sessions/${sessionId}/events/stream?after=${lastSeqRef.current}`)
+          if (cancelled) return
           const data = await res.json()
+          if (cancelled) return
           if (data.events && data.events.length > 0) {
             lastSeqRef.current = data.total
             setEvents(prev => {
@@ -1880,6 +2137,7 @@ export default function AgentSessionPage({
     fetch(`${CONTROL_API}/sessions/${sessionId}/events`)
       .then(r => r.json())
       .then(data => {
+        if (cancelled) return
         if (data.events) {
           setEvents(data.events)
           lastSeqRef.current = data.total || data.events.length
@@ -1890,7 +2148,10 @@ export default function AgentSessionPage({
     // Start polling
     poll()
 
-    return () => { pollingRef.current = false }
+    return () => {
+      pollingRef.current = false
+      cancelled = true
+    }
   }, [sessionId])
 
   // Auto-scroll when near bottom
@@ -1917,42 +2178,20 @@ export default function AgentSessionPage({
     } catch { /* error will show via events */ }
   }, [sessionId])
 
-  // Fetch sessions for sidebar if not provided externally
-  const [localSessions, setLocalSessions] = useState<SidebarSession[]>([])
-  useEffect(() => {
-    if (!externalSessions) {
-      fetch(`${CONTROL_API}/sessions`)
-        .then(r => r.json())
-        .then(d => setLocalSessions(d.sessions || []))
-        .catch(() => {})
-    }
-  }, [externalSessions])
-  const sidebarSessions = externalSessions || localSessions
-
-  const handleNavigateSession = useCallback((id: string) => {
-    if (onNavigateSession) {
-      onNavigateSession(id)
-    } else {
-      window.location.hash = `/session/${id}`
-    }
-  }, [onNavigateSession])
+  const handleStop = useCallback(async () => {
+    setLiveStatus('Stopping...')
+    try {
+      await fetch(`${CONTROL_API}/sessions/${sessionId}/interrupt`, { method: 'POST' })
+    } catch { /* */ }
+    setIsRunning(false)
+    setLiveStatus('Stopped')
+  }, [sessionId])
 
   return (
     <div className="as-page">
-      <WorkspaceSidebar
-        sessions={sidebarSessions}
-        activeSessionId={sessionId}
-        workspaceName="MapleEdge"
-        onNavigate={handleNavigateSession}
-        collapsed={sidebarCollapsed}
-        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-      />
-
-      <div className="as-page-main">
       <SessionTopBar title={sessionTitle} model={model || 'deepseek-chat'} />
 
-      <div className="as-body">
-        {/* Center transcript pane */}
+      <ResizableBody events={events} sessionId={sessionId}>
         <div className="as-center-pane">
           <div className="as-scroll" ref={scrollRef}>
             <div className="as-transcript">
@@ -1978,13 +2217,10 @@ export default function AgentSessionPage({
             sessionId={sessionId}
             isRunning={isRunning}
             onSend={handleSend}
+            onStop={handleStop}
           />
         </div>
-
-        {/* Right artifact/workspace pane */}
-        <RightPane events={events} sessionId={sessionId} />
-      </div>
-      </div>{/* end as-page-main */}
+      </ResizableBody>
     </div>
   )
 }
