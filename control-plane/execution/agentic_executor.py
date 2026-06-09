@@ -1071,3 +1071,51 @@ class AgenticExecutor(ExecutionAdapter):
             return result.stdout.strip() if result.returncode == 0 else ""
         except Exception:
             return ""
+
+    def run_task(self, session_id: str, packet: Any) -> Any:
+        """Bridge from the legacy TaskPacket/TaskResult interface.
+
+        Translates a TaskPacket (from executors/base.py) into an
+        execute_action() call and returns a TaskResult so callers like
+        prompt_handler, executor_runner, and queue can use AgenticExecutor
+        without changing their call sites.
+        """
+        import asyncio
+
+        action_name = "autonomous_code_edit"
+        params = {"intent": packet.instruction}
+        context = {
+            "branch": getattr(packet, "branch", "main"),
+            "model": getattr(packet, "model", os.environ.get("DEFAULT_MODEL", "deepseek-chat")),
+            "execution_mode": getattr(packet, "execution_mode", "finite"),
+        }
+
+        # Run the async execute_action in a new event loop (since run_task
+        # is called synchronously from run_in_executor threads).
+        try:
+            loop = asyncio.new_event_loop()
+            exec_result = loop.run_until_complete(
+                self.execute_action(
+                    session_id=session_id,
+                    worktree_path=getattr(packet, "worktree_path", ""),
+                    action_name=action_name,
+                    params=params,
+                    context=context,
+                )
+            )
+        finally:
+            loop.close()
+
+        # Convert ExecutionResult → TaskResult
+        from executors.base import TaskResult
+
+        return TaskResult(
+            status=exec_result.status,
+            summary=exec_result.summary or "",
+            error=exec_result.error or None,
+            files_edited=exec_result.files_touched or [],
+            commands_run=[],
+            tests_passed=0,
+            tests_failed=0,
+            duration_seconds=exec_result.duration_ms / 1000.0 if exec_result.duration_ms else 0.0,
+        )
