@@ -45,7 +45,7 @@ PROTECTED_BRANCHES = {"main", "master", "develop", "production"}
 
 # Global cancellation registry: sessions that have been interrupted.
 # Checked each iteration so thread-based execution stops promptly.
-_cancelled_sessions: set[str] = {}
+_cancelled_sessions: set[str] = set()
 
 
 # ============================================================
@@ -807,6 +807,96 @@ def _summarize_args(tool_name: str, args: dict) -> str:
     return str(args)[:60]
 
 
+def _emit_granular_tool_event(
+    event_callback: Any,
+    tool_name: str,
+    tool_args: dict[str, Any],
+    observation: str,
+    output_preview: str,
+    duration_ms: int,
+) -> None:
+    """Emit a granular workflow transcript event based on tool type."""
+    path = tool_args.get("path", "")
+    fname = path.rsplit("/", 1)[-1] if "/" in path else path
+
+    if tool_name == "read_file":
+        start = tool_args.get("start_line")
+        end = tool_args.get("end_line")
+        title = f"Read {fname}"
+        if start is not None and end is not None:
+            title += f":{start}-{end}"
+        event_callback("file_read", title, {
+            "path": path, "line_start": start, "line_end": end,
+            "duration_ms": duration_ms,
+        })
+
+    elif tool_name in ("write_file", "edit_file"):
+        # Count additions/deletions from old_str/new_str if available
+        old_str = tool_args.get("old_str", "")
+        new_str = tool_args.get("new_str", "")
+        content = tool_args.get("content", "")
+        additions = len(new_str.split("\n")) if new_str else (len(content.split("\n")) if content else 0)
+        deletions = len(old_str.split("\n")) if old_str else 0
+        title = f"Edited {fname}"
+        if additions or deletions:
+            title += f" +{additions} -{deletions}"
+        event_callback("file_edited", title, {
+            "path": path, "additions": additions, "deletions": deletions,
+            "duration_ms": duration_ms,
+        })
+
+    elif tool_name == "search":
+        pattern = tool_args.get("pattern", "")
+        result_count = observation.count("\n") if observation else 0
+        title = f"Searched for {pattern}"
+        if path:
+            title = f"Searched {fname} for {pattern}"
+        event_callback("code_searched", title, {
+            "query": pattern, "path": path, "result_count": result_count,
+            "duration_ms": duration_ms,
+        })
+
+    elif tool_name == "bash":
+        cmd = tool_args.get("command", "")
+        # Detect test commands
+        is_test = any(kw in cmd.lower() for kw in ["pytest", "test", "jest", "vitest", "mocha"])
+        exit_code = None
+        if observation:
+            # Try to extract exit code from observation
+            import re as _re
+            m = _re.search(r'exit code[:\s]+(\d+)', observation, _re.IGNORECASE)
+            if m:
+                exit_code = int(m.group(1))
+        if is_test:
+            event_callback("test_run", f"Ran tests: {cmd[:60]}", {
+                "command": cmd, "exit_code": exit_code,
+                "duration_ms": duration_ms,
+            })
+        else:
+            event_callback("command_run", f"Ran {cmd[:60]}", {
+                "command": cmd, "exit_code": exit_code,
+                "duration_ms": duration_ms,
+            })
+
+    elif tool_name == "list_dir":
+        dir_path = tool_args.get("path", ".")
+        event_callback("file_read", f"Listed {dir_path}", {
+            "path": dir_path, "duration_ms": duration_ms,
+        })
+
+    elif tool_name == "run_tests":
+        cmd = tool_args.get("command", "")
+        event_callback("test_run", f"Ran tests: {cmd[:60]}", {
+            "command": cmd, "duration_ms": duration_ms,
+        })
+
+    elif tool_name == "git":
+        cmd = tool_args.get("command", "")
+        event_callback("command_run", f"Git: {cmd[:60]}", {
+            "command": f"git {cmd}", "duration_ms": duration_ms,
+        })
+
+
 def _run_agent_loop(
     instruction: str,
     workspace: str,
@@ -851,6 +941,7 @@ def _run_agent_loop(
 
         _prune_messages(messages, max_chars=200000)
 
+        llm_start = time.time()
         try:
             response = _call_llm(messages, model)
         except RuntimeError as e:
@@ -865,6 +956,12 @@ def _run_agent_loop(
             else:
                 return ("failed", f"LLM error: {e}", executor.files_edited,
                         executor.tests_passed, executor.tests_failed, executor.commands_run)
+
+        llm_elapsed_ms = int((time.time() - llm_start) * 1000)
+        if event_callback and llm_elapsed_ms > 3000:
+            event_callback("thought_elapsed", f"Thought for {llm_elapsed_ms // 1000}s", {
+                "duration_ms": llm_elapsed_ms,
+            })
 
         choice = response.get("choices", [{}])[0]
         message = choice.get("message", {})
@@ -907,10 +1004,18 @@ def _run_agent_loop(
                 return (status, summary, executor.files_edited,
                         executor.tests_passed, executor.tests_failed, executor.commands_run)
 
+            tool_start = time.time()
             observation = executor.execute(tool_name, tool_args)
+            tool_duration_ms = int((time.time() - tool_start) * 1000)
 
             if event_callback:
                 output_preview = redact_output(observation[:2000]) if observation else "(no output)"
+                # Emit granular event type based on tool
+                _emit_granular_tool_event(
+                    event_callback, tool_name, tool_args,
+                    observation, output_preview, tool_duration_ms,
+                )
+                # Also emit legacy action_progress for backward compat
                 event_callback(
                     "action_progress",
                     f"Tool: {tool_name}",
