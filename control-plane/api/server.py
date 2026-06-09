@@ -1009,7 +1009,7 @@ def _service_commands():
         },
         "litellm": {
             "port": 4000,
-            "start": "nohup litellm --config /opt/workstation/litellm-config.yaml --port 4000 > /opt/workstation/logs/litellm.log 2>&1 &",
+            "start": "nohup /home/agent/.local/bin/litellm --config /opt/workstation/litellm-config.yaml --port 4000 > /opt/workstation/logs/litellm.log 2>&1 &",
         },
         "control-plane": {
             "port": 9877,
@@ -1022,7 +1022,7 @@ def _service_commands():
         },
         "dashboard": {
             "port": 5173,
-            "start": "cd /opt/workstation/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
+            "start": "cd /opt/workstation/repos/jubilant-goggles/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
         },
     }
 
