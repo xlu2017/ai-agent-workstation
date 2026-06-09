@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Menu, Send, ChevronLeft, Folder, GitBranch, Plus, X, Circle, CheckCircle, AlertCircle, Clock, ArrowUp, Power, RefreshCw, Server, Monitor, Maximize2, Minimize2, Download } from 'lucide-react'
+import AgentSessionPage from './AgentSessionPage'
+import './agent-session.css'
 
 // crypto.randomUUID() requires a secure context (HTTPS or localhost).
 // When accessed via HTTP + IP (e.g. http://100.119.21.55:5173/), it's unavailable.
@@ -990,7 +992,7 @@ export default function App() {
             <div className="session-list">
               {sessions.map(s => (
                 <div key={s.id} className={`session-item ${s.id === sessionId ? 'active' : ''}`}>
-                  <div className="session-item-main" onClick={() => selectSession(s.id)}>
+                  <div className="session-item-main" onClick={() => { navigate(`/session/${s.id}`); setShowSidebar(false) }}>
                     <span className="session-name">{s.id}</span>
                     <span className="session-meta">{s.repo_path?.split('/').pop()}</span>
                   </div>
@@ -1007,6 +1009,11 @@ export default function App() {
       <main className="main">
         {routePath === '/remote-desktop' ? (
           <RemoteDesktopPage />
+        ) : routePath.startsWith('/session/') ? (
+          <AgentSessionPage
+            sessionId={routePath.replace('/session/', '')}
+            onBack={() => navigate('/')}
+          />
         ) : !sessionId ? (
           <div className="welcome">
             <h2>Workstation Agent</h2>
