@@ -293,6 +293,16 @@ class ToolExecutor:
             if branch in PROTECTED_BRANCHES:
                 return f"BLOCKED: cannot push to protected branch '{branch}'"
 
+        # Duplicate commit guard for bash git commit commands
+        if "git commit" in command:
+            try:
+                from execution.commit_guard import check_duplicate_tree
+                is_dup, dup_detail = check_duplicate_tree(self.workspace)
+                if is_dup:
+                    return f"BLOCKED: {dup_detail}"
+            except Exception:
+                pass
+
         try:
             result = subprocess.run(
                 ["bash", "-c", command],
@@ -539,6 +549,17 @@ class ToolExecutor:
             branch = self._get_branch()
             if branch in PROTECTED_BRANCHES:
                 return f"BLOCKED: cannot modify protected branch '{branch}'"
+
+        # Duplicate commit guard: check tree hash before committing
+        if command.strip().startswith("commit"):
+            try:
+                # Stage first if 'git add' was run separately
+                from execution.commit_guard import check_duplicate_tree
+                is_dup, dup_detail = check_duplicate_tree(self.workspace)
+                if is_dup:
+                    return f"BLOCKED: {dup_detail}"
+            except Exception:
+                pass  # Non-fatal — proceed with commit
 
         full_cmd = f"git {command}"
         self.commands_run.append(full_cmd[:200])
@@ -933,6 +954,7 @@ class AgenticExecutor(ExecutionAdapter):
         action_name: str,
         params: dict[str, Any],
         context: dict[str, Any],
+        event_sink: Any = None,
     ) -> ExecutionResult:
         start_ms = int(time.time() * 1000)
         events: list[ExecutionEvent] = []
@@ -972,6 +994,11 @@ class AgenticExecutor(ExecutionAdapter):
                 source="agentic",
             )
             events.append(evt)
+            if event_sink:
+                try:
+                    event_sink(event_type, message, metadata)
+                except Exception:
+                    pass
 
         event_callback("action_progress", f"Agentic executor starting: {action_name}", {
             "workspace": worktree_path,
@@ -1071,3 +1098,52 @@ class AgenticExecutor(ExecutionAdapter):
             return result.stdout.strip() if result.returncode == 0 else ""
         except Exception:
             return ""
+
+    def run_task(self, session_id: str, packet: Any, event_sink: Any = None) -> Any:
+        """Bridge from the legacy TaskPacket/TaskResult interface.
+
+        Translates a TaskPacket (from executors/base.py) into an
+        execute_action() call and returns a TaskResult so callers like
+        prompt_handler, executor_runner, and queue can use AgenticExecutor
+        without changing their call sites.
+        """
+        import asyncio
+
+        action_name = "autonomous_code_edit"
+        params = {"intent": packet.instruction}
+        context = {
+            "branch": getattr(packet, "branch", "main"),
+            "model": getattr(packet, "model", os.environ.get("DEFAULT_MODEL", "deepseek-chat")),
+            "execution_mode": getattr(packet, "execution_mode", "finite"),
+        }
+
+        # Run the async execute_action in a new event loop (since run_task
+        # is called synchronously from run_in_executor threads).
+        try:
+            loop = asyncio.new_event_loop()
+            exec_result = loop.run_until_complete(
+                self.execute_action(
+                    session_id=session_id,
+                    worktree_path=getattr(packet, "worktree_path", ""),
+                    action_name=action_name,
+                    params=params,
+                    context=context,
+                    event_sink=event_sink,
+                )
+            )
+        finally:
+            loop.close()
+
+        # Convert ExecutionResult → TaskResult
+        from executors.base import TaskResult
+
+        return TaskResult(
+            status=exec_result.status,
+            summary=exec_result.summary or "",
+            error=exec_result.error or None,
+            files_edited=exec_result.files_touched or [],
+            commands_run=[],
+            tests_passed=0,
+            tests_failed=0,
+            duration_seconds=exec_result.duration_ms / 1000.0 if exec_result.duration_ms else 0.0,
+        )

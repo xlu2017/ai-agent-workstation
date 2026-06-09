@@ -45,6 +45,7 @@ class EventType(str, Enum):
     MEMORY_EXTRACTED = "memory_extracted"
     COMMIT_CREATED = "commit_created"
     PR_CREATED = "pr_created"
+    WORKSPACE_PROVISIONED = "workspace_provisioned"
 
 
 @dataclass

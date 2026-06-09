@@ -172,6 +172,9 @@ async def handle_prompt(
     _emit_event(session_id, "user_prompt_received", instruction, {"task_id": task_id})
 
     # 2. Route the prompt
+    task_class = ""
+    direct_action = ""
+    classification_confidence = 0.0
     try:
         from prompt_router.router import (
             RoutingDecision,
@@ -186,36 +189,83 @@ async def handle_prompt(
         routing_output = await route_prompt_async(routing_input)
         decision = routing_output.decision
         rationale = routing_output.rationale
+        task_class = getattr(routing_output, "task_class", "")
+        direct_action = getattr(routing_output, "direct_action", "")
+        classification_confidence = getattr(routing_output, "classification_confidence", 0.0)
     except Exception as e:
         logger.warning("Routing failed, defaulting to append_to_current: %s", e)
-        decision = RoutingDecision.APPEND_TO_CURRENT
+        # Use string fallback in case the import itself failed
+        decision = "append_to_current"
         rationale = f"[fallback] routing error: {e}"
 
-    _emit_event(session_id, "routing_decision_made", rationale, {
-        "decision": decision.value if hasattr(decision, "value") else str(decision),
+    # Build a clean user-facing status message instead of raw LLM rationale
+    _decision_labels = {
+        "append_to_current": "Continuing with your request.",
+        "modify_current_plan": "Updating the current plan with your changes.",
+        "interrupt_current": "Stopping the current task.",
+        "spawn_child_session": "Starting a related task in a new session.",
+        "spawn_new_session": "Starting a new session for this task.",
+        "queue": "Queued — will start once the current operation finishes.",
+    }
+    decision_val = decision.value if hasattr(decision, "value") else str(decision)
+    display_message = _decision_labels.get(decision_val, "Processing your request.")
+
+    routing_metadata: dict[str, Any] = {
+        "decision": decision_val,
         "task_id": task_id,
-    })
+        "rationale": rationale,
+    }
+    if task_class:
+        routing_metadata["task_class"] = task_class
+    if direct_action:
+        routing_metadata["direct_action"] = direct_action
+    if classification_confidence > 0:
+        routing_metadata["classification_confidence"] = classification_confidence
+    _emit_event(session_id, "routing_decision_made", display_message, routing_metadata)
 
     # Handle non-execution decisions
-    if decision == RoutingDecision.INTERRUPT_CURRENT:
+    if decision_val == "interrupt_current":
         _emit_event(session_id, "plan_cancelled", "User interrupted")
         return TaskHandle(
             task_id=task_id,
             session_id=session_id,
             state=TaskState.COMPLETED,
-            routing_decision=decision.value,
+            routing_decision=decision_val,
             message="Session interrupted by user",
         )
 
-    if decision == RoutingDecision.QUEUE:
+    if decision_val == "queue":
         _emit_event(session_id, "action_progress", "Queued for later execution")
         return TaskHandle(
             task_id=task_id,
             session_id=session_id,
             state=TaskState.QUEUED,
-            routing_decision=decision.value,
+            routing_decision=decision_val,
             message="Prompt queued — session is busy",
         )
+
+    # 2b. Mutation guard: desktop_control tasks must not modify files or commit
+    if task_class == "desktop_control":
+        policy.mutation_allowed = False
+        policy.commit_requires_approval = True
+        policy.push_requires_approval = True
+        logger.info(
+            "Mutation guard active for desktop_control task (action=%s, confidence=%.2f)",
+            direct_action,
+            classification_confidence,
+        )
+
+    # 2c. Direct action fast path: execute deterministic desktop actions without LLM
+    if direct_action and task_class == "desktop_control" and classification_confidence >= 0.65:
+        try:
+            result = await _execute_direct_action(session_id, task_id, direct_action, instruction)
+            return result
+        except Exception as e:
+            logger.warning("Direct action %s failed, falling through to agentic: %s", direct_action, e)
+            _emit_event(session_id, "action_failed", f"Direct action failed: {e}", {
+                "task_id": task_id, "direct_action": direct_action,
+            })
+            # Fall through to agentic executor as fallback
 
     # 3. Check runtime policy
     allowed, reason = _check_runtime_policy(session_id, instruction, policy)
@@ -225,7 +275,7 @@ async def handle_prompt(
             task_id=task_id,
             session_id=session_id,
             state=TaskState.BLOCKED,
-            routing_decision=decision.value,
+            routing_decision=decision_val,
             message=reason,
             error=reason,
         )
@@ -236,28 +286,37 @@ async def handle_prompt(
         try:
             from agent_core_client.client import AgentCoreClient, PlanRequest
             client = AgentCoreClient()
+            max_iter = int(os.environ.get("AGENTIC_EXECUTOR_MAX_ITERATIONS", "50"))
             plan_request = PlanRequest(
                 session_id=session_id,
                 repo_id="",
                 prompt=instruction,
                 allowed_actions=policy.allowed_actions,
+                max_iterations=max_iter,
             )
-            _emit_event(session_id, "plan_requested", "Requesting advisory plan from agent-core")
+            _emit_event(session_id, "plan_requested", "Requesting advisory plan from agent-core", metadata={
+                "prompt": instruction,
+            })
             plan_response = await client.plan(plan_request)
             await client.close()
+
+            # Capture the full messages sent to the DeepSeek API
+            import json as _json
+            llm_messages = plan_response.get("llm_messages", [])
+            llm_prompt_full = _json.dumps(llm_messages, indent=2, default=str) if llm_messages else ""
 
             if plan_response.get("ok"):
                 plan_obj = plan_response.get("plan", {})
                 plan_steps = plan_obj.get("steps", [])
                 plan_summary = str(plan_steps)[:200]
-                # Include full plan data in event for dashboard display
-                import json as _json
+                # Include full plan data and LLM messages in event for dashboard display
                 plan_full = _json.dumps(plan_obj, indent=2, default=str)[:4000]
                 _emit_event(session_id, "plan_generated", "Advisory plan received", {
                     "plan_mode": plan_obj.get("mode", "finite"),
                     "step_count": len(plan_steps),
                     "type": "plan_output",
                     "output": plan_full,
+                    "llm_prompt": llm_prompt_full,
                 })
             else:
                 _emit_event(session_id, "plan_validation_failed",
@@ -278,7 +337,7 @@ async def handle_prompt(
             task_id=task_id,
             session_id=session_id,
             state=TaskState.FAILED,
-            routing_decision=decision.value,
+            routing_decision=decision_val,
             plan_summary=plan_summary,
             message=error_msg,
             error=str(e),
@@ -305,7 +364,7 @@ async def handle_prompt(
         task_id=task_id,
         session_id=session_id,
         state=final_state,
-        routing_decision=decision.value,
+        routing_decision=decision_val,
         plan_summary=plan_summary,
         message=result.get("summary", "Execution complete"),
         events_path=str(_sessions_dir() / session_id / "events" / "events.jsonl"),
@@ -314,6 +373,238 @@ async def handle_prompt(
             "executor": "agentic",
             "duration_seconds": result.get("duration_seconds", 0),
         },
+    )
+
+
+def _auto_provision_workspace(session_id: str, session_dir: Path) -> tuple[str, str]:
+    """Auto-provision a workspace when session.json is missing or worktree is gone.
+
+    Tries to create a worktree from DEFAULT_REPO_PATH. If that's not set,
+    scans REPOS_DIR for any available git repo. Writes session.json so
+    subsequent requests don't need to re-provision.
+
+    Returns (worktree_path, branch) or ("", "") if recovery failed.
+    """
+    import json as _json
+    import subprocess
+
+    repos_dir = Path(os.environ.get("REPOS_DIR", "/opt/workstation/repos"))
+    default_repo = os.environ.get("DEFAULT_REPO_PATH", "")
+
+    # Find a usable repo
+    repo_path = ""
+    if default_repo and Path(default_repo).exists() and (Path(default_repo) / ".git").exists():
+        repo_path = default_repo
+    else:
+        # Scan repos dir for any git repo (prefer agent-core or jubilant-goggles)
+        if repos_dir.exists():
+            preferred = ["jubilant-goggles", "agent-core"]
+            for name in preferred:
+                candidate = repos_dir / name
+                if candidate.exists() and (candidate / ".git").exists():
+                    repo_path = str(candidate)
+                    break
+            if not repo_path:
+                for child in sorted(repos_dir.iterdir()):
+                    if child.is_dir() and (child / ".git").exists() and not child.name.startswith("worktree-"):
+                        repo_path = str(child)
+                        break
+
+    if not repo_path:
+        logger.warning("Auto-provision failed for %s: no git repo found", session_id)
+        return ("", "")
+
+    branch = f"{session_id}-branch"
+    worktree_path = str(repos_dir / f"worktree-{session_id}")
+
+    # Create worktree if it doesn't exist
+    if not Path(worktree_path).exists():
+        result = subprocess.run(
+            ["git", "worktree", "add", worktree_path, "-b", branch],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            # Branch might already exist — try without -b
+            result = subprocess.run(
+                ["git", "worktree", "add", worktree_path, branch],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                # Last resort: use HEAD directly
+                result = subprocess.run(
+                    ["git", "worktree", "add", "--detach", worktree_path],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    logger.warning(
+                        "Auto-provision worktree failed for %s: %s",
+                        session_id, result.stderr,
+                    )
+                    # Fall back to using the repo directly
+                    worktree_path = repo_path
+    else:
+        # Worktree dir exists but session.json was missing — just wire it up
+        pass
+
+    # Ensure session dir structure exists
+    session_dir.mkdir(parents=True, exist_ok=True)
+    (session_dir / "context").mkdir(exist_ok=True)
+    (session_dir / "events").mkdir(exist_ok=True)
+
+    # Write session.json for future requests
+    from datetime import datetime, timezone
+    meta = {
+        "id": session_id,
+        "repo_path": repo_path,
+        "worktree_path": worktree_path,
+        "branch": branch,
+        "port_range": "",
+        "browser_profile": session_id,
+        "tmux_session": f"agent-{session_id}",
+        "status": "active",
+        "task": "",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "auto_provisioned": True,
+    }
+    with open(session_dir / "session.json", "w") as f:
+        _json.dump(meta, f, indent=2)
+
+    logger.info(
+        "Auto-provisioned workspace for session %s: repo=%s worktree=%s",
+        session_id, repo_path, worktree_path,
+    )
+    _emit_event(session_id, "workspace_provisioned",
+                f"Auto-provisioned workspace from {Path(repo_path).name}",
+                {"repo_path": repo_path, "worktree_path": worktree_path})
+
+    return (worktree_path, branch)
+
+
+async def _execute_direct_action(
+    session_id: str,
+    task_id: str,
+    action: str,
+    instruction: str,
+) -> TaskHandle:
+    """Execute a deterministic desktop action without LLM.
+
+    Directly spawns the requested process (terminal, browser, file manager)
+    and returns immediately. No agent loop, no planning.
+    """
+    import subprocess
+
+    _emit_event(session_id, "action_started", f"Executing: {action}", {
+        "task_id": task_id, "direct_action": action, "executor": "direct",
+    })
+
+    start = time.time()
+
+    # Desktop env: xrdp session runs on :10 with agent's Xauthority
+    desktop_env = {
+        **os.environ,
+        "DISPLAY": os.environ.get("DISPLAY", ":10"),
+        "XAUTHORITY": os.environ.get("XAUTHORITY", "/home/agent/.Xauthority"),
+    }
+
+    if action == "open_terminal":
+        terminal_cmds = [
+            ["xfce4-terminal"],
+            ["xterm"],
+            ["gnome-terminal"],
+            ["x-terminal-emulator"],
+        ]
+        opened = False
+        for cmd in terminal_cmds:
+            try:
+                subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                    env=desktop_env,
+                )
+                opened = True
+                break
+            except FileNotFoundError:
+                continue
+
+        if not opened:
+            raise RuntimeError("No terminal emulator found (tried xfce4-terminal, xterm, gnome-terminal)")
+
+        summary = "Opened terminal on desktop"
+
+    elif action == "open_browser":
+        import re
+        url_match = re.search(r'https?://\S+', instruction)
+        url = url_match.group(0) if url_match else ""
+        cmd = ["xdg-open", url] if url else ["xdg-open", "about:blank"]
+        try:
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                env=desktop_env,
+            )
+        except FileNotFoundError:
+            raise RuntimeError("xdg-open not found")
+        summary = f"Opened browser{' to ' + url if url else ''}"
+
+    elif action == "open_file_manager":
+        try:
+            subprocess.Popen(
+                ["xdg-open", "."],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                env=desktop_env,
+            )
+        except FileNotFoundError:
+            raise RuntimeError("xdg-open not found")
+        summary = "Opened file manager"
+
+    elif action == "take_screenshot":
+        screenshot_dir = _sessions_dir() / session_id / "screenshots"
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+        screenshot_path = screenshot_dir / f"screenshot-{int(time.time())}.png"
+        try:
+            subprocess.run(
+                ["scrot", str(screenshot_path)],
+                timeout=10,
+                env=desktop_env,
+            )
+        except FileNotFoundError:
+            subprocess.run(
+                ["import", "-window", "root", str(screenshot_path)],
+                timeout=10,
+                env=desktop_env,
+            )
+        summary = f"Screenshot saved: {screenshot_path.name}"
+
+    else:
+        raise ValueError(f"Unknown direct action: {action}")
+
+    duration = time.time() - start
+    _emit_event(session_id, "action_completed", summary, {
+        "task_id": task_id,
+        "direct_action": action,
+        "executor": "direct",
+        "duration_seconds": round(duration, 2),
+    })
+
+    return TaskHandle(
+        task_id=task_id,
+        session_id=session_id,
+        state=TaskState.COMPLETED,
+        routing_decision="direct_action",
+        message=summary,
+        metadata={"executor": "direct", "action": action, "duration_seconds": round(duration, 2)},
     )
 
 
@@ -332,23 +623,27 @@ async def _execute_via_agentic(
     from execution.agentic_executor import AgenticExecutor
 
     session_dir = _sessions_dir() / session_id
-    meta_path = session_dir / "meta.json"
 
     import json as _json
     worktree_path = ""
     branch = ""
-    if meta_path.exists():
-        try:
-            meta = _json.loads(meta_path.read_text())
-            worktree_path = meta.get("repo_path", "") or meta.get("worktree_path", "")
-            branch = meta.get("branch", "")
-        except Exception:
-            pass
+    # Try session.json first (current format), then meta.json (legacy)
+    for filename in ("session.json", "meta.json"):
+        candidate = session_dir / filename
+        if candidate.exists():
+            try:
+                meta = _json.loads(candidate.read_text())
+                # Prefer worktree_path (isolated worktree) over repo_path (bare repo)
+                worktree_path = meta.get("worktree_path", "") or meta.get("repo_path", "")
+                branch = meta.get("branch", "")
+                break
+            except Exception:
+                pass
 
     if not worktree_path or not Path(worktree_path).exists():
-        # Fall back to DEFAULT_REPO_PATH env var, then error
-        worktree_path = os.environ.get("DEFAULT_REPO_PATH", "")
-        if not worktree_path or not Path(worktree_path).exists():
+        # Auto-recovery: provision workspace from DEFAULT_REPO_PATH
+        worktree_path, branch = _auto_provision_workspace(session_id, session_dir)
+        if not worktree_path:
             return {
                 "status": "failed",
                 "summary": "No valid workspace found for session. Set DEFAULT_REPO_PATH or create session with a repo.",
@@ -377,10 +672,15 @@ async def _execute_via_agentic(
         execution_mode=execution_mode,
     )
 
+    def _event_bridge(event_type: str, message: str, metadata: dict | None = None):
+        _emit_event(session_id, event_type, message, metadata or {})
+
     start = time.time()
     try:
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(_agent_executor, adapter.run_task, session_id, packet)
+        result = await loop.run_in_executor(
+            _agent_executor, adapter.run_task, session_id, packet, _event_bridge,
+        )
         duration = time.time() - start
         # Get raw output from events (last executor_finished event)
         raw_output = ""
