@@ -296,6 +296,18 @@ function EventTimeline({ events }: { events: SessionEvent[] }) {
                 <pre className="tool-output">{ev.data.output}</pre>
               </details>
             )}
+            {ev.data?.llm_prompt && (
+              <details className="tool-output-details">
+                <summary>Show DeepSeek API prompt</summary>
+                <pre className="tool-output">{ev.data.llm_prompt}</pre>
+              </details>
+            )}
+            {ev.event_type === 'plan_requested' && ev.data?.prompt && (
+              <details className="tool-output-details">
+                <summary>Show prompt sent</summary>
+                <pre className="tool-output">{ev.data.prompt}</pre>
+              </details>
+            )}
           </div>
         </div>
       ))}
@@ -359,6 +371,18 @@ function TaskResult({ entry }: { entry: ChatEntry }) {
                     <details className="tool-output-details">
                       <summary>{ev.data?.type === 'plan_output' ? 'Show agent-core plan' : 'Show output'}</summary>
                       <pre className="tool-output">{ev.data.output}</pre>
+                    </details>
+                  )}
+                  {ev.data?.llm_prompt && (
+                    <details className="tool-output-details">
+                      <summary>Show DeepSeek API prompt</summary>
+                      <pre className="tool-output">{ev.data.llm_prompt}</pre>
+                    </details>
+                  )}
+                  {ev.event_type === 'plan_requested' && ev.data?.prompt && (
+                    <details className="tool-output-details">
+                      <summary>Show prompt sent</summary>
+                      <pre className="tool-output">{ev.data.prompt}</pre>
                     </details>
                   )}
                 </div>

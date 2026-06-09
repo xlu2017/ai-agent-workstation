@@ -44,6 +44,7 @@ class PlanRequest:
     prompt: str
     allowed_actions: list[str]
     mode_preference: str = "finite"
+    max_iterations: int | None = None
     memories: list[dict[str, Any]] = field(default_factory=list)
     context_summaries: list[dict[str, Any]] = field(default_factory=list)
     recent_outcomes: list[dict[str, Any]] = field(default_factory=list)
@@ -99,6 +100,8 @@ class AgentCoreClient:
             "allowed_actions": request.allowed_actions,
             "mode_preference": request.mode_preference,
         }
+        if request.max_iterations is not None:
+            payload["max_iterations"] = request.max_iterations
         if request.memories:
             payload["memories"] = request.memories
         if request.context_summaries:
