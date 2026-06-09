@@ -491,6 +491,125 @@ def get_timeline(session_id: str, limit: int = 100):
     return {"events": events[-limit:], "summary": summary}
 
 
+@app.get("/api/v2/sessions/{session_id}/timeline")
+def get_session_timeline_v2(session_id: str):
+    """Return normalized timeline points and segments for replay scrubber."""
+    session_dir = SESSIONS_DIR / session_id
+    events_file = session_dir / "events" / "events.jsonl"
+
+    raw_events = []
+    if events_file.exists():
+        for line in events_file.read_text().strip().split("\n"):
+            if line.strip():
+                try:
+                    raw_events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+
+    import re
+    SECRET_PATS = [
+        re.compile(r"\b(ghp_[A-Za-z0-9]{36,})\b"),
+        re.compile(r"\b(gho_[A-Za-z0-9]{36,})\b"),
+        re.compile(r"\b(glpat-[A-Za-z0-9\-]{20,})\b"),
+        re.compile(r"\b(sk-[A-Za-z0-9]{20,})\b"),
+        re.compile(r"Bearer\s+[A-Za-z0-9._\-]{20,}", re.IGNORECASE),
+        re.compile(r"\b(AKIA[A-Z0-9]{16})\b"),
+        re.compile(r"tskey-[A-Za-z0-9\-]+"),
+        re.compile(r"password\s*[:=]\s*\S+", re.IGNORECASE),
+    ]
+
+    def _redact(text: str) -> str:
+        for pat in SECRET_PATS:
+            text = pat.sub("[redacted]", text)
+        return text
+
+    started_at = raw_events[0].get("timestamp") if raw_events else None
+    ended_at = raw_events[-1].get("timestamp") if raw_events else None
+    start_ms = 0
+    if started_at:
+        from datetime import datetime
+        try:
+            start_ms = int(datetime.fromisoformat(started_at.replace("Z", "+00:00")).timestamp() * 1000)
+        except Exception:
+            start_ms = 0
+
+    points = []
+    desktop_active = False
+    for ev in raw_events:
+        ts = ev.get("timestamp", "")
+        try:
+            ev_ms = int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() * 1000)
+        except Exception:
+            ev_ms = start_ms
+        offset_ms = ev_ms - start_ms
+
+        ev_type = ev.get("event_type", ev.get("type", ""))
+        data = ev.get("data", {})
+        kind = "status"
+        title = ev_type.replace("_", " ")
+        prompt = None
+        url = None
+
+        if ev_type == "user_prompt_received":
+            kind = "prompt"
+            title = _redact(data.get("message", "User prompt"))[:120]
+            prompt = title
+        elif ev_type in ("action_started", "action_progress", "action_completed"):
+            kind = "action"
+            title = data.get("tool", title)
+            if data.get("tool") == "browser_action":
+                url = data.get("url")
+                desktop_active = True
+        elif ev_type in ("action_failed", "plan_validation_failed"):
+            kind = "error"
+            title = _redact(data.get("message", "Error"))[:100]
+        elif ev_type in ("pr_created", "pr_merged"):
+            kind = "pr"
+            title = f"PR #{data.get('pr_number', '')}"
+        elif ev_type in ("commit_created", "branch_pushed"):
+            kind = "change"
+
+        points.append({
+            "id": ev.get("event_id", f"tp-{len(points)}"),
+            "sessionId": session_id,
+            "timestamp": ts,
+            "offsetMs": offset_ms,
+            "kind": kind,
+            "title": _redact(title),
+            "summary": _redact(data.get("args_summary", ""))[:100] if data.get("args_summary") else None,
+            "url": url,
+            "prompt": prompt,
+            "desktopActive": desktop_active,
+        })
+
+    total_duration = points[-1]["offsetMs"] if points else 1
+    seg_count = min(40, max(5, len(points) // 3 + 1))
+    seg_dur = total_duration / seg_count if seg_count else 1
+
+    segments = []
+    for i in range(seg_count):
+        s_start = i * seg_dur
+        s_end = (i + 1) * seg_dur
+        seg_pts = [p for p in points if s_start <= p["offsetMs"] < s_end]
+        segments.append({
+            "id": f"seg-{i}",
+            "startOffsetMs": s_start,
+            "endOffsetMs": s_end,
+            "desktopActive": any(p["desktopActive"] for p in seg_pts),
+            "eventCount": len(seg_pts),
+        })
+
+    return {
+        "session_id": session_id,
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration_ms": total_duration,
+        "live": ended_at is None,
+        "points": points,
+        "segments": segments,
+    }
+
+
 @app.get("/api/sessions/{session_id}/timeline/summary")
 def get_timeline_summary(session_id: str):
     from timeline import Timeline
@@ -549,6 +668,41 @@ class ChatMessage(BaseModel):
 # Background task tracking
 _running_tasks: dict[str, asyncio.Task] = {}
 
+
+@app.post("/api/sessions/{session_id}/interrupt")
+async def session_interrupt(session_id: str):
+    """Immediately cancel an in-flight chat execution for a session.
+
+    Sets a cancellation flag checked by the executor thread each iteration,
+    then cancels the asyncio wrapper task so the await also unblocks.
+    """
+    from execution.prompt_handler import _emit_event
+    from execution.agentic_executor import _cancelled_sessions
+
+    # Signal the executor thread to stop at the next iteration boundary
+    _cancelled_sessions.add(session_id)
+
+    bg_task = _running_tasks.get(session_id)
+    if not bg_task or bg_task.done():
+        _running_tasks.pop(session_id, None)
+        _cancelled_sessions.discard(session_id)
+        return {"stopped": False, "message": "No active task to stop"}
+
+    bg_task.cancel()
+    try:
+        await asyncio.wait_for(asyncio.shield(bg_task), timeout=5.0)
+    except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+        pass
+
+    _running_tasks.pop(session_id, None)
+    _cancelled_sessions.discard(session_id)
+    _emit_event(session_id, "plan_cancelled", "Stopped by user", {
+        "reason": "user_interrupt",
+        "source": "stop_button",
+    })
+    return {"stopped": True, "message": "Task cancelled"}
+
+
 @app.post("/api/sessions/{session_id}/chat")
 async def session_chat(session_id: str, body: ChatMessage):
     """Submit a prompt for execution in a session.
@@ -578,6 +732,9 @@ async def session_chat(session_id: str, body: ChatMessage):
                 execution_mode=body.execution_mode or "finite",
             )
             return result
+        except asyncio.CancelledError:
+            # Interrupted by stop button — don't swallow, let it propagate
+            return None
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -640,27 +797,31 @@ async def session_chat_status(session_id: str):
         "error": getattr(result, "error", ""),
     }
 
-@app.get("/api/sessions/{session_id}/events/stream")
-async def stream_session_events(session_id: str, after: int = 0):
-    """Stream events for a session via SSE. Returns new events since 'after' sequence number."""
+@app.get("/api/sessions/{session_id}/transcript")
+async def session_transcript(session_id: str):
+    """Build and return a workflow transcript for a session.
+
+    Aggregates raw session events into a compact, user-visible transcript
+    with working duration, diff stats, and granular event labels.
+    """
     import json as _json
+    from worklog.transcript import build_workflow_transcript
+
     events_file = SESSIONS_DIR / session_id / "events" / "events.jsonl"
-    events = []
-    if events_file.exists():
-        all_lines = events_file.read_text().strip().split("\n")
-        for idx, line in enumerate(all_lines):
-            if line.strip():
-                try:
-                    ev = _json.loads(line)
-                    # Use index as fallback sequence number
-                    seq = ev.get("sequence", idx + 1)
-                    if seq > after:
-                        ev["_seq"] = seq
-                        events.append(ev)
-                except Exception:
-                    continue
-    total = len(events) + after
-    return {"events": events, "total": total}
+    if not events_file.exists():
+        return {"session_id": session_id, "headline": "", "items": [], "working_duration_ms": 0,
+                "additions": 0, "deletions": 0, "tasks_created": 0,
+                "validation": {"overall": "not_run", "commands": []}}
+
+    raw_events = []
+    for line in events_file.read_text().strip().split("\n"):
+        if line.strip():
+            try:
+                raw_events.append(_json.loads(line))
+            except _json.JSONDecodeError:
+                continue
+
+    return build_workflow_transcript(session_id, raw_events)
 
 
 @app.get("/api/sessions/{session_id}/events/stream")
