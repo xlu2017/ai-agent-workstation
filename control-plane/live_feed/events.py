@@ -45,6 +45,23 @@ class EventType(str, Enum):
     MEMORY_EXTRACTED = "memory_extracted"
     COMMIT_CREATED = "commit_created"
     PR_CREATED = "pr_created"
+    WORKSPACE_PROVISIONED = "workspace_provisioned"
+
+    # Granular workflow transcript event types
+    TASK_STARTED = "task_started"
+    TASK_CLASSIFIED = "task_classified"
+    TASK_CREATED = "task_created"
+    TASK_COMPLETED = "task_completed"
+    TASK_BLOCKED = "task_blocked"
+    TASK_CANCELLED = "task_cancelled"
+    THOUGHT_ELAPSED = "thought_elapsed"
+    FILE_READ = "file_read"
+    CODE_SEARCHED = "code_searched"
+    FILE_EDITED = "file_edited"
+    COMMAND_RUN = "command_run"
+    TEST_RUN = "test_run"
+    VALIDATION_COMPLETED = "validation_completed"
+    DIFF_SUMMARIZED = "diff_summarized"
 
 
 @dataclass
