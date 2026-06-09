@@ -797,27 +797,31 @@ async def session_chat_status(session_id: str):
         "error": getattr(result, "error", ""),
     }
 
-@app.get("/api/sessions/{session_id}/events/stream")
-async def stream_session_events(session_id: str, after: int = 0):
-    """Stream events for a session via SSE. Returns new events since 'after' sequence number."""
+@app.get("/api/sessions/{session_id}/transcript")
+async def session_transcript(session_id: str):
+    """Build and return a workflow transcript for a session.
+
+    Aggregates raw session events into a compact, user-visible transcript
+    with working duration, diff stats, and granular event labels.
+    """
     import json as _json
+    from worklog.transcript import build_workflow_transcript
+
     events_file = SESSIONS_DIR / session_id / "events" / "events.jsonl"
-    events = []
-    if events_file.exists():
-        all_lines = events_file.read_text().strip().split("\n")
-        for idx, line in enumerate(all_lines):
-            if line.strip():
-                try:
-                    ev = _json.loads(line)
-                    # Use index as fallback sequence number
-                    seq = ev.get("sequence", idx + 1)
-                    if seq > after:
-                        ev["_seq"] = seq
-                        events.append(ev)
-                except Exception:
-                    continue
-    total = len(events) + after
-    return {"events": events, "total": total}
+    if not events_file.exists():
+        return {"session_id": session_id, "headline": "", "items": [], "working_duration_ms": 0,
+                "additions": 0, "deletions": 0, "tasks_created": 0,
+                "validation": {"overall": "not_run", "commands": []}}
+
+    raw_events = []
+    for line in events_file.read_text().strip().split("\n"):
+        if line.strip():
+            try:
+                raw_events.append(_json.loads(line))
+            except _json.JSONDecodeError:
+                continue
+
+    return build_workflow_transcript(session_id, raw_events)
 
 
 @app.get("/api/sessions/{session_id}/events/stream")

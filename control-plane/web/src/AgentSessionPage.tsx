@@ -1102,53 +1102,271 @@ function TimelineScrubber({
   )
 }
 
-/* Worklog panel — combines executed commands and file read inspectors */
+/* Worklog panel — renders compact workflow transcript entries */
 function WorklogPanel({ events }: { events: SessionEvent[] }) {
-  const worklogItems = useMemo(() => {
-    const items: { key: string; component: React.ReactNode }[] = []
-    for (let i = 0; i < events.length; i++) {
-      const ev = events[i]
-      const d = ev.data || {}
-      const key = ev.event_id || `wl-${i}`
-      if (ev.event_type === 'action_progress') {
-        const tool = d.tool || ''
-        if (tool === 'bash' || tool === 'execute_bash') {
-          items.push({
-            key,
-            component: <ExecutedCommandPanel key={key}
-              command={d.command || d.args_summary || ''}
-              output={d.output}
-              host={d.host}
-              exitCode={d.exit_code}
-            />,
-          })
-        } else if (tool === 'read_file' || (tool === 'str_replace_editor' && (d.args_summary || '').includes('view'))) {
-          items.push({
-            key,
-            component: <FileReadInspector key={key}
-              path={d.path || d.args_summary || ''}
-              displayName={d.path?.split('/').pop()}
-              repo={d.repo}
-              lineStart={d.line_start}
-              lineEnd={d.line_end}
-              content={d.content || d.output}
-            />,
-          })
-        }
-      }
-    }
-    return items
-  }, [events])
-
-  if (worklogItems.length === 0) {
-    return <div className="as-empty"><p>No worklog entries yet.</p></div>
-  }
+  const transcript = useMemo(() => buildTranscriptFromEvents(events), [events])
 
   return (
     <div className="as-worklog-panel">
-      {worklogItems.map(item => (
-        <div key={item.key} className="as-worklog-item">{item.component}</div>
+      {/* Headline / status message */}
+      {transcript.headline && (
+        <div className="wl-headline">{transcript.headline}</div>
+      )}
+
+      {/* Working duration + diff stats */}
+      {(transcript.workingDurationMs > 0 || transcript.additions > 0 || transcript.deletions > 0) && (
+        <div className="wl-summary-bar">
+          {transcript.workingDurationMs > 0 && (
+            <span className="wl-duration">
+              <Clock size={12} /> Working for {formatElapsed(transcript.workingDurationMs)}
+            </span>
+          )}
+          {(transcript.additions > 0 || transcript.deletions > 0) && (
+            <span className="wl-diff-stat">
+              <span className="wl-additions">+{transcript.additions}</span>
+              <span className="wl-deletions">-{transcript.deletions}</span>
+            </span>
+          )}
+          {transcript.tasksCreated > 0 && (
+            <span className="wl-tasks-count">
+              <Layers size={12} /> Created {transcript.tasksCreated} Tasks
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Compact event list */}
+      {transcript.items.length === 0 && !transcript.headline && (
+        <div className="as-empty"><p>No worklog entries yet.</p></div>
+      )}
+      {transcript.items.map((item, i) => (
+        <TranscriptItem key={`ti-${i}`} item={item} />
       ))}
+
+      {/* Validation summary */}
+      {transcript.validationOverall !== 'not_run' && (
+        <div className={`wl-validation wl-validation-${transcript.validationOverall}`}>
+          {transcript.validationOverall === 'passed' && <><CheckCircle size={14} /> Validation passed</>}
+          {transcript.validationOverall === 'failed' && <><XCircle size={14} /> Validation failed</>}
+          {transcript.validationOverall === 'partial' && <><AlertTriangle size={14} /> Partial validation</>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface TranscriptEntry {
+  kind: string
+  label: string
+  status: string
+  timestamp: string
+  durationMs: number
+  metadata: Record<string, any>
+}
+
+interface TranscriptData {
+  headline: string
+  workingDurationMs: number
+  additions: number
+  deletions: number
+  tasksCreated: number
+  items: TranscriptEntry[]
+  validationOverall: string
+}
+
+function buildTranscriptFromEvents(events: SessionEvent[]): TranscriptData {
+  const items: TranscriptEntry[] = []
+  let headline = ''
+  let firstActionTs = ''
+  let lastCompletedTs = ''
+  let additions = 0
+  let deletions = 0
+  let tasksCreated = 0
+  let validationOverall = 'not_run'
+  let prevTs = ''
+
+  const GRANULAR_TYPES = new Set([
+    'file_read', 'code_searched', 'file_edited', 'command_run',
+    'test_run', 'thought_elapsed', 'task_created', 'validation_completed',
+    'diff_summarized', 'task_cancelled',
+  ])
+
+  for (const ev of events) {
+    const et = ev.event_type
+    const d = ev.data || {}
+    const ts = ev.timestamp || ''
+    const msg = d.message || ''
+
+    // Detect thought gaps (>3s between events during execution)
+    if (prevTs && firstActionTs && !['user_prompt_received', 'routing_decision_made'].includes(et)) {
+      const gap = tsDiffMs(prevTs, ts)
+      if (gap > 3000 && !GRANULAR_TYPES.has(et)) {
+        items.push({ kind: 'thought', label: `Thought for ${formatElapsed(gap)}`, status: 'completed', timestamp: ts, durationMs: gap, metadata: {} })
+      }
+    }
+    prevTs = ts
+
+    if (et === 'task_started') {
+      if (!headline) headline = msg
+      items.push({ kind: 'status', label: msg, status: 'completed', timestamp: ts, durationMs: 0, metadata: {} })
+    } else if (et === 'task_created') {
+      tasksCreated += d.count || 1
+      items.push({ kind: 'tasks_created', label: `Created ${d.count || 1} Tasks`, status: 'completed', timestamp: ts, durationMs: 0, metadata: { tasks: d.tasks || [] } })
+    } else if (et === 'action_started') {
+      if (!firstActionTs) firstActionTs = ts
+    } else if (et === 'file_read') {
+      const path = d.path || ''
+      const fname = path.includes('/') ? path.split('/').pop() : path
+      let label = `Read ${fname}`
+      if (d.line_start != null && d.line_end != null) label += `:${d.line_start}-${d.line_end}`
+      items.push({ kind: 'read', label, status: 'completed', timestamp: ts, durationMs: d.duration_ms || 0, metadata: { path } })
+    } else if (et === 'code_searched') {
+      const query = d.query || ''
+      const path = d.path || ''
+      const fname = path.includes('/') ? path.split('/').pop() : (path || 'codebase')
+      let label = `Searched ${fname} for ${query}`
+      if (d.result_count) label += ` (${d.result_count} results)`
+      items.push({ kind: 'search', label, status: 'completed', timestamp: ts, durationMs: d.duration_ms || 0, metadata: { query, path } })
+    } else if (et === 'file_edited') {
+      const path = d.path || ''
+      const fname = path.includes('/') ? path.split('/').pop() : path
+      const a = d.additions || 0
+      const del_ = d.deletions || 0
+      additions += a
+      deletions += del_
+      let label = `Edited ${fname}`
+      if (a || del_) label += ` +${a} -${del_}`
+      items.push({ kind: 'edit', label, status: 'completed', timestamp: ts, durationMs: d.duration_ms || 0, metadata: { path } })
+    } else if (et === 'command_run') {
+      const cmd = d.command || ''
+      const exitCode = d.exit_code
+      const status = exitCode === 0 || exitCode == null ? 'completed' : 'failed'
+      items.push({ kind: 'command', label: `Ran ${cmd.slice(0, 60)}`, status, timestamp: ts, durationMs: d.duration_ms || 0, metadata: { command: cmd, exit_code: exitCode } })
+    } else if (et === 'test_run') {
+      const cmd = d.command || ''
+      const exitCode = d.exit_code
+      const status = exitCode === 0 || exitCode == null ? 'completed' : 'failed'
+      let label = 'Ran tests'
+      if (d.tests_passed || d.tests_failed) label += ` (${d.tests_passed || 0} passed, ${d.tests_failed || 0} failed)`
+      items.push({ kind: 'test', label, status, timestamp: ts, durationMs: d.duration_ms || 0, metadata: { command: cmd } })
+    } else if (et === 'thought_elapsed') {
+      items.push({ kind: 'thought', label: `Thought for ${formatElapsed(d.duration_ms || 0)}`, status: 'completed', timestamp: ts, durationMs: d.duration_ms || 0, metadata: {} })
+    } else if (et === 'validation_completed') {
+      validationOverall = d.status || 'not_run'
+    } else if (et === 'diff_summarized') {
+      additions += d.additions || 0
+      deletions += d.deletions || 0
+    } else if (et === 'task_completed' || et === 'action_completed') {
+      lastCompletedTs = ts
+    } else if (et === 'task_cancelled') {
+      items.push({ kind: 'cancelled', label: msg || 'Task cancelled', status: 'cancelled', timestamp: ts, durationMs: 0, metadata: {} })
+    } else if (et === 'routing_decision_made' && !headline) {
+      headline = msg
+    }
+    // Legacy action_progress: translate to granular items
+    else if (et === 'action_progress') {
+      const tool = d.tool || ''
+      if (tool === 'read_file' || (tool === 'str_replace_editor' && (d.args_summary || '').includes('view'))) {
+        const path = d.path || d.args_summary || ''
+        const fname = path.includes('/') ? path.split('/').pop() : path
+        items.push({ kind: 'read', label: `Read ${fname}`, status: 'completed', timestamp: ts, durationMs: 0, metadata: { path } })
+      } else if (['str_replace_editor', 'write_file', 'edit_file'].includes(tool)) {
+        const path = d.path || d.args_summary || ''
+        const fname = path.includes('/') ? path.split('/').pop() : path
+        items.push({ kind: 'edit', label: `Edited ${fname}`, status: 'completed', timestamp: ts, durationMs: 0, metadata: { path } })
+      } else if (['search', 'grep', 'find'].includes(tool)) {
+        items.push({ kind: 'search', label: `Searched ${d.args_summary || 'codebase'}`, status: 'completed', timestamp: ts, durationMs: 0, metadata: {} })
+      } else if (['bash', 'execute_bash'].includes(tool)) {
+        items.push({ kind: 'command', label: `Ran ${(d.command || d.args_summary || msg).slice(0, 60)}`, status: 'completed', timestamp: ts, durationMs: 0, metadata: { command: d.command } })
+      }
+    }
+  }
+
+  let workingDurationMs = 0
+  if (firstActionTs && lastCompletedTs) {
+    workingDurationMs = tsDiffMs(firstActionTs, lastCompletedTs)
+  }
+
+  // Deduplicate: if we have a granular event (file_read) and also got an
+  // action_progress for the same tool call, keep only the granular one.
+  // Simple heuristic: remove consecutive duplicates with same kind+label
+  const deduped: TranscriptEntry[] = []
+  for (const item of items) {
+    const prev = deduped[deduped.length - 1]
+    if (prev && prev.kind === item.kind && prev.label === item.label) continue
+    deduped.push(item)
+  }
+
+  return {
+    headline,
+    workingDurationMs,
+    additions,
+    deletions,
+    tasksCreated,
+    items: deduped,
+    validationOverall,
+  }
+}
+
+function tsDiffMs(ts1: string, ts2: string): number {
+  try {
+    return Math.max(0, new Date(ts2).getTime() - new Date(ts1).getTime())
+  } catch { return 0 }
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  const secs = ms / 1000
+  if (secs < 60) return `${Math.floor(secs)}s`
+  const mins = Math.floor(secs / 60)
+  const remSecs = Math.floor(secs % 60)
+  return `${mins}m ${remSecs}s`
+}
+
+const TRANSCRIPT_ICONS: Record<string, React.ReactNode> = {
+  read: <FileText size={13} />,
+  search: <Search size={13} />,
+  edit: <FilePlus size={13} />,
+  command: <Terminal size={13} />,
+  test: <FlaskConical size={13} />,
+  thought: <Clock size={13} />,
+  tasks_created: <Layers size={13} />,
+  status: <Sparkles size={13} />,
+  validation: <Shield size={13} />,
+  cancelled: <Square size={13} />,
+  diff: <GitCommit size={13} />,
+}
+
+function TranscriptItem({ item }: { item: TranscriptEntry }) {
+  const [expanded, setExpanded] = useState(false)
+  const icon = TRANSCRIPT_ICONS[item.kind] || <Circle size={13} />
+  const statusClass = item.status === 'failed' ? 'wl-item-failed' : item.status === 'cancelled' ? 'wl-item-cancelled' : ''
+
+  return (
+    <div className={`wl-transcript-item ${statusClass}`} onClick={() => setExpanded(!expanded)}>
+      <span className="wl-item-icon">{icon}</span>
+      <span className="wl-item-label">{item.label}</span>
+      {item.durationMs > 0 && (
+        <span className="wl-item-duration">{formatElapsed(item.durationMs)}</span>
+      )}
+      {item.status === 'failed' && <XCircle size={12} className="wl-item-fail-icon" />}
+      {item.status === 'completed' && item.kind !== 'thought' && item.kind !== 'status' && (
+        <CheckCircle size={12} className="wl-item-ok-icon" />
+      )}
+      {expanded && item.metadata && Object.keys(item.metadata).length > 0 && (
+        <div className="wl-item-details">
+          {item.metadata.command && <code className="wl-detail-cmd">{item.metadata.command}</code>}
+          {item.metadata.path && <span className="wl-detail-path">{item.metadata.path}</span>}
+          {item.metadata.tasks && item.metadata.tasks.length > 0 && (
+            <ul className="wl-detail-tasks">
+              {(item.metadata.tasks as string[]).map((t: string, i: number) => <li key={i}>{t}</li>)}
+            </ul>
+          )}
+          {item.metadata.exit_code != null && (
+            <span className="wl-detail-exit">Exit code: {item.metadata.exit_code}</span>
+          )}
+        </div>
+      )}
     </div>
   )
 }
