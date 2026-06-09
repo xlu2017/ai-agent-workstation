@@ -1249,22 +1249,21 @@ function ResizableBody({ events, sessionId, children }: {
   events: SessionEvent[]; sessionId: string; children: React.ReactNode
 }) {
   const [rightWidth, setRightWidth] = useState(420)
-  const dragging = useRef(false)
+  const [isDragging, setIsDragging] = useState(false)
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
-    dragging.current = true
+    setIsDragging(true)
     const startX = e.clientX
     const startW = rightWidth
 
     const onMove = (ev: MouseEvent) => {
-      if (!dragging.current) return
       const delta = startX - ev.clientX
       const newW = Math.max(120, startW + delta)
       setRightWidth(newW)
     }
     const onUp = () => {
-      dragging.current = false
+      setIsDragging(false)
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
       document.body.style.cursor = ''
@@ -1285,6 +1284,7 @@ function ResizableBody({ events, sessionId, children }: {
         title="Drag to resize"
       />
       <RightPane events={events} sessionId={sessionId} style={{ width: rightWidth }} />
+      {isDragging && <div style={{ position: 'fixed', inset: 0, zIndex: 9999, cursor: 'col-resize' }} />}
     </div>
   )
 }
