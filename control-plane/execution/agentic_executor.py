@@ -43,6 +43,10 @@ MAX_OUTPUT_CHARS = 4000
 COMMAND_TIMEOUT = int(os.environ.get("AGENTIC_EXECUTOR_COMMAND_TIMEOUT", "60"))
 PROTECTED_BRANCHES = {"main", "master", "develop", "production"}
 
+# Global cancellation registry: sessions that have been interrupted.
+# Checked each iteration so thread-based execution stops promptly.
+_cancelled_sessions: set[str] = {}
+
 
 # ============================================================
 # TOOL DEFINITIONS — OpenAI function-calling schema
@@ -810,6 +814,7 @@ def _run_agent_loop(
     max_iterations: int = MAX_ITERATIONS,
     event_callback: Any = None,
     plan_context: str = "",
+    session_id: str = "",
 ) -> tuple[str, str, list[str], int, int, list[str]]:
     """Run the LLM tool-calling agent loop.
 
@@ -831,6 +836,12 @@ def _run_agent_loop(
     summary = ""
 
     for iteration in range(max_iterations):
+        # Check cancellation flag (set by interrupt endpoint)
+        if session_id in _cancelled_sessions:
+            _cancelled_sessions.discard(session_id)
+            return ("cancelled", "Stopped by user", executor.files_edited,
+                    executor.tests_passed, executor.tests_failed, executor.commands_run)
+
         if event_callback:
             event_callback(
                 "action_progress",
@@ -875,6 +886,12 @@ def _run_agent_loop(
         messages.append(assistant_msg)
 
         for tool_call in message.get("tool_calls", []):
+            # Check cancellation before each tool execution
+            if session_id in _cancelled_sessions:
+                _cancelled_sessions.discard(session_id)
+                return ("cancelled", "Stopped by user", executor.files_edited,
+                        executor.tests_passed, executor.tests_failed, executor.commands_run)
+
             fn = tool_call.get("function", {})
             tool_name = fn.get("name", "")
             tool_call_id = tool_call.get("id", str(uuid.uuid4()))
@@ -1016,6 +1033,7 @@ class AgenticExecutor(ExecutionAdapter):
                 max_iterations=MAX_ITERATIONS,
                 event_callback=event_callback,
                 plan_context=plan_context,
+                session_id=session_id,
             )
         except Exception as e:
             event_callback("agent_error", f"Agent loop crashed: {e}")

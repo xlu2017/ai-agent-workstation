@@ -673,23 +673,29 @@ _running_tasks: dict[str, asyncio.Task] = {}
 async def session_interrupt(session_id: str):
     """Immediately cancel an in-flight chat execution for a session.
 
-    Adapted from the OpenHands interrupt pattern: cancel the tracked asyncio.Task
-    so CancelledError propagates through the agent loop, then emit an interrupt event.
+    Sets a cancellation flag checked by the executor thread each iteration,
+    then cancels the asyncio wrapper task so the await also unblocks.
     """
     from execution.prompt_handler import _emit_event
+    from execution.agentic_executor import _cancelled_sessions
+
+    # Signal the executor thread to stop at the next iteration boundary
+    _cancelled_sessions.add(session_id)
 
     bg_task = _running_tasks.get(session_id)
     if not bg_task or bg_task.done():
         _running_tasks.pop(session_id, None)
+        _cancelled_sessions.discard(session_id)
         return {"stopped": False, "message": "No active task to stop"}
 
     bg_task.cancel()
     try:
-        await asyncio.wait_for(asyncio.shield(bg_task), timeout=3.0)
+        await asyncio.wait_for(asyncio.shield(bg_task), timeout=5.0)
     except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
         pass
 
     _running_tasks.pop(session_id, None)
+    _cancelled_sessions.discard(session_id)
     _emit_event(session_id, "plan_cancelled", "Stopped by user", {
         "reason": "user_interrupt",
         "source": "stop_button",
@@ -726,6 +732,9 @@ async def session_chat(session_id: str, body: ChatMessage):
                 execution_mode=body.execution_mode or "finite",
             )
             return result
+        except asyncio.CancelledError:
+            # Interrupted by stop button — don't swallow, let it propagate
+            return None
         except Exception as e:
             import traceback
             traceback.print_exc()
