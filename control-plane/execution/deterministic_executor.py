@@ -354,6 +354,16 @@ class DeterministicExecutor(ExecutionAdapter):
             )
 
         subprocess.run(["git", "add", "-A"], cwd=str(worktree), capture_output=True)
+
+        # Duplicate commit guard: reject if identical tree already exists
+        from execution.commit_guard import check_duplicate_tree
+        is_dup, dup_detail = check_duplicate_tree(worktree)
+        if is_dup:
+            return ExecutionResult(
+                status="blocked", backend="deterministic",
+                error=f"Commit rejected: {dup_detail}",
+            )
+
         result = subprocess.run(
             ["git", "commit", "-m", message],
             cwd=str(worktree), capture_output=True, text=True, timeout=30,
