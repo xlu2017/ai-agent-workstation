@@ -1,19 +1,33 @@
 from __future__ import annotations
 
 from api.models.session_graph import (
+    AdaptationMode,
     AdapterEndpoint,
     AdapterFacet,
     AdapterMapping,
+    AdapterMappingStatus,
+    AdapterRelationship,
+    AdapterSourceRole,
+    AdapterTargetRole,
     ContextProjection,
     ContextProjectionBudget,
     EdgeType,
     MountMode,
     MountSessionRequest,
     MountSessionResult,
+    PolicyCheckEvidence,
+    PolicyEvidence,
+    PolicyVisibility,
+    PreservationMode,
     ProjectionMode,
+    ProjectionSelector,
+    ProjectionSource,
     SessionEvent,
+    SessionEventActor,
+    SessionEventType,
     SessionGraphSnapshot,
     SessionKind,
+    SessionPolicy,
     SessionRecord,
 )
 from api.services.session_graph_service import (
@@ -24,56 +38,129 @@ from api.services.session_graph_service import (
 )
 
 
-def _source_role(source: SessionRecord, mount_mode: MountMode) -> str:
+def _source_role(source: SessionRecord, mount_mode: MountMode) -> AdapterSourceRole:
     if mount_mode == MountMode.VENDOR:
-        return "vendor_dependency"
+        return AdapterSourceRole.VENDOR_DEPENDENCY
     if mount_mode == MountMode.COMPARE:
-        return "comparison_baseline"
+        return AdapterSourceRole.COMPARISON_BASELINE
+    if mount_mode == MountMode.TEMPLATE:
+        return AdapterSourceRole.DESIGN_PATTERN_SOURCE
     if source.kind == SessionKind.RUNTIME:
-        return "runtime_backend"
+        return AdapterSourceRole.RUNTIME_BACKEND
+    if source.kind == SessionKind.VALIDATION:
+        return AdapterSourceRole.TEST_SOURCE
     if source.kind == SessionKind.REPO:
-        return "reference_implementation"
-    return "documentation_source"
+        return AdapterSourceRole.REFERENCE_IMPLEMENTATION
+    return AdapterSourceRole.DOCUMENTATION_SOURCE
 
 
-def _target_role(target: SessionRecord, mount_mode: MountMode) -> str:
+def _target_role(target: SessionRecord, mount_mode: MountMode) -> AdapterTargetRole:
     if mount_mode == MountMode.WRAP:
-        return "component_to_wrap"
+        return AdapterTargetRole.COMPONENT_TO_WRAP
     if mount_mode == MountMode.PORT:
-        return "component_to_port"
+        return AdapterTargetRole.COMPONENT_TO_PORT
     if mount_mode == MountMode.DEPENDENCY:
-        return "dependency_to_call"
+        return AdapterTargetRole.DEPENDENCY_TO_CALL
     if target.kind == SessionKind.GOAL:
-        return "capability_to_integrate"
+        return AdapterTargetRole.CAPABILITY_TO_INTEGRATE
     if target.kind == SessionKind.APP:
-        return "architecture_to_emulate"
-    return "knowledge_source"
+        return AdapterTargetRole.ARCHITECTURE_TO_EMULATE
+    return AdapterTargetRole.KNOWLEDGE_SOURCE
 
 
-def _preservation_mode(mount_mode: MountMode) -> str:
+def _preservation_mode(mount_mode: MountMode) -> PreservationMode:
     if mount_mode == MountMode.FORK:
-        return "fork"
+        return PreservationMode.FORK
     if mount_mode == MountMode.VENDOR:
-        return "vendor_import"
+        return PreservationMode.VENDOR_IMPORT
     if mount_mode == MountMode.PORT:
-        return "port"
+        return PreservationMode.PORT
     if mount_mode == MountMode.WRAP:
-        return "wrap"
-    return "lossless_reference"
+        return PreservationMode.WRAP
+    return PreservationMode.LOSSLESS_REFERENCE
 
 
-def _adaptation_mode(source: SessionRecord, target: SessionRecord, mount_mode: MountMode) -> str:
+def _adaptation_mode(source: SessionRecord, target: SessionRecord, mount_mode: MountMode) -> AdaptationMode:
     if mount_mode in {MountMode.COMPONENT, MountMode.DEPENDENCY}:
-        return "api_mapping"
+        return AdaptationMode.API_MAPPING
     if mount_mode == MountMode.PORT:
-        return "migration_plan"
+        return AdaptationMode.MIGRATION_PLAN
+    if mount_mode == MountMode.WRAP:
+        return AdaptationMode.INTERFACE_MAPPING
     if source.kind == SessionKind.REPO and target.kind == SessionKind.GOAL:
-        return "capability_mapping"
-    return "semantic_projection"
+        return AdaptationMode.CAPABILITY_MAPPING
+    return AdaptationMode.SEMANTIC_PROJECTION
 
 
 def _adapter_required(source: SessionRecord, target: SessionRecord, request: MountSessionRequest) -> bool:
     return source.kind != target.kind or request.mount_mode == MountMode.UNKNOWN or len(request.user_intent) > 80
+
+
+def _effective_policy(session: SessionRecord) -> SessionPolicy:
+    policy = session.policy.model_copy(deep=True)
+    if session.id not in policy.effective_policy_source_ids:
+        policy.effective_policy_source_ids.append(session.id)
+    return policy
+
+
+def _policy_evidence(
+    source: SessionRecord,
+    target: SessionRecord,
+    request: MountSessionRequest,
+    errors: list[str],
+) -> PolicyEvidence:
+    source_policy = _effective_policy(source)
+    target_policy = _effective_policy(target)
+    checks: list[PolicyCheckEvidence] = []
+
+    def check(code: str, ok: bool, message: str) -> None:
+        checks.append(PolicyCheckEvidence(
+            code=code,
+            ok=ok,
+            message=message,
+            source_session_id=source.id,
+            target_session_id=target.id,
+        ))
+        if not ok:
+            errors.append(message)
+
+    check(
+        "source_outbound_mount_allowed",
+        source_policy.allow_mount and source_policy.allow_outbound_mount,
+        f"Source session {source.id} effective policy does not allow outbound mounting.",
+    )
+    check(
+        "target_inbound_mount_allowed",
+        target_policy.allow_mount and target_policy.allow_inbound_mount,
+        f"Target session {target.id} effective policy does not allow inbound mounts.",
+    )
+    if request.create_adaptation_session:
+        check(
+            "source_outbound_adapt_allowed",
+            source_policy.allow_adapt and source_policy.allow_outbound_adapt,
+            f"Source session {source.id} effective policy does not allow outbound adaptation.",
+        )
+        check(
+            "target_inbound_adapt_allowed",
+            target_policy.allow_adapt and target_policy.allow_inbound_adapt,
+            f"Target session {target.id} effective policy does not allow inbound adaptation.",
+        )
+
+    private_cross_root = source_policy.visibility == PolicyVisibility.PRIVATE and source.root_id != target.root_id
+    check(
+        "private_cross_root_projection_authorized",
+        not private_cross_root or bool(request.authorization and request.authorization.allow_private_projection),
+        "Source effective visibility is private; cross-root projection requires explicit authorization.",
+    )
+
+    return PolicyEvidence(
+        source_effective_policy=source_policy,
+        target_effective_policy=target_policy,
+        source_policy_source_ids=source_policy.effective_policy_source_ids,
+        target_policy_source_ids=target_policy.effective_policy_source_ids,
+        authorization=request.authorization,
+        checks=checks,
+    )
 
 
 def _warnings(source: SessionRecord, target: SessionRecord, request: MountSessionRequest) -> list[str]:
@@ -88,10 +175,10 @@ def _warnings(source: SessionRecord, target: SessionRecord, request: MountSessio
         warnings.append("Source is much broader than target; semantic projection excludes unrelated context.")
     if request.mount_mode == MountMode.UNKNOWN:
         warnings.append("Mount mode is unknown; mappings should be confirmed before execution use.")
-    if source.policy.visibility == "private" and source.root_id != target.root_id:
-        warnings.append("Private source visibility requires platform authorization before projection.")
     if source.policy.license:
         warnings.append(f"License constraint should be represented on the adapter: {source.policy.license}.")
+    for constraint in source.policy.security_constraints:
+        warnings.append(f"Security constraint should be represented on the adapter: {constraint}.")
     return warnings
 
 
@@ -99,48 +186,53 @@ def validate_mount_request(source: SessionRecord, target: SessionRecord, request
     errors: list[str] = []
     if source.id == target.id:
         errors.append("A session cannot be mounted under itself.")
-    if not source.policy.allow_mount:
-        errors.append(f"Source session {source.id} policy does not allow mounting.")
-    if request.create_adaptation_session and not source.policy.allow_adapt:
-        errors.append(f"Source session {source.id} policy does not allow adaptation.")
+    _policy_evidence(source, target, request, errors)
     if _adapter_required(source, target, request) and not request.create_adaptation_session:
         errors.append("Adapter session is required for cross-kind, ambiguous, or non-trivial mounts.")
     return errors
 
 
-def generate_default_mappings(source: SessionRecord, target: SessionRecord, adaptation_mode: str) -> list[AdapterMapping]:
+def policy_evidence_for(source: SessionRecord, target: SessionRecord, request: MountSessionRequest) -> PolicyEvidence:
+    errors: list[str] = []
+    evidence = _policy_evidence(source, target, request, errors)
+    if errors:
+        raise ValueError(" ".join(errors))
+    return evidence
+
+
+def generate_default_mappings(source: SessionRecord, target: SessionRecord, adaptation_mode: AdaptationMode) -> list[AdapterMapping]:
     repo_facet = source.facets.get("repo", {})
     raw_capabilities = repo_facet.get("capabilities", [])
     capabilities = [
         capability for capability in raw_capabilities
         if isinstance(capability, str)
     ] if isinstance(raw_capabilities, list) else []
+
     if not capabilities:
-        capabilities = [
-            "shell execution",
-            "browser interaction",
-            "file editing",
-            "agent loop",
-            "task completion detection",
-            "cancellation handling",
-        ]
+        known_commands = repo_facet.get("known_commands", {})
+        if isinstance(known_commands, dict):
+            capabilities.extend(f"{name} command" for name in known_commands.keys())
+
+    if not capabilities:
+        capabilities = ["session reference", "capability comparison", "behavioral guidance"]
+
     return [
         AdapterMapping(
             source=AdapterEndpoint(
                 session_id=source.id,
-                facet=source.kind.value,
+                facet=source.kind.value if source.kind.value in {name.value for name in SessionKind} else None,
                 capability=capability,
                 description=f"{source.title}: {capability}",
             ),
             target=AdapterEndpoint(
                 session_id=target.id,
-                facet=target.kind.value,
+                facet=target.kind.value if target.kind.value in {name.value for name in SessionKind} else None,
                 capability=capability,
                 description=f"{target.title}: projected {capability}",
             ),
-            relationship="ports" if adaptation_mode == "migration_plan" else "informs",
+            relationship=AdapterRelationship.PORTS if adaptation_mode == AdaptationMode.MIGRATION_PLAN else AdapterRelationship.INFORMS,
             confidence=0.55,
-            evidence=["default scaffold mapping"],
+            evidence=["default scaffold mapping", f"source_session:{source.id}", f"target_session:{target.id}"],
         )
         for capability in capabilities
     ]
@@ -155,6 +247,7 @@ def create_adaptation_session(source: SessionRecord, target: SessionRecord, requ
         target_role=_target_role(target, request.mount_mode),
         preservation_mode=_preservation_mode(request.mount_mode),
         adaptation_mode=adaptation_mode,
+        mapping_status=AdapterMappingStatus.PROPOSED,
         mappings=generate_default_mappings(source, target, adaptation_mode),
         constraints=[
             *source.policy.security_constraints,
@@ -174,24 +267,45 @@ def create_adaptation_session(source: SessionRecord, target: SessionRecord, requ
     )
 
 
-def generate_context_projection(source: SessionRecord, target: SessionRecord, request: MountSessionRequest) -> ContextProjection:
+def generate_context_projection(
+    source: SessionRecord,
+    target: SessionRecord,
+    request: MountSessionRequest,
+    mappings: list[AdapterMapping] | None = None,
+) -> ContextProjection:
     broad_source = source.kind in {SessionKind.REPO, SessionKind.APP, SessionKind.CONTAINER}
     focused_target = target.kind in {SessionKind.GOAL, SessionKind.WORK, SessionKind.QUESTION}
+    mapping_based = bool(mappings)
+    include_selectors = [ProjectionSelector.ADAPTER_MAPPINGS, ProjectionSelector.CAPABILITIES] if mapping_based else []
+    if broad_source and focused_target:
+        include_selectors.extend([
+            ProjectionSelector.CAPABILITIES,
+            ProjectionSelector.BEHAVIORS,
+            ProjectionSelector.INTERFACES,
+            ProjectionSelector.TERMINATION_CONDITIONS,
+        ])
+    else:
+        include_selectors.extend([ProjectionSelector.SUMMARY, ProjectionSelector.FACETS, ProjectionSelector.RELATIONSHIPS])
+
+    evidence = [f"source:{source.id}:{source.kind.value}", f"target:{target.id}:{target.kind.value}"]
+    if mappings:
+        evidence.append(f"mapping_count:{len(mappings)}")
+        evidence.extend(f"mapping:{mapping.id}:{mapping.relationship.value}:{mapping.confidence}" for mapping in mappings[:8])
+
     return ContextProjection(
-        active_session_id=source.id if request.make_active else target.id,
+        active_session_id=target.id,
         source_session_ids=[source.id],
         projection_mode=ProjectionMode.BEHAVIOR_MAP if broad_source and focused_target else ProjectionMode.SUMMARY,
-        include_selectors=[
-            "capabilities",
-            "behaviors",
-            "interfaces",
-            "termination_conditions",
-        ] if broad_source and focused_target else ["summary", "facets", "relationships"],
+        projection_source=ProjectionSource.MAPPING_BASED if mapping_based else ProjectionSource.HEURISTIC,
+        relevance_score=0.6 if mapping_based else 0.5,
+        evidence=evidence,
+        include_selectors=list(dict.fromkeys(include_selectors)),
         exclude_selectors=[
-            "unrelated_ui",
-            "deployment",
-            "plugins",
-            "historical_noise",
+            ProjectionSelector.UNRELATED_UI,
+            ProjectionSelector.DEPLOYMENT,
+            ProjectionSelector.PLUGINS,
+            ProjectionSelector.HISTORICAL_NOISE,
+            ProjectionSelector.UNRELATED_CAPABILITIES,
         ] if broad_source and focused_target else [],
         budget=ContextProjectionBudget(
             max_tokens=4000 if focused_target else 12000,
@@ -214,15 +328,19 @@ def preview_mount_session(store: SessionGraphStore, request: MountSessionRequest
     errors = validate_mount_request(source, target, request)
     if errors:
         raise ValueError(" ".join(errors))
+    policy_evidence = policy_evidence_for(source, target, request)
 
     event = SessionEvent(
-        type="session.mounted",
+        type=SessionEventType.SESSION_MOUNTED,
         session_id=target.id,
+        root_session_id=target.root_id,
+        actor=SessionEventActor.SYSTEM,
         data={
             "source_session_id": source.id,
             "target_session_id": target.id,
             "mount_mode": request.mount_mode.value,
             "preserves_source_identity": True,
+            "policy_evidence": policy_evidence.model_dump(mode="json"),
         },
     )
     mounted_edge = create_session_edge(
@@ -239,13 +357,19 @@ def preview_mount_session(store: SessionGraphStore, request: MountSessionRequest
     adaptation_session = create_adaptation_session(source, target, request) if request.create_adaptation_session else None
     adaptation_edges = []
     events = [event]
+    mappings: list[AdapterMapping] | None = None
     if adaptation_session:
+        adapter_facet = AdapterFacet.model_validate(adaptation_session.facets["adapter"])
+        mappings = adapter_facet.mappings
         adapter_event = SessionEvent(
-            type="session.adapter_created",
+            type=SessionEventType.SESSION_ADAPTER_CREATED,
             session_id=adaptation_session.id,
+            root_session_id=adaptation_session.root_id,
+            actor=SessionEventActor.SYSTEM,
             data={
                 "source_session_id": source.id,
                 "target_session_id": target.id,
+                "facet": adapter_facet.model_dump(mode="json"),
             },
         )
         events.append(adapter_event)
@@ -260,10 +384,12 @@ def preview_mount_session(store: SessionGraphStore, request: MountSessionRequest
                 adapter_event.id,
             ),
         ]
-    projection = generate_context_projection(source, target, request)
+    projection = generate_context_projection(source, target, request, mappings)
     events.append(SessionEvent(
-        type="session.adapter_projection_created",
+        type=SessionEventType.SESSION_ADAPTER_PROJECTION_CREATED,
         session_id=adaptation_session.id if adaptation_session else target.id,
+        root_session_id=adaptation_session.root_id if adaptation_session else target.root_id,
+        actor=SessionEventActor.SYSTEM,
         data={"projection": projection.model_dump(mode="json")},
     ))
     return MountSessionResult(
@@ -271,6 +397,7 @@ def preview_mount_session(store: SessionGraphStore, request: MountSessionRequest
         adaptation_session=adaptation_session,
         adaptation_edges=adaptation_edges,
         context_projection_delta=projection,
+        policy_evidence=policy_evidence,
         warnings=_warnings(source, target, request),
         events=events,
     )
@@ -302,12 +429,47 @@ def adapt_session(store: SessionGraphStore, request: MountSessionRequest) -> Ses
         raise ValueError(f"Source session {request.source_session_id} not found.")
     if target is None:
         raise ValueError(f"Target session {request.target_session_id} not found.")
-    session = create_adaptation_session(source, target, request)
-    store.create_session(session)
-    append_session_event(
-        store,
-        session.id,
-        "session.adapter_created",
-        {"source_session_id": source.id, "target_session_id": target.id},
+    adapted_request = request.model_copy(update={"create_adaptation_session": True})
+    errors = validate_mount_request(source, target, adapted_request)
+    if errors:
+        raise ValueError(" ".join(errors))
+    session = create_adaptation_session(source, target, adapted_request)
+    adapter_facet = AdapterFacet.model_validate(session.facets["adapter"])
+    projection = generate_context_projection(source, target, adapted_request, adapter_facet.mappings)
+    event = SessionEvent(
+        type=SessionEventType.SESSION_ADAPTER_CREATED,
+        session_id=session.id,
+        root_session_id=session.root_id,
+        actor=SessionEventActor.SYSTEM,
+        data={"source_session_id": source.id, "target_session_id": target.id, "facet": adapter_facet.model_dump(mode="json")},
     )
+    edges = [
+        create_session_edge(EdgeType.ADAPTS_FROM, session.id, source.id, event_id=event.id),
+        create_session_edge(EdgeType.ADAPTS_INTO, session.id, target.id, event_id=event.id),
+        create_session_edge(
+            EdgeType.ADAPTED_UNDER,
+            source.id,
+            session.id,
+            {"target_context_session_id": target.id},
+            event.id,
+        ),
+    ]
+    projection_event = SessionEvent(
+        type=SessionEventType.SESSION_ADAPTER_PROJECTION_CREATED,
+        session_id=session.id,
+        root_session_id=session.root_id,
+        actor=SessionEventActor.SYSTEM,
+        data={"projection": projection.model_dump(mode="json")},
+    )
+    graph = store.load()
+    candidate = SessionGraphSnapshot(
+        sessions=[*graph.sessions, session],
+        edges=[*graph.edges, *edges],
+        events=[*graph.events, event, projection_event],
+        projections=[*graph.projections, projection],
+    )
+    issues = validate_graph_update(candidate)
+    if issues:
+        raise ValueError(" ".join(issues))
+    store.save(candidate)
     return session
