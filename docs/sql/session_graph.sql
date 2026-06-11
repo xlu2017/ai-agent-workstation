@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,
@@ -22,13 +24,16 @@ CREATE TABLE IF NOT EXISTS session_edges (
   target_session_id TEXT NOT NULL REFERENCES sessions(id),
   metadata JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_from_event_id TEXT NULL
+  created_from_event_id TEXT NULL,
+  UNIQUE (type, source_session_id, target_session_id)
 );
 
 CREATE TABLE IF NOT EXISTS session_events (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL,
   session_id TEXT NOT NULL,
+  root_session_id TEXT NULL,
+  actor TEXT NOT NULL DEFAULT 'system',
   data JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -38,6 +43,8 @@ CREATE TABLE IF NOT EXISTS session_artifacts (
   session_id TEXT NOT NULL REFERENCES sessions(id),
   artifact_type TEXT NOT NULL,
   uri TEXT NOT NULL,
+  mime_type TEXT NULL,
+  size_bytes BIGINT NULL,
   metadata JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -56,6 +63,9 @@ CREATE TABLE IF NOT EXISTS session_context_projections (
   active_session_id TEXT NOT NULL REFERENCES sessions(id),
   source_session_ids TEXT[] NOT NULL,
   projection_mode TEXT NOT NULL,
+  projection_source TEXT NOT NULL DEFAULT 'heuristic',
+  relevance_score NUMERIC NOT NULL DEFAULT 0.5,
+  evidence JSONB NOT NULL DEFAULT '[]',
   include_selectors JSONB NOT NULL DEFAULT '[]',
   exclude_selectors JSONB NOT NULL DEFAULT '[]',
   budget JSONB NOT NULL DEFAULT '{}',
@@ -84,9 +94,17 @@ CREATE TABLE IF NOT EXISTS session_memory_chunks (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE INDEX IF NOT EXISTS idx_sessions_kind ON sessions(kind);
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+CREATE INDEX IF NOT EXISTS idx_sessions_root ON sessions(root_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_facets_gin ON sessions USING GIN (facets);
+CREATE INDEX IF NOT EXISTS idx_sessions_policy_gin ON sessions USING GIN (policy);
 CREATE INDEX IF NOT EXISTS idx_session_edges_source ON session_edges(source_session_id);
 CREATE INDEX IF NOT EXISTS idx_session_edges_target ON session_edges(target_session_id);
+CREATE INDEX IF NOT EXISTS idx_session_edges_type ON session_edges(type);
 CREATE INDEX IF NOT EXISTS idx_session_events_session ON session_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_events_root ON session_events(root_session_id);
+CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(type);
 CREATE INDEX IF NOT EXISTS idx_session_context_projections_active ON session_context_projections(active_session_id);
 CREATE INDEX IF NOT EXISTS idx_session_adapter_mappings_adapter ON session_adapter_mappings(adaptation_session_id);
 CREATE INDEX IF NOT EXISTS idx_session_memory_chunks_session ON session_memory_chunks(session_id);
