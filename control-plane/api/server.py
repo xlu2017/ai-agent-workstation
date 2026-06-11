@@ -37,6 +37,7 @@ from api.service_updater import (
     schedule_deferred_update,
     update_service,
 )
+from api.session_graph import router as session_graph_router
 
 from sessions.session_manager import (
     SessionAlreadyExists,
@@ -88,6 +89,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(session_graph_router)
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -1009,7 +1012,7 @@ def _service_commands():
         },
         "litellm": {
             "port": 4000,
-            "start": "nohup litellm --config /opt/workstation/litellm-config.yaml --port 4000 > /opt/workstation/logs/litellm.log 2>&1 &",
+            "start": "nohup /home/agent/.local/bin/litellm --config /opt/workstation/litellm-config.yaml --port 4000 > /opt/workstation/logs/litellm.log 2>&1 &",
         },
         "control-plane": {
             "port": 9877,
@@ -1022,7 +1025,7 @@ def _service_commands():
         },
         "dashboard": {
             "port": 5173,
-            "start": "cd /opt/workstation/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
+            "start": "cd /opt/workstation/repos/jubilant-goggles/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
         },
     }
 
