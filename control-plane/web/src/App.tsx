@@ -9,6 +9,7 @@ import {
   Cpu, Lock, Play,
 } from 'lucide-react'
 import AgentSessionPage from './AgentSessionPage'
+import SessionGraphExplorer from './components/session-graph/SessionGraphExplorer'
 import './agent-session.css'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -652,6 +653,7 @@ export default function App() {
 
   const navItems = [
     { key: 'sessions', label: 'Sessions', icon: <Layers size={16} /> },
+    { key: 'graph', label: 'Session Graph', icon: <GitBranch size={16} />, badge: 'New' },
     { key: 'ask', label: 'Ask', icon: <MessageSquare size={16} /> },
     { key: 'wiki', label: 'Knowledge', icon: <BookOpen size={16} /> },
     { key: 'review', label: 'Review', icon: <Eye size={16} /> },
@@ -666,7 +668,7 @@ export default function App() {
           <>
             <button className="sidebar-expand-btn" onClick={() => setSidebarCollapsed(false)} aria-label="Expand sidebar"><ChevronRight size={16} /></button>
             <div className="sidebar-collapsed-nav">
-              {navItems.map(n => <button key={n.key} className={`sidebar-icon-btn ${navActive === n.key ? 'active' : ''}`} onClick={() => { setNavActive(n.key); setSidebarCollapsed(false) }} title={n.label} aria-label={n.label}>{n.icon}</button>)}
+              {navItems.map(n => <button key={n.key} className={`sidebar-icon-btn ${navActive === n.key ? 'active' : ''}`} onClick={() => { setNavActive(n.key); if (n.key === 'graph') navigate('/session-graph'); setSidebarCollapsed(false) }} title={n.label} aria-label={n.label}>{n.icon}</button>)}
             </div>
             <div className="sidebar-collapsed-footer">
               <button className="sidebar-icon-btn" onClick={() => navigate('/settings')} title="Settings" aria-label="Settings"><Settings size={16} /></button>
@@ -688,7 +690,7 @@ export default function App() {
             {/* Primary nav */}
             <nav className="sidebar-primary-nav" aria-label="Primary navigation">
               {navItems.map(n => (
-                <button key={n.key} className={`sidebar-nav-item ${navActive === n.key ? 'active' : ''}`} onClick={() => setNavActive(n.key)} aria-label={n.label}>
+                <button key={n.key} className={`sidebar-nav-item ${navActive === n.key ? 'active' : ''}`} onClick={() => { setNavActive(n.key); if (n.key === 'graph') navigate('/session-graph') }} aria-label={n.label}>
                   {n.icon} <span>{n.label}</span>
                   {n.badge && <span className="sidebar-badge">{n.badge}</span>}
                 </button>
@@ -754,6 +756,8 @@ export default function App() {
           <AgentSessionPage sessionId={routePath.replace('/session/', '')} onBack={() => navigate('/')} sessions={sessions} onNavigateSession={id => navigate(`/session/${id}`)} />
         ) : routePath === '/remote-desktop' ? (
           <RemoteDesktopPage />
+        ) : routePath === '/session-graph' ? (
+          <SessionGraphExplorer />
         ) : !sessionId ? (
           <div className="welcome">
             <h2>Agent Workspace</h2>
