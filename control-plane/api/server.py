@@ -37,6 +37,7 @@ from api.service_updater import (
     schedule_deferred_update,
     update_service,
 )
+from api.session_graph import router as session_graph_router
 
 from sessions.session_manager import (
     SessionAlreadyExists,
@@ -88,6 +89,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(session_graph_router)
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
