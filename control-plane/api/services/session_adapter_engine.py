@@ -25,6 +25,7 @@ from api.models.session_graph import (
     SessionEvent,
     SessionEventActor,
     SessionEventType,
+    SessionFacetName,
     SessionGraphSnapshot,
     SessionKind,
     SessionPolicy,
@@ -32,10 +33,16 @@ from api.models.session_graph import (
 )
 from api.services.session_graph_service import (
     SessionGraphStore,
-    append_session_event,
     create_session_edge,
     validate_graph_update,
 )
+
+
+def _facet_for_session_kind(kind: SessionKind) -> SessionFacetName | None:
+    try:
+        return SessionFacetName(kind.value)
+    except ValueError:
+        return None
 
 
 def _source_role(source: SessionRecord, mount_mode: MountMode) -> AdapterSourceRole:
@@ -213,26 +220,31 @@ def generate_default_mappings(source: SessionRecord, target: SessionRecord, adap
         if isinstance(known_commands, dict):
             capabilities.extend(f"{name} command" for name in known_commands.keys())
 
+    from_source = bool(capabilities)
     if not capabilities:
-        capabilities = ["session reference", "capability comparison", "behavioral guidance"]
+        capabilities = ["session summary", "documented capabilities", "known interfaces", "relevant constraints"]
 
     return [
         AdapterMapping(
             source=AdapterEndpoint(
                 session_id=source.id,
-                facet=source.kind.value if source.kind.value in {name.value for name in SessionKind} else None,
+                facet=_facet_for_session_kind(source.kind),
                 capability=capability,
                 description=f"{source.title}: {capability}",
             ),
             target=AdapterEndpoint(
                 session_id=target.id,
-                facet=target.kind.value if target.kind.value in {name.value for name in SessionKind} else None,
+                facet=_facet_for_session_kind(target.kind),
                 capability=capability,
                 description=f"{target.title}: projected {capability}",
             ),
             relationship=AdapterRelationship.PORTS if adaptation_mode == AdaptationMode.MIGRATION_PLAN else AdapterRelationship.INFORMS,
-            confidence=0.55,
-            evidence=["default scaffold mapping", f"source_session:{source.id}", f"target_session:{target.id}"],
+            confidence=0.55 if from_source else 0.35,
+            evidence=[
+                "source capability mapping" if from_source else "neutral scaffold mapping",
+                f"source_session:{source.id}",
+                f"target_session:{target.id}",
+            ],
         )
         for capability in capabilities
     ]
@@ -354,6 +366,8 @@ def preview_mount_session(store: SessionGraphStore, request: MountSessionRequest
         },
         event.id,
     )
+    event.data["edge"] = mounted_edge.model_dump(mode="json")
+
     adaptation_session = create_adaptation_session(source, target, request) if request.create_adaptation_session else None
     adaptation_edges = []
     events = [event]
@@ -369,6 +383,7 @@ def preview_mount_session(store: SessionGraphStore, request: MountSessionRequest
             data={
                 "source_session_id": source.id,
                 "target_session_id": target.id,
+                "session": adaptation_session.model_dump(mode="json"),
                 "facet": adapter_facet.model_dump(mode="json"),
             },
         )
@@ -441,7 +456,12 @@ def adapt_session(store: SessionGraphStore, request: MountSessionRequest) -> Ses
         session_id=session.id,
         root_session_id=session.root_id,
         actor=SessionEventActor.SYSTEM,
-        data={"source_session_id": source.id, "target_session_id": target.id, "facet": adapter_facet.model_dump(mode="json")},
+        data={
+            "source_session_id": source.id,
+            "target_session_id": target.id,
+            "session": session.model_dump(mode="json"),
+            "facet": adapter_facet.model_dump(mode="json"),
+        },
     )
     edges = [
         create_session_edge(EdgeType.ADAPTS_FROM, session.id, source.id, event_id=event.id),
