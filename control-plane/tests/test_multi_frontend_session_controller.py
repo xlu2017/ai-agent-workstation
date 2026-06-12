@@ -37,7 +37,7 @@ def test_create_topology_writes_session_graph(tmp_path):
     assert len(topology.frontends) == 2
     assert len(graph.sessions) == 4
     assert any(session.kind == SessionKind.APP for session in graph.sessions)
-    assert sum(1 for edge in graph.edges if edge.type == EdgeType.CONTAINS) == 3
+    assert sum(1 for session in graph.sessions if session.parent_id == topology.root_session_id) == 3
     assert sum(1 for edge in graph.edges if edge.type == EdgeType.DEPENDS_ON) == 2
 
 
