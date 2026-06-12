@@ -5,6 +5,7 @@ import { appendChatTurn, assistantAcknowledgementForPrompt, normalizeChatTurns }
 import PlatformGraphSessionChatComposer from './PlatformGraphSessionChatComposer'
 import PlatformGraphSessionMessageList from './PlatformGraphSessionMessageList'
 import PlatformGraphSessionRepoScopeNotice from './PlatformGraphSessionRepoScopeNotice'
+import PlatformHomeThreePaneShell from './PlatformHomeThreePaneShell'
 
 export default function PlatformGraphSessionWorkspaceScreen({
   sessionId,
@@ -55,32 +56,42 @@ export default function PlatformGraphSessionWorkspaceScreen({
   }, [draft, session, saving, turns])
 
   if (error && !session) {
-    return <main className="graph-session-page"><section className="graph-session-card"><button className="home-link" onClick={() => onNavigate('/')}>← Home</button><div className="home-error">{error}</div></section></main>
+    return (
+      <PlatformHomeThreePaneShell activeSession={null} onNavigate={onNavigate}>
+        <section className="graph-session-card"><button className="home-link" onClick={() => onNavigate('/')}>← Home</button><div className="home-error">{error}</div></section>
+      </PlatformHomeThreePaneShell>
+    )
   }
 
   if (!session) {
-    return <main className="graph-session-page"><section className="graph-session-card"><div className="home-kicker">Loading session…</div></section></main>
+    return (
+      <PlatformHomeThreePaneShell activeSession={null} onNavigate={onNavigate}>
+        <section className="graph-session-card"><div className="home-kicker">Loading session…</div></section>
+      </PlatformHomeThreePaneShell>
+    )
   }
 
   return (
-    <main className="graph-session-page workspace-shell">
-      <header className="graph-session-header">
-        <button className="home-link" onClick={() => onNavigate('/')}>← New session</button>
-        <button className="home-link" onClick={() => onNavigate('/session-graph')}>Open graph</button>
-      </header>
-      <section className="workspace-main-card">
-        <div className="workspace-title-row">
-          <div>
-            <div className="home-kicker">Graph session workspace</div>
-            <h1>{session.title}</h1>
+    <PlatformHomeThreePaneShell activeSession={session} onNavigate={onNavigate}>
+      <div className="graph-session-page workspace-shell">
+        <header className="graph-session-header">
+          <button className="home-link" onClick={() => onNavigate('/')}>← New session</button>
+          <button className="home-link" onClick={() => onNavigate('/session-graph')}>Open graph</button>
+        </header>
+        <section className="workspace-main-card">
+          <div className="workspace-title-row">
+            <div>
+              <div className="home-kicker">Graph session workspace</div>
+              <h1>{session.title}</h1>
+            </div>
+            <span className="workspace-kind-pill">{session.kind}</span>
           </div>
-          <span className="workspace-kind-pill">{session.kind}</span>
-        </div>
-        <PlatformGraphSessionRepoScopeNotice session={session} />
-        <PlatformGraphSessionMessageList turns={turns} />
-        <PlatformGraphSessionChatComposer value={draft} disabled={saving} onChange={setDraft} onSubmit={submitDraft} />
-        {error && <div className="home-error">{error}</div>}
-      </section>
-    </main>
+          <PlatformGraphSessionRepoScopeNotice session={session} />
+          <PlatformGraphSessionMessageList turns={turns} />
+          <PlatformGraphSessionChatComposer value={draft} disabled={saving} onChange={setDraft} onSubmit={submitDraft} />
+          {error && <div className="home-error">{error}</div>}
+        </section>
+      </div>
+    </PlatformHomeThreePaneShell>
   )
 }
