@@ -60,6 +60,44 @@ def test_session_crud_update_and_delete(monkeypatch, tmp_path: Path):
     assert deleted["deleted_session_ids"] == ["goal-a"]
 
 
+def test_duplicate_session_payload_creates_independent_copy(monkeypatch, tmp_path: Path):
+    _use_graph_path(monkeypatch, tmp_path)
+    context = _ctx()
+    original = create_session(
+        SessionRecord(
+            id="goal-a",
+            kind=SessionKind.GOAL,
+            title="Plan adapter engine",
+            summary="Original planning session.",
+            state={"scope_status": "scoped"},
+            metadata={"source": "test"},
+        ),
+        context=context,
+    )["session"]
+
+    duplicated = create_session(
+        SessionRecord(
+            kind=SessionKind(original["kind"]),
+            title=f"{original['title']} copy",
+            summary=original["summary"],
+            parent_id=original.get("parent_id"),
+            facets=original.get("facets", {}),
+            state=original.get("state", {}),
+            metadata={
+                **original.get("metadata", {}),
+                "source": "session-graph-duplicate-action",
+                "duplicated_from_session_id": original["id"],
+            },
+        ),
+        context=context,
+    )["session"]
+
+    assert duplicated["id"] != original["id"]
+    assert duplicated["title"] == "Plan adapter engine copy"
+    assert duplicated["state"]["scope_status"] == "scoped"
+    assert duplicated["metadata"]["duplicated_from_session_id"] == "goal-a"
+
+
 def test_edge_crud_update_and_delete(monkeypatch, tmp_path: Path):
     _use_graph_path(monkeypatch, tmp_path)
     context = _ctx()
