@@ -8,10 +8,10 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 
+from api.repo_provider import get_repo_provider_token
 from api.service_updater import (
     SERVICE_CONFIGS,
     _get_lock,
-    _get_token,
     _git_commit,
     _now,
     _resolve_branch,
@@ -90,14 +90,14 @@ def check_service_latest(service_name: str) -> dict[str, object]:
             },
         )
 
-    token = _get_token()
+    token = get_repo_provider_token()
     if not token:
         return _response(
             service_name=service_name,
             status="token_missing",
             ok=False,
-            message="GitHub token is not configured. Set GITHUB_TOKEN or GITHUB_PAT.",
-            error={"code": "NO_TOKEN", "message": "GitHub token is not configured."},
+            message="No selected repo provider token is available. Connect GitHub or select the personal access token provider.",
+            error={"code": "NO_TOKEN", "message": "No selected repo provider token is available."},
         )
 
     repo_url = config["repo_url"]
