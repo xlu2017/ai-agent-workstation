@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import App from './App'
 import PlatformHomeInitialChatScreen from './home/PlatformHomeInitialChatScreen'
 import PlatformGraphSessionWorkspaceScreen from './home/PlatformGraphSessionWorkspaceScreen'
+import './home/platformHomeSharedTheme.css'
+import './home/platformHomeThreePaneLayout.css'
 import './platform-home.css'
 
 export default function PlatformHome() {

@@ -4,6 +4,7 @@ import type { BrowseEntry, GitHubRepo, GraphSession, RepoSource } from './types'
 import { getControlPlaneJson, postControlPlaneJson } from './platformHomeControlPlaneRequestHelpers'
 import { compactTitleFromInitialPrompt, displayNameForGitHubRepository, displayNameForLocalRepositoryPath } from './platformHomeRepositoryNameHelpers'
 import PlatformHomeRepositoryScopeSelector from './PlatformHomeRepositoryScopeSelector'
+import PlatformHomeThreePaneShell from './PlatformHomeThreePaneShell'
 
 export default function PlatformHomeInitialChatScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
   const [prompt, setPrompt] = useState('')
@@ -78,20 +79,22 @@ export default function PlatformHomeInitialChatScreen({ onNavigate }: { onNaviga
   }, [prompt, creating, repoSource, selectedGithubRepo, localPath, onNavigate])
 
   return (
-    <main className="platform-home">
-      <section className="home-dialog" aria-label="Start a session">
-        <div className="home-kicker">Agent workspace</div>
-        <h1>What should we work on?</h1>
-        <p className="home-subtitle">Start with a prompt. Attach a repository now, or start unscoped and attach one before code execution.</p>
-        <PlatformHomeRepositoryScopeSelector repoSource={repoSource} setRepoSource={setRepoSource} repoQuery={repoQuery} setRepoQuery={setRepoQuery} githubRepoName={githubRepoName} setGithubRepoName={setGithubRepoName} githubRepos={githubRepos} localPath={localPath} setLocalPath={setLocalPath} browsePath={browsePath} browseEntries={browseEntries} loadingRepos={loadingRepos} loadingBrowse={loadingBrowse} onLoadGithubRepos={loadGithubRepos} onBrowseLocalPath={browseLocalPath} />
-        <div className="home-composer">
-          <textarea value={prompt} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void createSession() } }} placeholder="Describe the feature, bug, review, or question..." rows={5} autoFocus />
-          <button type="button" className="home-send" onClick={createSession} disabled={!prompt.trim() || creating} aria-label="Create session">{creating ? <Loader2 size={19} className="spin" /> : <ArrowUp size={20} />}</button>
-        </div>
-        {repoSource === 'none' && <p className="home-note">Repo is optional at session start. The platform should require one only before repo-dependent execution.</p>}
-        {error && <div className="home-error">{error}</div>}
-      </section>
-    </main>
+    <PlatformHomeThreePaneShell activeSession={null} onNavigate={onNavigate}>
+      <div className="platform-home-centered-card">
+        <section className="home-dialog" aria-label="Start a session">
+          <div className="home-kicker">Agent workspace</div>
+          <h1>What should we work on?</h1>
+          <p className="home-subtitle">Start with a prompt. Attach a repository now, or start unscoped and attach one before code execution.</p>
+          <PlatformHomeRepositoryScopeSelector repoSource={repoSource} setRepoSource={setRepoSource} repoQuery={repoQuery} setRepoQuery={setRepoQuery} githubRepoName={githubRepoName} setGithubRepoName={setGithubRepoName} githubRepos={githubRepos} localPath={localPath} setLocalPath={setLocalPath} browsePath={browsePath} browseEntries={browseEntries} loadingRepos={loadingRepos} loadingBrowse={loadingBrowse} onLoadGithubRepos={loadGithubRepos} onBrowseLocalPath={browseLocalPath} />
+          <div className="home-composer">
+            <textarea value={prompt} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void createSession() } }} placeholder="Describe the feature, bug, review, or question..." rows={5} autoFocus />
+            <button type="button" className="home-send" onClick={createSession} disabled={!prompt.trim() || creating} aria-label="Create session">{creating ? <Loader2 size={19} className="spin" /> : <ArrowUp size={20} />}</button>
+          </div>
+          {repoSource === 'none' && <p className="home-note">Repo is optional at session start. The platform should require one only before repo-dependent execution.</p>}
+          {error && <div className="home-error">{error}</div>}
+        </section>
+      </div>
+    </PlatformHomeThreePaneShell>
   )
 }
 
