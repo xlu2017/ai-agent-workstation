@@ -1,6 +1,8 @@
 import { FileText, Info, Target } from 'lucide-react'
 import type { ProjectionView, SessionView } from './sessionGraphTypes'
 import { formatId, sessionTitle } from './sessionGraphTypes'
+import { parseProjectionBudgetDecision } from './projectionBudgetDecision'
+import './projection-budget-decision.css'
 
 function budgetLabel(value: number | undefined, fallback = 'any'): string {
   if (value === undefined || value === null) return fallback
@@ -24,6 +26,7 @@ export default function ContextProjectionPanel({
     : projections
   const latest = previewProjection || scoped[scoped.length - 1] || projections[projections.length - 1]
   const isPreview = Boolean(previewProjection)
+  const budgetDecision = latest ? parseProjectionBudgetDecision(latest) : null
 
   return (
     <section className={`sg-card ${isPreview ? 'sg-preview-card' : ''}`}>
@@ -39,7 +42,7 @@ export default function ContextProjectionPanel({
         Projection explains exactly how much source context can enter the active session. This is the guardrail against context pollution.
       </p>
 
-      {!latest ? (
+      {!latest || !budgetDecision ? (
         <div className="sg-empty-state">
           <Info size={16} />
           <div>
@@ -52,6 +55,7 @@ export default function ContextProjectionPanel({
           <div className="sg-tags">
             <span>{latest.projection_mode}</span>
             <span>{latest.projection_source || 'heuristic'}</span>
+            <span>{budgetDecision.profile}</span>
             {isPreview && <span>preview</span>}
             {typeof latest.relevance_score === 'number' && <span>{Math.round(latest.relevance_score * 100)}% relevance</span>}
           </div>
@@ -61,6 +65,24 @@ export default function ContextProjectionPanel({
             <div><strong>{budgetLabel(latest.budget.max_files)}</strong><span>files</span></div>
             <div><strong>{budgetLabel(latest.budget.max_events)}</strong><span>events</span></div>
             <div><strong>{latest.budget.recency_days || 'any'}</strong><span>days</span></div>
+          </div>
+
+          <div className="sg-budget-decision">
+            <div className="sg-budget-decision-header">
+              <div className="sg-budget-decision-title">
+                <strong>{budgetDecision.title}</strong>
+                <small>{budgetDecision.intent}</small>
+              </div>
+              <span className="sg-count-pill">{budgetLabel(budgetDecision.tokens)} tokens</span>
+            </div>
+            <p>{budgetDecision.rationale}</p>
+            <div className="sg-tags">
+              <span>{budgetLabel(budgetDecision.files)} files</span>
+              <span>{budgetLabel(budgetDecision.events)} events</span>
+              <span>{budgetDecision.recencyDays || 'any'} day lookback</span>
+              {budgetDecision.dominanceGuard && <span>dominance guard</span>}
+            </div>
+            <div className="sg-budget-edit-hint">{budgetDecision.editHint}</div>
           </div>
 
           <div className="sg-policy-checks">
