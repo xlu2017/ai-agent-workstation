@@ -32,6 +32,7 @@ from api.routes.repo_sources import router as repo_sources_router
 from api.routes.services import router as services_router
 from api.service_update_check import router as service_update_check_router
 from api.routes.app_automation import router as app_automation_router
+from api.routes.visual_automation import router as visual_automation_router
 from api.routes.models import router as models_router
 from api.routes.knowledge import router as knowledge_router
 from api.routes.filesystem import router as filesystem_router
@@ -58,6 +59,7 @@ app.include_router(repo_sources_router)
 app.include_router(services_router)
 app.include_router(service_update_check_router)
 app.include_router(app_automation_router)
+app.include_router(visual_automation_router)
 app.include_router(models_router)
 app.include_router(knowledge_router)
 app.include_router(filesystem_router)
