@@ -16,6 +16,7 @@ from ambient.evidence_graph import write_evidence_graph
 from ambient.reducers import reduce_ambient_events
 from ambient.service import AmbientObservationService
 from ambient.types import AmbientEvent
+from ambient.vendor_registry import ambient_vendor_status
 
 SESSIONS_DIR = Path(os.environ.get("SESSIONS_DIR", "/opt/workstation/sessions"))
 
@@ -69,6 +70,15 @@ def _persist_and_refresh(session_id: str, event: AmbientEvent) -> AmbientEvent:
     events = load_ambient_events(session_id, sessions_dir=SESSIONS_DIR)
     write_evidence_graph(events, sessions_dir=SESSIONS_DIR)
     return stored
+
+
+@router.get("/vendors")
+def get_ambient_vendors(session_id: str):
+    """Return ambient vendor/provider status for this control-plane instance."""
+
+    status = ambient_vendor_status()
+    status["session_id"] = session_id
+    return status
 
 
 @router.post("/events")
