@@ -34,7 +34,7 @@ shared backend runtime session
 Chrome desktop frontend runtime session
 Android emulator frontend runtime session
 iOS simulator frontend runtime session
-contains edges from app to children
+parent_id containment from app to backend/frontends
 depends_on edges from each frontend to backend
 multi_frontend_topology state on the root app session
 ```
@@ -72,10 +72,9 @@ The source of truth is the session graph. The fallback writes the same graph sha
 
 ```text
 SessionRecord(kind=app, state.multi_frontend_topology)
-SessionRecord(kind=runtime, role=backend)
-SessionRecord(kind=runtime, role=frontend_client)
-SessionEdge(type=contains)
-SessionEdge(type=depends_on)
+SessionRecord(kind=runtime, role=backend, parent_id=root_app_session)
+SessionRecord(kind=runtime, role=frontend_client, parent_id=root_app_session)
+SessionEdge(type=depends_on, frontend -> backend)
 ```
 
 That means a later server mount does not require data migration.
