@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Workstation Component Selector",
-  "description": "Select front-end regions and send targeted edit requests to the active agent session.",
+  "description": "Select local front-end regions and send edit requests to the active agent session.",
   "version": "0.1.0",
   "permissions": ["contextMenus", "activeTab", "scripting", "storage"],
-  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "http://0.0.0.0/*", "http://*.local/*", "https://*.local/*"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "http://0.0.0.0/*"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["content-script.js"],
+      "matches": ["http://localhost/*", "http://127.0.0.1/*", "http://0.0.0.0/*"],
+      "js": ["page-selector.js"],
       "css": ["overlay.css"],
       "run_at": "document_idle"
     }
