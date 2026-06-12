@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -22,6 +23,12 @@ from api.services.session_architecture_planner import (  # noqa: E402
     plan_question_only,
     propose_context_sources,
 )
+from api.services.session_graph_service import SessionGraphStore  # noqa: E402
+
+
+def _store(tmp_path: Path) -> SessionGraphStore:
+    os.environ["SESSION_GRAPH_PATH"] = str(tmp_path / "session-graph.json")
+    return SessionGraphStore()
 
 
 def test_build_session_record_sets_root_to_self_for_root_session():
@@ -30,6 +37,18 @@ def test_build_session_record_sets_root_to_self_for_root_session():
     assert record.root_id == record.id
     assert record.parent_id is None
     assert record.kind == SessionKind.REPO
+
+
+def test_plan_create_root_applies_to_graph_store(tmp_path: Path):
+    store = _store(tmp_path)
+    plan = plan_create_root(SessionSeed(kind=SessionKind.REPO, title="Frontend repo"))
+
+    graph = store.apply_update_proposal(plan.proposal)
+
+    assert len(graph.sessions) == 1
+    assert graph.sessions[0].title == "Frontend repo"
+    assert graph.sessions[0].root_id == graph.sessions[0].id
+    assert any(event.type.value == "session.updated" for event in graph.events)
 
 
 def test_plan_create_child_inherits_parent_root_and_contains_edge():
@@ -46,6 +65,18 @@ def test_plan_create_child_inherits_parent_root_and_contains_edge():
     assert edge.type == EdgeType.CONTAINS
     assert edge.source_session_id == "app"
     assert edge.target_session_id == child.id
+
+
+def test_plan_create_child_applies_with_parent_edge(tmp_path: Path):
+    store = _store(tmp_path)
+    parent = store.create_session(SessionRecord(id="app", kind=SessionKind.APP, title="Application"))
+    plan = plan_create_child(parent, SessionSeed(kind=SessionKind.WORK, title="Fix auth bug"))
+
+    graph = store.apply_update_proposal(plan.proposal)
+
+    child = next(session for session in graph.sessions if session.title == "Fix auth bug")
+    assert child.parent_id == parent.id
+    assert any(edge.type == EdgeType.CONTAINS and edge.source_session_id == parent.id for edge in graph.edges)
 
 
 def test_plan_create_sibling_links_to_active_and_preserves_root():
@@ -90,6 +121,28 @@ def test_move_repo_under_goal_uses_non_destructive_adapter_mount():
     assert "Adapter projection required" in plan.warnings[0]
 
 
+def test_move_under_applies_through_adapter_engine(tmp_path: Path):
+    store = _store(tmp_path)
+    store.create_session(SessionRecord(id="openhands", kind=SessionKind.REPO, title="OpenHands"))
+    store.create_session(SessionRecord(id="goal", kind=SessionKind.GOAL, title="Integrate executor behavior"))
+    source = store.get_session("openhands")
+    target = store.get_session("goal")
+    assert source is not None
+    assert target is not None
+    plan = plan_move_under(
+        source,
+        target,
+        user_intent="Adapt executor behavior from OpenHands into this project goal.",
+    )
+
+    graph = store.apply_update_proposal(plan.proposal)
+
+    assert any(edge.type == EdgeType.MOUNTED_UNDER for edge in graph.edges)
+    assert any(edge.type == EdgeType.ADAPTS_FROM for edge in graph.edges)
+    assert any(session.kind == SessionKind.ADAPTER for session in graph.sessions)
+    assert graph.projections
+
+
 def test_move_same_kind_short_intent_can_plain_mount():
     source = SessionRecord(id="docs-a", kind=SessionKind.WORK, title="Docs cleanup A")
     target = SessionRecord(id="docs-b", kind=SessionKind.WORK, title="Docs cleanup B")
@@ -118,6 +171,17 @@ def test_question_only_does_not_create_graph_changes():
     assert plan.proposal.created_sessions == []
     assert plan.proposal.created_edges == []
     assert plan.proposal.mount_request is None
+
+
+def test_question_only_apply_records_update_event(tmp_path: Path):
+    store = _store(tmp_path)
+    active = store.create_session(SessionRecord(id="goal", kind=SessionKind.GOAL, title="Explain plan"))
+    plan = plan_question_only(active, question="What is this session doing?")
+
+    graph = store.apply_update_proposal(plan.proposal)
+
+    assert len(graph.sessions) == 1
+    assert any(event.type.value == "session.updated" for event in graph.events)
 
 
 def test_propose_context_sources_prefers_same_root_and_repo_context():
