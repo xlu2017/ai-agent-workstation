@@ -6,7 +6,22 @@
   margin-top: 2px;
 }
 
-.pm-btn-update[aria-busy="true"] {
+.pm-btn-update[aria-busy="true"],
+.pm-btn-check-latest[aria-busy="true"] {
   opacity: 0.85;
   cursor: wait;
+}
+
+.pm-btn-check-latest {
+  min-width: 46px;
+  padding-inline: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.pm-btn-check-latest:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
 }
