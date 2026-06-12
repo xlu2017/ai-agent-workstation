@@ -6,6 +6,7 @@ import ContextProjectionPanel from './ContextProjectionPanel'
 import type { GraphSnapshot, MountResultView, SessionEdgeView, SessionEventView, SessionView } from './sessionGraphTypes'
 import { adapterFacet, formatId, sessionTitle } from './sessionGraphTypes'
 import './session-graph.css'
+import './session-graph-ux.css'
 
 const emptyGraph: GraphSnapshot = { sessions: [], edges: [], events: [], projections: [] }
 const mountModes = ['reference', 'component', 'dependency', 'vendor', 'template', 'fork', 'port', 'wrap', 'compare', 'unknown']
