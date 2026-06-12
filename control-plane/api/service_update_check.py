@@ -104,23 +104,25 @@ def check_service_latest(service_name: str) -> dict[str, object]:
     repo_path = config["path"]
     branch, branch_error = _resolve_branch(repo_url, config.get("branch"), token)
     if branch_error or not branch:
+        safe_error = _sanitize(branch_error or "Unable to resolve repository default branch.", token)
         return _response(
             service_name=service_name,
             status="branch_resolve_failed",
             ok=False,
-            message=branch_error or "Unable to resolve repository default branch.",
-            error={"code": "BRANCH_RESOLVE_FAILED", "message": branch_error or "Unable to resolve repository default branch."},
+            message=safe_error,
+            error={"code": "BRANCH_RESOLVE_FAILED", "message": safe_error},
         )
 
     remote, remote_error = _remote_commit(repo_url, branch, token)
     if remote_error or not remote:
+        safe_error = _sanitize(remote_error or "Unable to read remote branch commit.", token)
         return _response(
             service_name=service_name,
             status="remote_check_failed",
             branch=branch,
             ok=False,
-            message=remote_error or "Unable to read remote branch commit.",
-            error={"code": "REMOTE_CHECK_FAILED", "message": remote_error or "Unable to read remote branch commit."},
+            message=safe_error,
+            error={"code": "REMOTE_CHECK_FAILED", "message": safe_error},
         )
 
     lock = _get_lock(repo_path)
@@ -202,14 +204,15 @@ def check_service_latest(service_name: str) -> dict[str, object]:
             error={"code": "TIMEOUT", "message": "Update check timed out."},
         )
     except Exception as exc:
+        safe_error = _sanitize(str(exc), token)
         return _response(
             service_name=service_name,
             status="remote_check_failed",
             branch=branch,
             remote_commit=remote,
             ok=False,
-            message=_sanitize(str(exc), token),
-            error={"code": "UPDATE_CHECK_FAILED", "message": _sanitize(str(exc), token)},
+            message=safe_error,
+            error={"code": "UPDATE_CHECK_FAILED", "message": safe_error},
         )
     finally:
         lock.release()
