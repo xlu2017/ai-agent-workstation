@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "intent": "Vendored ambient-context provider stack for browser, editor, terminal, repo, runtime, and desktop observation. Vendored source is optional at import time and is used only through first-party collector adapters.",
+  "selected_tools": [
+    {
+      "id": "playwright_python",
+      "name": "Playwright Python",
+      "repo_url": "https://github.com/microsoft/playwright-python.git",
+      "github_owner": "microsoft",
+      "github_repo": "playwright-python",
+      "target_dir": "control-plane/vendor/ambient-context/playwright_python/source",
+      "python_path_hints": ["playwright"],
+      "role": "browser_cdp_dom_accessibility_console_network_provider",
+      "collector_targets": ["browser_cdp", "dom_snapshot", "accessibility_tree", "console", "network"]
+    },
+    {
+      "id": "watchfiles",
+      "name": "watchfiles",
+      "repo_url": "https://github.com/samuelcolvin/watchfiles.git",
+      "github_owner": "samuelcolvin",
+      "github_repo": "watchfiles",
+      "target_dir": "control-plane/vendor/ambient-context/watchfiles/source",
+      "python_path_hints": ["watchfiles"],
+      "role": "repo_worktree_file_change_provider",
+      "collector_targets": ["repo_watcher", "file_change_events"]
+    },
+    {
+      "id": "tree_sitter",
+      "name": "Tree-sitter",
+      "repo_url": "https://github.com/tree-sitter/tree-sitter.git",
+      "github_owner": "tree-sitter",
+      "github_repo": "tree-sitter",
+      "target_dir": "control-plane/vendor/ambient-context/tree_sitter/source",
+      "python_path_hints": ["tree_sitter"],
+      "role": "code_structure_symbol_syntax_provider",
+      "collector_targets": ["source_mapping", "symbols", "syntax_tree"]
+    },
+    {
+      "id": "pygls",
+      "name": "pygls",
+      "repo_url": "https://github.com/openlawlibrary/pygls.git",
+      "github_owner": "openlawlibrary",
+      "github_repo": "pygls",
+      "target_dir": "control-plane/vendor/ambient-context/pygls/source",
+      "python_path_hints": ["pygls"],
+      "role": "editor_lsp_bridge_provider",
+      "collector_targets": ["editor_bridge", "lsp_context", "diagnostics"]
+    },
+    {
+      "id": "pyte",
+      "name": "pyte",
+      "repo_url": "https://github.com/selectel/pyte.git",
+      "github_owner": "selectel",
+      "github_repo": "pyte",
+      "target_dir": "control-plane/vendor/ambient-context/pyte/source",
+      "python_path_hints": ["pyte"],
+      "role": "terminal_screen_reconstruction_provider",
+      "collector_targets": ["terminal_collector", "pty_screen_state"]
+    },
+    {
+      "id": "opentelemetry_python",
+      "name": "OpenTelemetry Python",
+      "repo_url": "https://github.com/open-telemetry/opentelemetry-python.git",
+      "github_owner": "open-telemetry",
+      "github_repo": "opentelemetry-python",
+      "target_dir": "control-plane/vendor/ambient-context/opentelemetry_python/source",
+      "python_path_hints": ["opentelemetry"],
+      "role": "runtime_trace_provider",
+      "collector_targets": ["runtime_trace", "fastapi_asgi_tracing", "request_correlation"]
+    },
+    {
+      "id": "python_lsp_server",
+      "name": "python-lsp-server",
+      "repo_url": "https://github.com/python-lsp/python-lsp-server.git",
+      "github_owner": "python-lsp",
+      "github_repo": "python-lsp-server",
+      "target_dir": "control-plane/vendor/ambient-context/python_lsp_server/source",
+      "python_path_hints": ["pylsp"],
+      "role": "python_editor_symbol_diagnostic_provider",
+      "collector_targets": ["editor_bridge", "python_diagnostics", "symbol_lookup"]
+    },
+    {
+      "id": "source_map_js",
+      "name": "source-map",
+      "repo_url": "https://github.com/mozilla/source-map.git",
+      "github_owner": "mozilla",
+      "github_repo": "source-map",
+      "target_dir": "control-plane/vendor/ambient-context/source_map_js/source",
+      "python_path_hints": [],
+      "role": "javascript_source_map_reference",
+      "collector_targets": ["source_mapping", "dom_to_source"]
+    }
+  ]
+}
