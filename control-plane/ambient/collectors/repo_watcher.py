@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from ambient.types import AmbientEvent, AmbientEventType, AmbientSource
+from ambient.vendor_registry import ensure_vendor_python_path, provider_available
 
 
 class RepoSnapshotCollector:
@@ -20,11 +21,13 @@ class RepoSnapshotCollector:
             return {
                 "repo_root": str(self.repo_root),
                 "available": False,
+                "provider": "git_status",
                 "exists": exists,
                 "is_git": is_git,
                 "branch": None,
                 "commit": None,
                 "dirty_files": [],
+                "watchfiles_available": provider_available("watchfiles", "watchfiles"),
             }
 
         branch = self._git(["rev-parse", "--abbrev-ref", "HEAD"]).strip() or None
@@ -38,11 +41,13 @@ class RepoSnapshotCollector:
         return {
             "repo_root": str(self.repo_root),
             "available": True,
+            "provider": "git_status",
             "exists": True,
             "is_git": True,
             "branch": branch,
             "commit": commit,
             "dirty_files": dirty_files,
+            "watchfiles_available": provider_available("watchfiles", "watchfiles"),
         }
 
     def build_event(
@@ -63,6 +68,31 @@ class RepoSnapshotCollector:
             confidence=0.95 if snap.get("available") else 0.25,
             payload=snap,
         )
+
+    def poll_file_changes_once(self, *, timeout_ms: int = 1000) -> list[dict[str, str]]:
+        """Collect a one-shot watchfiles batch when the provider is available.
+
+        This is intentionally optional. The normal collection path still records
+        git status, while long-running watchers can call this method to get live
+        file change events without importing watchfiles at process start.
+        """
+
+        if not self.repo_root.exists() or not provider_available("watchfiles", "watchfiles"):
+            return []
+        ensure_vendor_python_path("watchfiles")
+        try:
+            from watchfiles import watch
+        except Exception:
+            return []
+        try:
+            for changes in watch(str(self.repo_root), stop_event=None, yield_on_timeout=True, rust_timeout=timeout_ms):
+                result = []
+                for change, path in changes:
+                    result.append({"change": str(change), "path": str(Path(path))})
+                return result
+        except Exception:
+            return []
+        return []
 
     def _git(self, args: list[str]) -> str:
         try:
@@ -97,5 +127,5 @@ def build_files_changed_event(
         repo_id=repo_id,
         worktree_id=worktree_id,
         branch=branch,
-        payload={"changes": changes},
+        payload={"changes": changes, "provider": "watchfiles" if provider_available("watchfiles", "watchfiles") else "external"},
     )
