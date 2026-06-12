@@ -19,10 +19,9 @@ payloads live under <sessions_dir>/<session_id>/ambient/events.jsonl.
 from __future__ import annotations
 
 import json
-import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
@@ -128,12 +127,25 @@ class EventStore:
         session_id: str,
         after_sequence: int = 0,
         event_types: list[EventType] | None = None,
-        limit: int = 1000,
+        limit: int | None = None,
+        apply_observability_settings: bool = True,
     ) -> list[dict[str, Any]]:
-        """Read events from the session log."""
+        """Read events from the session log.
+
+        By default, reads honor the persisted observability lookback and max-event
+        settings. Callers that need archival reads can pass
+        apply_observability_settings=False.
+        """
         path = self._events_file(session_id)
         if not path.exists():
             return []
+
+        settings = _safe_observability_settings() if apply_observability_settings else None
+        effective_limit = limit or (settings.max_events_per_session if settings else 1000)
+        cutoff = None
+        if settings:
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.lookback_hours)
+
         events = []
         for line in path.open():
             line = line.strip()
@@ -145,12 +157,14 @@ class EventStore:
                 continue
             if evt.get("sequence", 0) <= after_sequence:
                 continue
-            if event_types and evt.get("event_type") not in [
-                t.value for t in event_types
-            ]:
+            if event_types and evt.get("event_type") not in [t.value for t in event_types]:
+                continue
+            if cutoff and _event_timestamp(evt) and _event_timestamp(evt) < cutoff:
+                continue
+            if settings and not _event_allowed_by_logging_extent(evt, settings):
                 continue
             events.append(evt)
-            if len(events) >= limit:
+            if len(events) >= effective_limit:
                 break
         return events
 
@@ -174,6 +188,51 @@ class EventStore:
                 continue
             latest = evt
         return latest
+
+
+def _safe_observability_settings():
+    try:
+        from api.services.platform_settings import get_observability_settings
+        return get_observability_settings()
+    except Exception:
+        return None
+
+
+def _event_timestamp(evt: dict[str, Any]) -> datetime | None:
+    value = evt.get("timestamp")
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _event_allowed_by_logging_extent(evt: dict[str, Any], settings) -> bool:
+    data = evt.get("data") if isinstance(evt.get("data"), dict) else {}
+    event_type = evt.get("event_type", "")
+    if not settings.include_ambient_context and event_type in {
+        EventType.AMBIENT_CONTEXT_COLLECTED.value,
+        EventType.AMBIENT_STATE_UPDATED.value,
+        EventType.CONTEXT_PACKET_BUILT.value,
+        EventType.SCREENSHOT_FALLBACK_CAPTURED.value,
+    }:
+        return False
+    if not settings.include_debug_prompts and ("llm_prompt" in data or event_type == EventType.PLAN_REQUESTED.value):
+        data.pop("llm_prompt", None)
+        data.pop("prompt", None)
+    if not settings.include_tool_outputs and data.get("type") in {"tool_output", "plan_output"}:
+        data.pop("output", None)
+    if settings.logging_extent == "minimal" and event_type in {
+        EventType.ACTION_PROGRESS.value,
+        EventType.THOUGHT_ELAPSED.value,
+        EventType.AMBIENT_CONTEXT_COLLECTED.value,
+    }:
+        return False
+    return True
 
 
 def create_event(
