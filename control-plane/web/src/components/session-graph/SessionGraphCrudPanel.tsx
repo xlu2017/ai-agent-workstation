@@ -43,6 +43,8 @@ export default function SessionGraphCrudPanel({
   const [editSummary, setEditSummary] = useState('')
   const [editStatus, setEditStatus] = useState('proposed')
   const [deleteCascade, setDeleteCascade] = useState(false)
+  const [childKind, setChildKind] = useState('work')
+  const [childTitle, setChildTitle] = useState('')
 
   const [edgeType, setEdgeType] = useState('references')
   const [edgeSourceId, setEdgeSourceId] = useState('')
@@ -53,6 +55,7 @@ export default function SessionGraphCrudPanel({
     setEditTitle(selectedSession?.title || '')
     setEditSummary(selectedSession?.summary || '')
     setEditStatus(selectedSession?.status || 'proposed')
+    setChildTitle(selectedSession ? `Child of ${selectedSession.title}` : '')
   }, [selectedSession?.id, selectedSession?.title, selectedSession?.summary, selectedSession?.status])
 
   useEffect(() => {
@@ -115,6 +118,27 @@ export default function SessionGraphCrudPanel({
       })
       onSelectSession(response.session.id)
     }, 'Session duplicated.')
+  }
+
+  function createChildSession() {
+    if (!selectedSession) return
+    return run(async () => {
+      const response = await apiFetch<{ session: SessionView }>('/api/session-graph/sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: childKind,
+          title: childTitle.trim() || `Child of ${selectedSession.title}`,
+          summary: `Child session of ${selectedSession.title}.`,
+          parent_id: selectedSession.id,
+          root_id: selectedSession.root_id || selectedSession.id,
+          metadata: {
+            source: 'session-graph-create-child-action',
+            parent_session_title: selectedSession.title,
+          },
+        }),
+      })
+      onSelectSession(response.session.id)
+    }, 'Child session created.')
   }
 
   function updateSession() {
@@ -190,6 +214,11 @@ export default function SessionGraphCrudPanel({
             <label><span>Summary</span><textarea value={editSummary} onChange={event => setEditSummary(event.target.value)} /></label>
             <label><span>Status</span><select value={editStatus} onChange={event => setEditStatus(event.target.value)}>{sessionStatuses.map(status => <option key={status} value={status}>{status}</option>)}</select></label>
             <div className="sg-form-actions"><button className="sg-button sg-button-primary" type="button" disabled={busy || !editTitle.trim()} onClick={updateSession}><RefreshCw size={14} /> Save</button><button className="sg-button" type="button" disabled={busy} onClick={duplicateSession}><Copy size={14} /> Duplicate</button></div>
+            <div className="sg-child-action">
+              <label><span>Child kind</span><select value={childKind} onChange={event => setChildKind(event.target.value)}>{sessionKinds.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select></label>
+              <label><span>Child title</span><input value={childTitle} onChange={event => setChildTitle(event.target.value)} placeholder="Child session title" /></label>
+              <button className="sg-button" type="button" disabled={busy || !childTitle.trim()} onClick={createChildSession}><Plus size={14} /> Create child</button>
+            </div>
             <label className="sg-crud-check"><input type="checkbox" checked={deleteCascade} onChange={event => setDeleteCascade(event.target.checked)} /> Cascade related edges/projections</label>
             <button className="sg-button sg-button-danger" type="button" disabled={busy} onClick={deleteSession}><Trash2 size={14} /> Delete session</button>
           </>}
