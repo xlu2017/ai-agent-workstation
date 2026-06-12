@@ -39,6 +39,7 @@ from api.routes.knowledge import router as knowledge_router
 from api.routes.filesystem import router as filesystem_router
 from api.routes.multi_frontend import router as multi_frontend_router
 from api.routes.ui_capabilities import router as ui_capabilities_router
+from api.routes.ambient_vendors import router as ambient_vendors_router
 from api.routes.session_graph.router import router as session_graph_router
 
 app = FastAPI(title="Workstation Control Plane", version="0.1.0")
@@ -70,4 +71,5 @@ app.include_router(knowledge_router)
 app.include_router(filesystem_router)
 app.include_router(ui_capabilities_router)
 app.include_router(session_graph_router)
+app.include_router(ambient_vendors_router)
 app.include_router(multi_frontend_router)
