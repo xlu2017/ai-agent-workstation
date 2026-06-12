@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Edit3, GitBranch, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Copy, Edit3, GitBranch, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import type { SessionEdgeView, SessionView } from './sessionGraphTypes'
 
 const sessionKinds = ['app', 'repo', 'goal', 'work', 'question', 'validation', 'adapter', 'runtime', 'memory', 'artifact', 'container']
@@ -93,6 +93,30 @@ export default function SessionGraphCrudPanel({
     }, 'Session created.')
   }
 
+  function duplicateSession() {
+    if (!selectedSession) return
+    return run(async () => {
+      const response = await apiFetch<{ session: SessionView }>('/api/session-graph/sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: selectedSession.kind,
+          title: `${selectedSession.title} copy`,
+          summary: selectedSession.summary || `Copy of ${selectedSession.title}.`,
+          parent_id: selectedSession.parent_id || null,
+          facets: selectedSession.facets || {},
+          policy: selectedSession.policy,
+          state: selectedSession.state || {},
+          metadata: {
+            ...(selectedSession.metadata || {}),
+            source: 'session-graph-duplicate-action',
+            duplicated_from_session_id: selectedSession.id,
+          },
+        }),
+      })
+      onSelectSession(response.session.id)
+    }, 'Session duplicated.')
+  }
+
   function updateSession() {
     if (!selectedSession) return
     return run(async () => {
@@ -165,7 +189,7 @@ export default function SessionGraphCrudPanel({
             <label><span>Title</span><input value={editTitle} onChange={event => setEditTitle(event.target.value)} /></label>
             <label><span>Summary</span><textarea value={editSummary} onChange={event => setEditSummary(event.target.value)} /></label>
             <label><span>Status</span><select value={editStatus} onChange={event => setEditStatus(event.target.value)}>{sessionStatuses.map(status => <option key={status} value={status}>{status}</option>)}</select></label>
-            <div className="sg-form-actions"><button className="sg-button sg-button-primary" type="button" disabled={busy || !editTitle.trim()} onClick={updateSession}><RefreshCw size={14} /> Save</button></div>
+            <div className="sg-form-actions"><button className="sg-button sg-button-primary" type="button" disabled={busy || !editTitle.trim()} onClick={updateSession}><RefreshCw size={14} /> Save</button><button className="sg-button" type="button" disabled={busy} onClick={duplicateSession}><Copy size={14} /> Duplicate</button></div>
             <label className="sg-crud-check"><input type="checkbox" checked={deleteCascade} onChange={event => setDeleteCascade(event.target.checked)} /> Cascade related edges/projections</label>
             <button className="sg-button sg-button-danger" type="button" disabled={busy} onClick={deleteSession}><Trash2 size={14} /> Delete session</button>
           </>}
