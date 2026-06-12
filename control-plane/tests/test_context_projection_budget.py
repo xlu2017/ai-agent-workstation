@@ -28,12 +28,20 @@ def test_projection_budget_profiles_are_selected():
 
     assert direct.profile == "direct_ui_action"
     assert direct.budget.max_tokens == 1000
+    assert direct.budget_rationale.startswith("1000 tokens")
+    assert "budget_tokens:1000" in direct.evidence
     assert bugfix.profile == "known_repo_bug_fix"
     assert 4000 <= bugfix.budget.max_tokens <= 8000
+    assert bugfix.budget_rationale.startswith("6000 tokens")
+    assert "budget_tokens:6000" in bugfix.evidence
     assert architecture.profile == "architecture_planning"
     assert architecture.budget.max_events == 200
+    assert architecture.budget_rationale.startswith("20000 tokens")
+    assert "budget_tokens:20000" in architecture.evidence
     assert integration.profile == "cross_repo_integration"
     assert integration.budget.max_tokens >= 20000
+    assert integration.budget_rationale.startswith("22000 tokens")
+    assert "budget_tokens:22000" in integration.evidence
 
 
 def test_budgeted_projection_records_dominance_guard_evidence():
@@ -54,6 +62,9 @@ def test_budgeted_projection_records_dominance_guard_evidence():
 
     assert projection.budget.max_tokens == 4000
     assert "budget_profile:focused_mount_projection" in projection.evidence
+    assert "budget_tokens:4000" in projection.evidence
+    assert any(item.startswith("budget_rationale:4000 tokens") for item in projection.evidence)
+    assert "4000 tokens" in projection.rationale
     assert "dominance_guard:broad_source_under_focused_target" in projection.evidence
     assert "unrelated_capabilities" in [selector.value for selector in projection.exclude_selectors]
 
@@ -75,4 +86,6 @@ def test_session_adapter_engine_projection_is_wired_to_budgeted_service():
     projection = engine.generate_context_projection(repo, goal, request)
 
     assert "budget_profile:focused_mount_projection" in projection.evidence
+    assert "budget_tokens:4000" in projection.evidence
+    assert "4000 tokens" in projection.rationale
     assert projection.budget.max_tokens == 4000
