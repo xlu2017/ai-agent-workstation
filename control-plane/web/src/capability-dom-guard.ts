@@ -118,10 +118,6 @@ function shouldRender(capability: UiCapability): boolean {
   return capability.enabled && capability.visibility === 'render'
 }
 
-function shouldDisable(capability: UiCapability): boolean {
-  return !capability.enabled || capability.visibility === 'disabled'
-}
-
 function applyCapabilityToElement(element: Element, capability: UiCapability) {
   if (shouldRender(capability)) {
     element.removeAttribute('hidden')
