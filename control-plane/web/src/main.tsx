@@ -5,6 +5,7 @@ import './service-update-enhancer'
 import './styles.css'
 import './service-update-enhancer.css'
 import './no-placeholder-actions.css'
+import './ux-polish.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
