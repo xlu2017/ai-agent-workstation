@@ -2,6 +2,18 @@
 
 A production-quality, self-hosted development workstation for AI coding agents. Runs OpenHands with DeepSeek models via LiteLLM Proxy on Hetzner Cloud, with multi-agent worktree isolation, knowledge system, observability, and UI-to-code bridging.
 
+## Session Platform Intent
+
+The control plane treats repositories, goals, work sessions, app compositions, adapters, runtimes, validation runs, and questions as graph-addressable sessions. Session movement should preserve source identity, record adapter intent, validate policy before mutation, and project only relevant context into execution.
+
+Normative docs:
+
+- [Session platform intent](docs/session-platform-intent.md)
+- [Session graph API](docs/api-session-graph.md)
+- [Session adapter control-plane behavior](docs/session-adapter-control-plane.md)
+
+Future work should keep the FastAPI models, API routes, SQL scaffold, UI panels, and `agent-core` contracts aligned. Divergence between those surfaces should be treated as a bug.
+
 ## Current Deployment
 
 | Component | Status |
@@ -96,6 +108,9 @@ See [docs/architecture.md](docs/architecture.md) for full details.
 │   └── ARCHITECTURE.md
 ├── docs/
 │   ├── architecture.md             # System architecture
+│   ├── session-platform-intent.md  # Session platform intent and invariants
+│   ├── api-session-graph.md        # Session graph API semantics
+│   ├── session-adapter-control-plane.md # Adapter control-plane behavior
 │   ├── operations/remote-desktop.md # Browser remote desktop via Guacamole
 │   ├── provider-comparison.md      # Infra & API comparison
 │   ├── cost-model.md               # Budget projections
