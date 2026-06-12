@@ -98,6 +98,33 @@ def test_duplicate_session_payload_creates_independent_copy(monkeypatch, tmp_pat
     assert duplicated["metadata"]["duplicated_from_session_id"] == "goal-a"
 
 
+def test_create_child_action_payload_sets_parent_and_root(monkeypatch, tmp_path: Path):
+    _use_graph_path(monkeypatch, tmp_path)
+    context = _ctx()
+    parent = create_session(
+        SessionRecord(id="app-a", kind=SessionKind.APP, title="Application", root_id="app-a"),
+        context=context,
+    )["session"]
+
+    child = create_session(
+        SessionRecord(
+            kind=SessionKind.WORK,
+            title="Child of Application",
+            summary="Child session of Application.",
+            parent_id=parent["id"],
+            root_id=parent.get("root_id") or parent["id"],
+            metadata={"source": "session-graph-create-child-action", "parent_session_title": parent["title"]},
+        ),
+        context=context,
+    )["session"]
+
+    assert child["id"] != parent["id"]
+    assert child["parent_id"] == "app-a"
+    assert child["root_id"] == "app-a"
+    assert child["metadata"]["source"] == "session-graph-create-child-action"
+    assert child["metadata"]["parent_session_title"] == "Application"
+
+
 def test_edge_crud_update_and_delete(monkeypatch, tmp_path: Path):
     _use_graph_path(monkeypatch, tmp_path)
     context = _ctx()
