@@ -45,18 +45,14 @@ class PlanRequest:
     allowed_actions: list[str]
     mode_preference: str = "finite"
     max_iterations: int | None = None
-    memories: list[dict[str, Any]] = field(default_factory=list)
-    context_summaries: list[dict[str, Any]] = field(default_factory=list)
-    recent_outcomes: list[dict[str, Any]] = field(default_factory=list)
+    recent_memories: list[dict[str, Any]] = field(default_factory=list)
+    context_summaries: list[str] = field(default_factory=list)
+    recent_action_outcomes: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
 class OutcomeRecord:
-    """Local outcome record for jubilant-goggles timeline tracking.
-
-    Outcomes are recorded in the live feed / status feed first.
-    Future: sync to agent-core trace store when POST /actions/outcome exists.
-    """
+    """Outcome record forwarded to agent-core for trace/memory integration."""
 
     session_id: str
     action_name: str
@@ -93,7 +89,7 @@ class AgentCoreClient:
 
     async def plan(self, request: PlanRequest) -> dict[str, Any]:
         """Generate an advisory plan. The plan is not authorization."""
-        payload = {
+        payload: dict[str, Any] = {
             "session_id": request.session_id,
             "repo_id": request.repo_id,
             "prompt": request.prompt,
@@ -102,12 +98,12 @@ class AgentCoreClient:
         }
         if request.max_iterations is not None:
             payload["max_iterations"] = request.max_iterations
-        if request.memories:
-            payload["memories"] = request.memories
+        if request.recent_memories:
+            payload["recent_memories"] = request.recent_memories
         if request.context_summaries:
             payload["context_summaries"] = request.context_summaries
-        if request.recent_outcomes:
-            payload["recent_outcomes"] = request.recent_outcomes
+        if request.recent_action_outcomes:
+            payload["recent_action_outcomes"] = request.recent_action_outcomes
         resp = await self._client.post("/actions/plan", json=payload)
         resp.raise_for_status()
         return self._mark_advisory(resp.json())
@@ -173,20 +169,22 @@ class AgentCoreClient:
         return self._mark_advisory(resp.json())
 
     async def record_outcome(self, outcome: OutcomeRecord) -> dict[str, Any]:
-        """Record an action outcome.
-
-        Currently records locally only. When agent-core exposes
-        POST /actions/outcome, this will forward the record for
-        trace/memory integration.
-        """
-        # TODO: POST to agent-core /actions/outcome when endpoint exists
-        return {
-            "recorded": True,
-            "local_only": True,
+        """Forward an action outcome to agent-core."""
+        payload = {
             "session_id": outcome.session_id,
             "action_name": outcome.action_name,
+            "params": outcome.params,
             "status": outcome.status,
+            "output": outcome.output,
+            "duration_ms": outcome.duration_ms,
+            "executor": outcome.executor or "jubilant-goggles",
+            "rationale": outcome.rationale,
+            "error": outcome.error,
+            "files_touched": outcome.files_touched,
         }
+        resp = await self._client.post("/actions/outcome", json=payload)
+        resp.raise_for_status()
+        return self._mark_advisory(resp.json())
 
     async def close(self) -> None:
         await self._client.aclose()
