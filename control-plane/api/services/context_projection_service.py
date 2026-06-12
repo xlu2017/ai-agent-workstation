@@ -21,9 +21,9 @@ def generate_budgeted_context_projection(
 ) -> ContextProjection:
     """Generate a task-scoped projection that uses a dynamic budget profile.
 
-    This is the budgeted projection scaffold for the SessionAdapter Engine. The existing
-    mount path can call this once the API schema and UI are ready to display named
-    budget profiles. Until then, the selected profile is carried as projection evidence.
+    The selected profile carries both the numeric budget and the direct logic rationale
+    for that budget in projection evidence, so previews and persisted events can explain
+    why a mount received 1000, 4000, 6000, 12000, 20000, or 22000 projected tokens.
     """
     broad_source = source.kind in {SessionKind.REPO, SessionKind.APP, SessionKind.CONTAINER}
     focused_target = target.kind in {SessionKind.GOAL, SessionKind.WORK, SessionKind.QUESTION}
@@ -62,6 +62,7 @@ def generate_budgeted_context_projection(
         f"source:{source.id}:{source.kind.value}",
         f"target:{target.id}:{target.kind.value}",
         f"budget_profile:{budget_decision.profile}",
+        f"budget_rationale:{budget_decision.budget_rationale}",
         *budget_decision.evidence,
     ]
     if mappings:
@@ -78,5 +79,8 @@ def generate_budgeted_context_projection(
         include_selectors=list(dict.fromkeys(include_selectors)),
         exclude_selectors=list(dict.fromkeys(exclude_selectors)),
         budget=budget_decision.budget,
-        rationale=f"{budget_decision.rationale} Project {source.title} into {target.title} without rewriting source identity.",
+        rationale=(
+            f"Budget rationale: {budget_decision.budget_rationale} "
+            f"Project {source.title} into {target.title} without rewriting source identity."
+        ),
     )
