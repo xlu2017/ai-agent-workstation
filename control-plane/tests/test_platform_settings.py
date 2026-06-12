@@ -1,4 +1,5 @@
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Add control-plane root to path
@@ -44,3 +45,34 @@ def test_observability_settings_reject_invalid_lookback():
         assert "lookback_hours" in str(exc)
     else:
         raise AssertionError("Expected invalid lookback to fail validation")
+
+
+def test_event_store_can_apply_observability_settings(monkeypatch, tmp_path):
+    from api.services.platform_settings import ObservabilitySettings
+    from live_feed.events import EventStore, EventType, create_event
+
+    store = EventStore(tmp_path)
+    old_event = create_event(EventType.ACTION_PROGRESS, "s1", message="old")
+    old_event.timestamp = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    current_event = create_event(EventType.ACTION_COMPLETED, "s1", message="current")
+    ambient_event = create_event(EventType.AMBIENT_CONTEXT_COLLECTED, "s1", message="ambient")
+
+    store.append(old_event)
+    store.append(current_event)
+    store.append(ambient_event)
+
+    class FakeSettings:
+        lookback_hours = 24
+        max_events_per_session = 100
+        include_ambient_context = False
+        include_debug_prompts = False
+        include_tool_outputs = True
+        logging_extent = "standard"
+
+    monkeypatch.setattr("live_feed.events._safe_observability_settings", lambda: FakeSettings())
+
+    events = store.get_events("s1")
+    assert [event["event_type"] for event in events] == ["action_completed"]
+
+    unfiltered = store.get_events("s1", apply_observability_settings=False)
+    assert len(unfiltered) == 3
