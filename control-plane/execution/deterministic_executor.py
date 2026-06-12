@@ -3,25 +3,23 @@ DeterministicExecutor — fast deterministic executor for simple local operation
 
 Handles cheap, direct actions without an LLM loop:
   grep, search_code, read_file, list_files, git_status, git_diff,
-  inspect_diff, apply_patch (exact content), write_file, run_tests,
+  inspect_diff, apply_patch with unified diff text, write_file, run_tests,
   run_lint, run_typecheck, summarize_diff, commit.
 
 Does not make autonomous decisions.
-
-Configuration:
-  ALLOW_DETERMINISTIC_EXECUTOR=true
 """
 
 from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
 from adapters.execution.base import ExecutionAdapter
-from execution.redaction import redact_output, redact_value
+from execution.redaction import redact_output
 from execution.results import ExecutionEvent, ExecutionResult
 
 COMMAND_TIMEOUT = int(os.environ.get("AGENTIC_EXECUTOR_COMMAND_TIMEOUT", "60"))
@@ -29,11 +27,7 @@ PROTECTED_BRANCHES = {"main", "master", "develop", "production"}
 
 
 class DeterministicExecutor(ExecutionAdapter):
-    """Fast deterministic executor for simple local actions.
-
-    Executes actions directly on the filesystem. All path operations
-    are sandboxed to the worktree directory. No LLM, no autonomous decisions.
-    """
+    """Fast deterministic executor for simple local actions."""
 
     async def execute_action(
         self,
@@ -86,10 +80,13 @@ class DeterministicExecutor(ExecutionAdapter):
 
     def _validate_path(self, worktree: Path, target: str) -> Path:
         """Ensure the target path does not escape the worktree."""
-        resolved = (worktree / target).resolve()
         wt_resolved = worktree.resolve()
-        if not str(resolved).startswith(str(wt_resolved)):
-            raise PermissionError(f"Path escapes worktree: {target}")
+        candidate = Path(target)
+        resolved = candidate.resolve() if candidate.is_absolute() else (worktree / candidate).resolve()
+        try:
+            resolved.relative_to(wt_resolved)
+        except ValueError as exc:
+            raise PermissionError(f"Path escapes worktree: {target}") from exc
         return resolved
 
     def _make_event(self, event_type: str, title: str, summary: str, status: str = "completed") -> ExecutionEvent:
@@ -110,16 +107,18 @@ class DeterministicExecutor(ExecutionAdapter):
                 status="failed", backend="deterministic",
                 error="grep/search_code requires a pattern parameter",
             )
+        search_path = params.get("path", ".")
+        target = self._validate_path(worktree, search_path) if search_path != "." else worktree
         result = subprocess.run(
-            ["grep", "-rn", pattern, "."],
+            ["grep", "-rn", str(pattern), str(target)],
             cwd=str(worktree), capture_output=True, text=True, timeout=30,
         )
         matches = result.stdout.strip().split("\n") if result.stdout.strip() else []
         return ExecutionResult(
             status="succeeded", backend="deterministic",
             output={"matches": matches[:100], "count": len(matches)},
-            summary=f"Found {len(matches)} matches for '{pattern[:40]}'",
-            events=[self._make_event("command_executed", "grep", f"grep -rn {pattern[:40]}")],
+            summary=f"Found {len(matches)} matches for '{str(pattern)[:40]}'",
+            events=[self._make_event("command_executed", "grep", f"grep -rn {str(pattern)[:40]}")],
         )
 
     async def _exec_read_file(
@@ -131,7 +130,7 @@ class DeterministicExecutor(ExecutionAdapter):
                 status="failed", backend="deterministic",
                 error="read_file requires a path parameter",
             )
-        target = self._validate_path(worktree, path_str)
+        target = self._validate_path(worktree, str(path_str))
         if not target.exists():
             return ExecutionResult(
                 status="failed", backend="deterministic",
@@ -141,7 +140,7 @@ class DeterministicExecutor(ExecutionAdapter):
         return ExecutionResult(
             status="succeeded", backend="deterministic",
             output={"content": content, "path": path_str},
-            files_touched=[path_str],
+            files_touched=[str(path_str)],
             events=[self._make_event("file_read", f"Read {path_str}", f"Read {len(content)} bytes")],
         )
 
@@ -149,13 +148,13 @@ class DeterministicExecutor(ExecutionAdapter):
         self, worktree: Path, params: dict[str, Any], context: dict[str, Any],
     ) -> ExecutionResult:
         path_str = params.get("path", ".")
-        target = self._validate_path(worktree, path_str) if path_str != "." else worktree
+        target = self._validate_path(worktree, str(path_str)) if path_str != "." else worktree
         if not target.exists() or not target.is_dir():
             return ExecutionResult(
                 status="failed", backend="deterministic",
                 error=f"Directory not found: {path_str}",
             )
-        max_depth = min(params.get("max_depth", 1) or 1, 4)
+        max_depth = min(params.get("max_depth", params.get("depth", 1)) or 1, 4)
         result = subprocess.run(
             ["find", str(target), "-maxdepth", str(max_depth),
              "-not", "-path", "*/.git/*", "-not", "-path", "*/node_modules/*"],
@@ -191,6 +190,9 @@ class DeterministicExecutor(ExecutionAdapter):
             cmd.append("--staged")
         if params.get("stat_only"):
             cmd.append("--stat")
+        if params.get("path"):
+            target = self._validate_path(worktree, str(params["path"]))
+            cmd.extend(["--", str(target.relative_to(worktree.resolve()))])
         result = subprocess.run(
             cmd, cwd=str(worktree), capture_output=True, text=True, timeout=30,
         )
@@ -228,27 +230,90 @@ class DeterministicExecutor(ExecutionAdapter):
     async def _exec_apply_patch(
         self, worktree: Path, params: dict[str, Any], context: dict[str, Any],
     ) -> ExecutionResult:
+        patch_text = params.get("patch", "")
         file_path = params.get("file", params.get("path", ""))
-        content = params.get("content", params.get("patch", ""))
-        if not file_path:
+        content = params.get("content")
+
+        if params.get("intent") and not patch_text and content is None:
             return ExecutionResult(
                 status="failed", backend="deterministic",
-                error="apply_patch requires a file/path parameter",
+                error="apply_patch with intent requires the agentic executor; deterministic executor only accepts unified diff text or explicit content",
             )
-        target = self._validate_path(worktree, file_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content)
-        return ExecutionResult(
-            status="succeeded", backend="deterministic",
-            output={"path": file_path, "bytes_written": len(content)},
-            files_touched=[file_path],
-            events=[self._make_event("file_edited", f"Wrote {file_path}", f"Wrote {len(content)} bytes")],
-        )
+
+        if content is not None:
+            if not file_path:
+                return ExecutionResult(
+                    status="failed", backend="deterministic",
+                    error="apply_patch content mode requires a file/path parameter",
+                )
+            target = self._validate_path(worktree, str(file_path))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(str(content))
+            return ExecutionResult(
+                status="succeeded", backend="deterministic",
+                output={"path": file_path, "bytes_written": len(str(content)), "mode": "content"},
+                files_touched=[str(file_path)],
+                events=[self._make_event("file_edited", f"Wrote {file_path}", f"Wrote {len(str(content))} bytes")],
+            )
+
+        if not patch_text:
+            return ExecutionResult(
+                status="failed", backend="deterministic",
+                error="apply_patch requires unified diff text in patch or explicit content",
+            )
+
+        with tempfile.NamedTemporaryFile("w", suffix=".patch", dir=str(worktree), delete=False) as handle:
+            handle.write(str(patch_text))
+            patch_path = Path(handle.name)
+        try:
+            check = subprocess.run(
+                ["git", "apply", "--check", str(patch_path)],
+                cwd=str(worktree), capture_output=True, text=True, timeout=30,
+            )
+            if check.returncode != 0:
+                return ExecutionResult(
+                    status="failed", backend="deterministic",
+                    output={"stderr": redact_output(check.stderr)},
+                    error=redact_output(check.stderr.strip()) or "Patch check failed",
+                )
+            result = subprocess.run(
+                ["git", "apply", str(patch_path)],
+                cwd=str(worktree), capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                return ExecutionResult(
+                    status="failed", backend="deterministic",
+                    output={"stderr": redact_output(result.stderr)},
+                    error=redact_output(result.stderr.strip()) or "Patch apply failed",
+                )
+            changed = subprocess.run(
+                ["git", "diff", "--name-only"],
+                cwd=str(worktree), capture_output=True, text=True, timeout=10,
+            )
+            files = [line for line in changed.stdout.splitlines() if line.strip()]
+            return ExecutionResult(
+                status="succeeded", backend="deterministic",
+                output={"files": files, "mode": "unified_diff"},
+                files_touched=files,
+                events=[self._make_event("file_edited", "Applied patch", f"Changed {len(files)} files")],
+            )
+        finally:
+            try:
+                patch_path.unlink()
+            except OSError:
+                pass
 
     async def _exec_write_file(
         self, worktree: Path, params: dict[str, Any], context: dict[str, Any],
     ) -> ExecutionResult:
-        return await self._exec_apply_patch(worktree, params, context)
+        path_str = params.get("path", "")
+        if not path_str:
+            return ExecutionResult(
+                status="failed", backend="deterministic",
+                error="write_file requires a path parameter",
+            )
+        content = params.get("content", "")
+        return await self._exec_apply_patch(worktree, {"path": path_str, "content": str(content)}, context)
 
     async def _exec_run_tests(
         self, worktree: Path, params: dict[str, Any], context: dict[str, Any],
@@ -341,7 +406,6 @@ class DeterministicExecutor(ExecutionAdapter):
                 status="failed", backend="deterministic",
                 error="commit requires a non-empty message parameter",
             )
-        # Protected branch check
         branch_result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             cwd=str(worktree), capture_output=True, text=True, timeout=5,
@@ -355,7 +419,6 @@ class DeterministicExecutor(ExecutionAdapter):
 
         subprocess.run(["git", "add", "-A"], cwd=str(worktree), capture_output=True)
 
-        # Duplicate commit guard: reject if identical tree already exists
         from execution.commit_guard import check_duplicate_tree
         is_dup, dup_detail = check_duplicate_tree(worktree)
         if is_dup:
@@ -365,7 +428,7 @@ class DeterministicExecutor(ExecutionAdapter):
             )
 
         result = subprocess.run(
-            ["git", "commit", "-m", message],
+            ["git", "commit", "-m", str(message)],
             cwd=str(worktree), capture_output=True, text=True, timeout=30,
         )
         if result.returncode == 0:
