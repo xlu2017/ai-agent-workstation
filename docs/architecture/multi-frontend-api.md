@@ -1,4 +1,4 @@
-# Multi Frontend API Scaffold
+# Multi Frontend API
 
 ## Files
 
@@ -6,13 +6,14 @@
 control-plane/api/models/multi_frontend.py
 control-plane/api/services/multi_frontend_session_controller.py
 control-plane/api/multi_frontend.py
+control-plane/api/server.py
 control-plane/tests/test_multi_frontend_session_controller.py
 control-plane/tests/test_multi_frontend_api_router.py
 ```
 
 ## API endpoints
 
-The router scaffold is `control-plane/api/multi_frontend.py`.
+The router lives in `control-plane/api/multi_frontend.py` and is mounted by `control-plane/api/server.py`.
 
 ```text
 POST /api/multi-frontend/topologies
@@ -24,14 +25,14 @@ POST /api/multi-frontend/traces
 
 ## Mounting
 
-The router is intentionally separate from generic session graph CRUD. To expose it directly over HTTP, mount it in `control-plane/api/server.py`:
+Mounted in `control-plane/api/server.py`:
 
 ```python
 from api.multi_frontend import router as multi_frontend_router
 app.include_router(multi_frontend_router)
 ```
 
-The web panel also has a current-server fallback path using the already-mounted session graph CRUD routes. That fallback creates the same data shape without requiring a full server module edit.
+The web panel keeps a defensive current-server fallback path using session graph CRUD routes, but the mounted `/api/multi-frontend/*` route family is now the intended primary path.
 
 ## Controller responsibilities
 
