@@ -1,16 +1,26 @@
 # Common software development workflow
 
-This platform should represent a normal coding task as session graph topology before action execution.
+This platform should represent a normal coding task as session graph topology before action execution. A user may start a session without selecting a repo. Repo scope becomes mandatory only when the task needs repo-dependent execution.
 
 ## Walkthrough
 
-1. **Repo session** — durable identity for the codebase. Store path, branch hints, known commands, ownership, capabilities, and source metadata in repo facets.
-2. **Goal session** — durable identity for the user request, such as a feature, bug fix, refactor, review, architecture change, or integration.
-3. **Mount and adapter session** — mount the repo under the goal. Create an adapter when repo context needs translation, filtering, or capability mapping before it is projected into the goal.
+1. **Goal or question session** — durable identity for the user request, such as a question, feature, bug fix, refactor, review, architecture change, or integration. This may start unscoped.
+2. **Repo session, when needed** — durable identity for the codebase. Store path, branch hints, known commands, ownership, capabilities, and source metadata in repo facets. Pure question and planning sessions may omit this.
+3. **Mount and adapter session** — mount the repo under the goal before code execution. Create an adapter when repo context needs translation, filtering, or capability mapping before it is projected into the goal.
 4. **Work session** — represent the implementation attempt. Plans, user interjections, tool calls, file changes, and status changes attach to this work session.
 5. **Runtime session** — represent server, browser, terminal, emulator, container, or worktree state only when an action needs it. Runtime is not the task identity.
 6. **Validation session** — represent test, lint, typecheck, smoke, screenshot, and manual review evidence.
 7. **Pull request or artifact session** — represent reviewable output, a patch, deployment, release note, summary, or other handoff artifact.
+
+## Repo requirement rule
+
+```text
+Session start: repo optional
+Question/planning: repo optional
+Implementation/file edit/test/runtime/PR: repo required before execution
+```
+
+Do not block creation of an unscoped goal or question session. Instead, block or redirect the first repo-dependent execution action until the user selects or mounts a repo session.
 
 ## Recommended graph relationships
 
