@@ -1,87 +1,46 @@
-# Workstation Glue Layer
+# Deprecated: Workstation Glue Layer
 
-Source-aware multi-agent session management for the AI coding workstation. Connects browser UI inspection to coding agent sessions via source-file resolution.
+`glue/` is deprecated without migration.
 
-## What It Does
+This folder is retained only as historical reference for the old standalone glue stack. Do not add new product behavior here, do not start services from this folder, and do not create new dependencies on `/opt/workstation/glue`.
 
-1. You inspect a UI element in Chrome (right-click → "Inspect element for agent")
-2. The browser extension resolves the element to its source file/component using [element-source](https://github.com/aidenybai/element-source)
-3. The event is sent to the UI Bridge service
-4. The bridge routes the context to the correct agent session
-5. A markdown context file is written that the agent can read
+## Replacement surface
 
-## Quick Start
+Use the active control-plane modules instead:
 
-```bash
-# Start the bridge service
-cd /opt/workstation/glue/ui-bridge
-uvicorn server:app --host 0.0.0.0 --port 9876
-
-# Create a session
-glue session create my-feature --repo /opt/workstation/repos/my-app
-
-# Load the browser extension
-# Chrome → chrome://extensions → Developer mode → Load unpacked → /opt/workstation/glue/browser-extension
-
-# Open your dev app in Chrome
-# Right-click any element → "Inspect element for agent"
-# Check: /opt/workstation/sessions/my-feature/context/latest-ui-context.md
+```text
+control-plane/api/              FastAPI routes and product contracts
+control-plane/web/              dashboard and session UI
+control-plane/cli/              platformctl command surface
+/api/session-graph              canonical session identity and topology
+control-plane/api/routes/*      UI, visual automation, services, repo, and graph routes
 ```
 
-## Components
+## Why this is deprecated
 
-| Component | Location | Port | Purpose |
-|-----------|----------|------|---------|
-| UI Bridge Service | `ui-bridge/server.py` | 9876 | Event router + context writer |
-| Browser Extension | `browser-extension/` | — | Element capture + source resolution |
-| Session CLI | `bin/glue` | — | Session lifecycle management |
-| Test App | `test-app/` | 5180 | Vite React app for validation |
+The old glue layer predates the session graph architecture. It duplicates session lifecycle and UI-context routing, relies on direct `session.json` objects, and assumes old paths and services such as:
 
-## Dependencies
-
-| Upstream Project | How Used | Install |
-|-----------------|----------|---------|
-| [element-source](https://github.com/aidenybai/element-source) | npm package, bundled in extension | `npm install element-source` |
-| [par](https://github.com/coplane/par) | Session/worktree management | `pipx install par-cli` |
-| FastAPI | Bridge service framework | `pip install fastapi uvicorn` |
-
-## Directory Structure
-
-```
-/opt/workstation/
-├── glue/
-│   ├── ui-bridge/          # Bridge service (FastAPI)
-│   ├── browser-extension/  # Chrome MV3 extension
-│   ├── test-app/           # Vite React test application
-│   ├── bin/glue            # CLI tool
-│   └── docs/               # Documentation
-├── sessions/               # Per-session metadata + context
-│   └── <session-id>/
-│       ├── session.json
-│       └── context/
-│           ├── ui-events.jsonl
-│           └── latest-ui-context.md
-└── upstream/               # Cloned reference projects (read-only)
+```text
+/opt/workstation/glue
+/opt/workstation/sessions/<session-id>/session.json
+/opt/workstation/sessions/<session-id>/context/latest-ui-context.md
 ```
 
-## Session Management
+Those runtime objects are not migrated. New product code must use graph-addressable sessions and control-plane routes.
 
-```bash
-glue session list                    # List all sessions
-glue session create <name>           # Create with worktree + tmux
-glue session destroy <name>          # Clean up everything
-glue session inspect <name>          # Show details + latest context
-glue bridge start                    # Start UI bridge service
-glue bridge status                   # Check bridge health
-```
+## Allowed changes in this folder
 
-## Supported Frameworks
+Allowed:
 
-Source resolution works with (via element-source):
-- React (including Next.js)
-- Preact
-- Vue
-- Svelte
-- Solid
+1. Documentation that explains the deprecation.
+2. Notes that point to a copied or rewritten control-plane replacement.
+3. Removal after callers have been verified absent.
 
-**Requirement:** App must be running in development mode (debug metadata needed).
+Not allowed:
+
+1. New feature work.
+2. New deployment or setup instructions.
+3. New code that writes legacy session metadata.
+4. New browser, editor, or automation integrations.
+
+See `docs/deprecated-top-level-folders.md` and `docs/deprecated-legacy-sessions.md` for the governing policy.
