@@ -19,6 +19,18 @@ type UpdateResponse = {
   error?: { code?: string; message?: string }
 }
 
+type UpdateCheckResponse = {
+  ok?: boolean
+  service?: string
+  status?: string
+  branch?: string
+  local_commit?: string
+  remote_commit?: string
+  update_available?: boolean
+  message?: string
+  error?: { code?: string; message?: string }
+}
+
 const CONTROL_API = window.location.port === '5173'
   ? `${window.location.protocol}//${window.location.hostname}:9877/api`
   : '/api'
@@ -46,6 +58,11 @@ async function readJson<T>(response: Response): Promise<T> {
 function findUpdateButton(target: EventTarget | null): HTMLButtonElement | null {
   if (!(target instanceof Element)) return null
   return target.closest('button.pm-btn-update') as HTMLButtonElement | null
+}
+
+function findCheckButton(target: EventTarget | null): HTMLButtonElement | null {
+  if (!(target instanceof Element)) return null
+  return target.closest('button.pm-btn-check-latest') as HTMLButtonElement | null
 }
 
 function findServiceName(button: HTMLButtonElement): string | null {
@@ -110,6 +127,32 @@ async function pollServiceUpdate(serviceName: string, onProgress: (message: stri
   return null
 }
 
+function checkMessageType(data: UpdateCheckResponse): 'success' | 'error' | 'info' {
+  if (data.status === 'up_to_date') return 'success'
+  if (data.status === 'update_available' || data.status === 'missing_checkout' || data.status === 'update_locked') return 'info'
+  return 'error'
+}
+
+async function checkLatest(serviceName: string, button: HTMLButtonElement): Promise<void> {
+  setBusy(button, true)
+  setMessage(button, 'info', `Checking ${serviceName}…`)
+  try {
+    const response = await fetch(`${CONTROL_API}/v2/services/${encodeURIComponent(serviceName)}/update-check`, {
+      method: 'GET',
+      cache: 'no-store',
+    })
+    const data = await readJson<UpdateCheckResponse>(response)
+    if (!response.ok) {
+      throw new Error(parseErrorPayload(data, `${serviceName} check failed`))
+    }
+    setMessage(button, checkMessageType(data), data.message || `${serviceName} check complete`)
+  } catch (error) {
+    setMessage(button, 'error', error instanceof Error ? error.message : `${serviceName} check failed`)
+  } finally {
+    setBusy(button, false)
+  }
+}
+
 async function updateLatest(serviceName: string, button: HTMLButtonElement): Promise<void> {
   setBusy(button, true)
   setMessage(button, 'info', `Starting ${serviceName} update…`)
@@ -149,7 +192,35 @@ async function updateLatest(serviceName: string, button: HTMLButtonElement): Pro
   }
 }
 
+function ensureCheckButtons(): void {
+  document.querySelectorAll('.pm-item').forEach(item => {
+    if (item.querySelector('.pm-btn-check-latest')) return
+    const updateButton = item.querySelector('button.pm-btn-update') as HTMLButtonElement | null
+    const actions = item.querySelector('.pm-item-actions')
+    if (!updateButton || !actions) return
+
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'pm-btn pm-btn-check-latest'
+    button.title = 'Check latest without updating'
+    button.setAttribute('aria-label', 'Check latest')
+    button.textContent = 'Check'
+    actions.insertBefore(button, updateButton)
+  })
+}
+
 function handleClick(event: MouseEvent): void {
+  const checkButton = findCheckButton(event.target)
+  if (checkButton && !checkButton.disabled) {
+    const serviceName = findServiceName(checkButton)
+    if (!serviceName) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+    void checkLatest(serviceName, checkButton)
+    return
+  }
+
   const button = findUpdateButton(event.target)
   if (!button || button.disabled) return
   const serviceName = findServiceName(button)
@@ -161,3 +232,7 @@ function handleClick(event: MouseEvent): void {
 }
 
 document.addEventListener('click', handleClick, true)
+
+ensureCheckButtons()
+const observer = new MutationObserver(() => ensureCheckButtons())
+observer.observe(document.body, { childList: true, subtree: true })
