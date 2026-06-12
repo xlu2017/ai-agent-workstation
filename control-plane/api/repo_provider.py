@@ -24,6 +24,7 @@ SECRETS_PATH = Path(os.environ.get("REPO_PROVIDER_SECRETS_PATH", "/opt/workstati
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 GITHUB_USER_URL = "https://api.github.com/user"
+GITHUB_REPOS_URL = "https://api.github.com/user/repos"
 
 
 def _now() -> str:
@@ -178,6 +179,67 @@ def get_repo_provider_status() -> dict:
         "effective_token_available": get_repo_provider_token() is not None,
         "github_oauth_configured": github_configured,
         "providers": providers,
+    }
+
+
+def list_accessible_repositories(limit: int = 100) -> dict:
+    """List repositories visible to the selected server-side GitHub credential."""
+    token = get_repo_provider_token()
+    status = get_repo_provider_status()
+    if not token:
+        return {
+            "ok": False,
+            "repositories": [],
+            "active_provider": status["active_provider"],
+            "error": {"code": "NO_GITHUB_TOKEN", "message": "No selected GitHub credential is available."},
+        }
+
+    params = urllib.parse.urlencode({
+        "per_page": min(max(limit, 1), 100),
+        "sort": "updated",
+        "affiliation": "owner,collaborator,organization_member",
+    })
+    request = urllib.request.Request(
+        f"{GITHUB_REPOS_URL}?{params}",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            repos = json.loads(response.read().decode())
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        return {
+            "ok": False,
+            "repositories": [],
+            "active_provider": status["active_provider"],
+            "error": {"code": "GITHUB_REPO_LIST_FAILED", "message": str(exc)[:200]},
+        }
+
+    normalized = []
+    for repo in repos if isinstance(repos, list) else []:
+        if not isinstance(repo, dict):
+            continue
+        normalized.append({
+            "id": repo.get("id"),
+            "name": repo.get("name"),
+            "full_name": repo.get("full_name"),
+            "description": repo.get("description"),
+            "private": repo.get("private"),
+            "default_branch": repo.get("default_branch"),
+            "clone_url": repo.get("clone_url"),
+            "ssh_url": repo.get("ssh_url"),
+            "html_url": repo.get("html_url"),
+            "updated_at": repo.get("updated_at"),
+        })
+
+    return {
+        "ok": True,
+        "repositories": normalized,
+        "active_provider": status["active_provider"],
     }
 
 
