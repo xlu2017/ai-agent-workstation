@@ -54,6 +54,26 @@ function popOutRemoteDesktop(app?: ServerAppEntry): void {
   window.open(url, `remote-desktop-${app?.id || 'desktop'}`, 'noopener,noreferrer,width=1440,height=960')
 }
 
+function appConfidence(app: ServerAppEntry): string {
+  if (app.running) return 'running'
+  if (app.installed) return 'installed'
+  return app.confidence || 'catalog only'
+}
+
+function appCommandSummary(app: ServerAppEntry): string {
+  if (app.launchCommand) return app.launchCommand
+  if (app.matchedCommands?.length) return app.matchedCommands.slice(0, 3).join(' · ')
+  return app.preferredCommands.slice(0, 3).join(' · ') || 'remote desktop'
+}
+
+function appEvidenceSummary(app: ServerAppEntry): string {
+  const parts: string[] = []
+  if (app.matchedDesktopFiles?.length) parts.push(`${app.matchedDesktopFiles.length} desktop file${app.matchedDesktopFiles.length === 1 ? '' : 's'}`)
+  if (app.matchedProcesses?.length) parts.push(`${app.matchedProcesses.length} process${app.matchedProcesses.length === 1 ? '' : 'es'}`)
+  if (app.matchedWindows?.length) parts.push(`${app.matchedWindows.length} window${app.matchedWindows.length === 1 ? '' : 's'}`)
+  return parts.join(' · ')
+}
+
 async function fetchPlatformApps(): Promise<void> {
   try {
     const response = await fetch(endpoint('/session-graph/platform-apps'))
@@ -180,19 +200,23 @@ function renderAppsPanel(): void {
       <div class="as-app-launcher-head">
         <div>
           <strong>Server applications</strong>
-          <p>Search common desktop apps and open them as right-panel remote desktop tabs.</p>
+          <p>Search canonical app intents resolved against this server's distro commands, desktop files, processes, and windows.</p>
         </div>
         <button class="as-action-btn as-app-popout-desktop" type="button">Open desktop window</button>
       </div>
-      <input class="as-app-search" placeholder="Search apps, commands, or categories..." value="${escapeHtml(currentQuery)}" />
+      <input class="as-app-search" placeholder="Search apps, aliases, commands, categories, or running processes..." value="${escapeHtml(currentQuery)}" />
       <div class="as-app-results">
         ${results.map(app => `
-          <div class="as-app-card" data-app-id="${escapeHtml(app.id)}">
+          <div class="as-app-card as-app-confidence-${escapeHtml(appConfidence(app).replace(/\s+/g, '-'))}" data-app-id="${escapeHtml(app.id)}">
             <div class="as-app-card-main">
               <span class="as-app-category">${escapeHtml(app.category)}</span>
               <strong>${escapeHtml(app.name)}</strong>
               <p>${escapeHtml(app.description)}</p>
-              <small>${escapeHtml(app.preferredCommands.slice(0, 3).join(' · ') || 'remote desktop')}</small>
+              <div class="as-app-resolver-row">
+                <span class="as-app-confidence">${escapeHtml(appConfidence(app))}</span>
+                <code>${escapeHtml(appCommandSummary(app))}</code>
+              </div>
+              ${appEvidenceSummary(app) ? `<small>${escapeHtml(appEvidenceSummary(app))}</small>` : ''}
             </div>
             <button class="as-action-btn as-app-launch" type="button" data-app-id="${escapeHtml(app.id)}">Open tab</button>
           </div>
@@ -223,6 +247,10 @@ function renderAppTab(app: ServerAppEntry, status = 'Remote desktop tab ready.')
         <div>
           <strong>${escapeHtml(app.name)}</strong>
           <p>${escapeHtml(status)}</p>
+          <div class="as-app-resolver-row">
+            <span class="as-app-confidence">${escapeHtml(appConfidence(app))}</span>
+            <code>${escapeHtml(appCommandSummary(app))}</code>
+          </div>
         </div>
         <div class="as-app-actions">
           <button class="as-action-btn as-app-relaunch" type="button">Relaunch</button>
@@ -230,7 +258,7 @@ function renderAppTab(app: ServerAppEntry, status = 'Remote desktop tab ready.')
         </div>
       </div>
       <div class="as-app-remote-frame-note">
-        Use the Desktop tab or the popped-out window for the live Guacamole stream. This tab keeps app-specific launch state and actions attached to the session.
+        Use the Desktop tab or the popped-out window for the live Guacamole stream. This tab keeps app-specific launch state, resolver confidence, and actions attached to the session.
       </div>
     </div>
   `
