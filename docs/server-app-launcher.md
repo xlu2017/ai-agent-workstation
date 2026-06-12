@@ -6,10 +6,11 @@ The server app launcher lets the session right panel expose common remote-deskto
 
 1. Open a session page.
 2. The right panel gains an `Apps` tab beside `Worklog`, `Changes`, and `Desktop`.
-3. Search for common apps such as Terminal, Web Browser, File Manager, Code Editor, System Monitor, Screenshot Tool, or Settings.
-4. Selecting an app opens an app-specific right-panel tab.
-5. The app tab submits a normal session chat instruction, such as `Open a terminal on the remote desktop`, so the existing desktop-control routing path can perform the launch.
-6. Any remote desktop or app tab can be opened in a separate browser window using the `Pop out` control.
+3. Search for canonical app intents such as Terminal, Web Browser, File Manager, Code Editor, System Monitor, Screenshot Tool, or Settings.
+4. The app list reports resolver confidence: `running`, `installed`, or `catalog_only`.
+5. Selecting an app opens an app-specific right-panel tab.
+6. The app tab submits a normal session chat instruction, such as `Open a terminal on the remote desktop`, so the existing desktop-control routing path can perform the launch.
+7. Any remote desktop or app tab can be opened in a separate browser window using the `Pop out` control.
 
 ## Frontend files
 
@@ -28,50 +29,66 @@ GET /api/session-graph/platform-apps
 
 If that endpoint is not present, it uses the bundled popular-app catalog and still works through the existing session chat endpoint.
 
-## Backend scaffold
+## Backend resolver
 
 ```text
 control-plane/api/services/platform_apps.py
+control-plane/api/platform_apps_routes.py
 ```
 
 The service provides:
 
 ```python
 discover_popular_applications(query: str = "")
+resolve_popular_applications(query: str = "")
 launch_popular_application(app_id: str)
 ```
 
-Discovery checks allowlisted popular desktop apps against PATH and `.desktop` files under:
+The resolver is canonical-intent based rather than command-name based. For example, the canonical `Terminal` app can resolve to `xfce4-terminal`, `gnome-terminal`, `konsole`, `mate-terminal`, `lxterminal`, `x-terminal-emulator`, `xterm`, or other known distro variants.
+
+Resolution combines these signals:
 
 ```text
-/usr/share/applications
-~/.local/share/applications
+1. PATH lookup via shutil.which
+2. .desktop file parsing
+3. .desktop Name, GenericName, Categories, Keywords, and Exec metadata
+4. distro alternatives/fallbacks such as x-terminal-emulator, x-www-browser, sensible-browser, editor, and xdg-open
+5. process scan via ps -eo pid,comm,args
+6. optional visible-window scan via wmctrl -lx when available
 ```
 
-Launch is allowlist-based. It only attempts commands defined in the catalog and sets the remote desktop environment:
+The response includes explicit evidence:
+
+```json
+{
+  "id": "terminal",
+  "installed": true,
+  "running": false,
+  "confidence": "installed",
+  "launchCommand": "x-terminal-emulator",
+  "matchedCommands": ["x-terminal-emulator", "xterm"],
+  "matchedDesktopFiles": ["/usr/share/applications/org.xfce.Terminal.desktop"],
+  "matchedProcesses": [],
+  "matchedWindows": []
+}
+```
+
+Launch is allowlist-based. It only attempts commands defined by the canonical app resolver and sets the remote desktop environment:
 
 ```text
 DISPLAY=:10
 XAUTHORITY=/home/agent/.Xauthority
 ```
 
-## Intended route wiring
+## Route wiring
 
-The route can be wired into the existing session graph router without changing the frontend contract:
+`control-plane/api/platform_apps_routes.py` exposes the discovery route with the same frontend contract:
 
 ```python
-from api.services.platform_apps import discover_popular_applications, launch_popular_application
-
-@router.get("/platform-apps")
-def list_platform_apps(q: str = ""):
-    return {"applications": discover_popular_applications(q)}
-
-@router.post("/platform-apps/{app_id}/launch")
-def launch_platform_app(app_id: str):
-    return launch_popular_application(app_id)
+GET /api/session-graph/platform-apps?q=terminal
 ```
 
-The frontend already calls `GET /api/session-graph/platform-apps` opportunistically and falls back when it is unavailable.
+The current right-panel frontend calls this route opportunistically and falls back to its bundled catalog if the router is not included by the running FastAPI entrypoint.
 
 ## Tests
 
@@ -80,4 +97,4 @@ control-plane/tests/test_server_apps_panel.py
 control-plane/tests/test_platform_apps_service.py
 ```
 
-These tests verify frontend wiring and catalog discovery behavior.
+These tests verify frontend wiring, canonical search behavior, `.desktop` alias matching, process detection, and resolver evidence fields.
