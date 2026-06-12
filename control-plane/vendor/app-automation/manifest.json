@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "intent": "Vendored app-automation stack for action-to-app execution. Source code is intended to live under each target_dir so future platform revisions can patch vendored implementations directly.",
+  "selected_tools": [
+    {
+      "id": "activepieces",
+      "name": "Activepieces",
+      "repo_url": "https://github.com/activepieces/activepieces.git",
+      "target_dir": "control-plane/vendor/app-automation/activepieces/source",
+      "license": "MIT for Community Edition; commercial license for enterprise features",
+      "role": "workflow_engine_and_mcp_piece_catalog",
+      "priority": 1,
+      "execution_kinds": ["workflow", "mcp"],
+      "coverage": ["slack", "gmail", "google_sheets", "discord", "rss", "openai", "http", "forms", "approvals"],
+      "notes": "Primary connector/workflow base. Pieces can become MCP tools; keep custom pieces patchable in-tree."
+    },
+    {
+      "id": "composio",
+      "name": "Composio",
+      "repo_url": "https://github.com/ComposioHQ/composio.git",
+      "target_dir": "control-plane/vendor/app-automation/composio/source",
+      "license": "MIT",
+      "role": "api_toolkit_and_auth_bridge",
+      "priority": 2,
+      "execution_kinds": ["api", "mcp"],
+      "coverage": ["github", "gmail", "slack", "linear", "notion", "jira", "google_calendar", "hubspot"],
+      "notes": "Broad app API toolkit/auth bridge. Use when API-backed app execution is more reliable than browser automation."
+    },
+    {
+      "id": "mcp_servers",
+      "name": "Model Context Protocol reference servers",
+      "repo_url": "https://github.com/modelcontextprotocol/servers.git",
+      "target_dir": "control-plane/vendor/app-automation/mcp_servers/source",
+      "license": "Apache-2.0 for new contributions; existing code under MIT per upstream repository",
+      "role": "mcp_reference_server_catalog",
+      "priority": 3,
+      "execution_kinds": ["mcp"],
+      "coverage": ["filesystem", "git", "github", "postgres", "slack", "google_drive", "stripe", "puppeteer"],
+      "notes": "Reference implementations and MCP contract examples. Treat as examples first, production only after hardening."
+    },
+    {
+      "id": "n8n",
+      "name": "n8n",
+      "repo_url": "https://github.com/n8n-io/n8n.git",
+      "target_dir": "control-plane/vendor/app-automation/n8n/source",
+      "license": "Sustainable Use License / n8n Enterprise License",
+      "role": "deterministic_workflow_engine",
+      "priority": 4,
+      "execution_kinds": ["workflow"],
+      "coverage": ["400_plus_integrations", "visual_workflows", "webhooks", "templates", "custom_code"],
+      "notes": "Powerful workflow engine. License must be reviewed before redistributing modified vendored source."
+    },
+    {
+      "id": "stagehand",
+      "name": "Stagehand",
+      "repo_url": "https://github.com/browserbase/stagehand.git",
+      "target_dir": "control-plane/vendor/app-automation/stagehand/source",
+      "license": "MIT",
+      "role": "browser_agent_sdk",
+      "priority": 5,
+      "execution_kinds": ["browser"],
+      "coverage": ["web_navigation", "form_fill", "web_app_workflows", "playwright_bridge"],
+      "notes": "TypeScript browser-agent layer. Use for web apps when API/MCP coverage is absent or insufficient."
+    },
+    {
+      "id": "browser_use",
+      "name": "Browser Use",
+      "repo_url": "https://github.com/browser-use/browser-use.git",
+      "target_dir": "control-plane/vendor/app-automation/browser_use/source",
+      "license": "MIT",
+      "role": "general_browser_agent_runtime",
+      "priority": 6,
+      "execution_kinds": ["browser"],
+      "coverage": ["web_task_automation", "playwright", "browser_sessions", "agent_browser_control"],
+      "notes": "Python browser-agent runtime. Useful fallback for natural-language browser tasks."
+    },
+    {
+      "id": "skyvern",
+      "name": "Skyvern",
+      "repo_url": "https://github.com/Skyvern-AI/skyvern.git",
+      "target_dir": "control-plane/vendor/app-automation/skyvern/source",
+      "license": "AGPL-3.0 core; upstream managed-cloud exceptions noted by project",
+      "role": "vision_browser_workflow_runtime",
+      "priority": 7,
+      "execution_kinds": ["browser", "visual_browser"],
+      "coverage": ["vision_llm", "playwright", "no_code_workflows", "unstable_dom_sites"],
+      "notes": "Use for brittle websites and visual interaction. AGPL obligations require explicit review before redistribution."
+    }
+  ],
+  "default_execution_ladder": [
+    "api",
+    "mcp",
+    "workflow",
+    "browser",
+    "visual_browser",
+    "desktop"
+  ],
+  "seed_apps": [
+    "github",
+    "slack",
+    "gmail",
+    "google_calendar",
+    "google_sheets",
+    "notion",
+    "linear",
+    "jira",
+    "discord",
+    "hubspot"
+  ]
+}
