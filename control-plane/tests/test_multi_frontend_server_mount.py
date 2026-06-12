@@ -11,7 +11,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def test_server_mounts_multi_frontend_router(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("SESSION_GRAPH_PATH", str(tmp_path / "session-graph.json"))
-    server = importlib.import_module("api.server")
+    if "api.server" in sys.modules:
+        server = importlib.reload(sys.modules["api.server"])
+    else:
+        server = importlib.import_module("api.server")
     client = TestClient(server.app)
 
     response = client.post("/api/multi-frontend/topologies", json={
