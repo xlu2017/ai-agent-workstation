@@ -28,6 +28,49 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _install_session_architecture_router_bootstrap() -> None:
+    """Mount the session architecture router from the existing server import path.
+
+    The current control-plane server imports this module before creating and
+    configuring the FastAPI app. That gives us a safe compatibility point for
+    mounting the newly implemented session architecture API without rewriting the
+    large server module through the GitHub contents API.
+    """
+
+    try:
+        from fastapi import FastAPI
+    except Exception as exc:  # pragma: no cover - defensive import guard
+        logger.warning("Unable to import FastAPI for session architecture router bootstrap: %s", exc)
+        return
+
+    original_include_router = getattr(FastAPI, "include_router", None)
+    if original_include_router is None:
+        return
+    if getattr(original_include_router, "_session_architecture_bootstrap", False):
+        return
+
+    def include_router_with_session_architecture(self, router, *args, **kwargs):
+        result = original_include_router(self, router, *args, **kwargs)
+        if getattr(self, "_session_architecture_router_mounted", False):
+            return result
+        if getattr(router, "prefix", "") != "/api/session-graph":
+            return result
+        try:
+            from api.session_architecture import router as session_architecture_router
+
+            original_include_router(self, session_architecture_router)
+            setattr(self, "_session_architecture_router_mounted", True)
+        except Exception as exc:  # pragma: no cover - defensive import guard
+            logger.warning("Unable to mount session architecture router: %s", exc)
+        return result
+
+    setattr(include_router_with_session_architecture, "_session_architecture_bootstrap", True)
+    FastAPI.include_router = include_router_with_session_architecture
+
+
+_install_session_architecture_router_bootstrap()
+
 # Path of the running control-plane process (used to detect self-updates)
 _CONTROL_PLANE_REPO_PATH = str(Path(__file__).resolve().parent.parent.parent)
 
