@@ -1,13 +1,45 @@
 from __future__ import annotations
 
 import time
+from contextlib import contextmanager
 from typing import Any
 
 from ambient.types import AmbientEvent, AmbientEventType, AmbientSource
+from ambient.vendor_registry import ensure_vendor_python_path, provider_available
 
 SESSION_HEADER = "x-agent-session-id"
 WORKTREE_HEADER = "x-agent-worktree-id"
 TRACE_HEADER = "x-agent-trace-id"
+
+
+def opentelemetry_available() -> bool:
+    ensure_vendor_python_path("opentelemetry_python")
+    return provider_available("opentelemetry_python", "opentelemetry")
+
+
+@contextmanager
+def ambient_trace_span(name: str, attributes: dict[str, Any] | None = None):
+    """Create an OpenTelemetry span when vendored/installed OTel is available.
+
+    This is deliberately a no-op fallback so request observation remains working
+    without optional tracing dependencies.
+    """
+
+    if not opentelemetry_available():
+        yield None
+        return
+    try:
+        from opentelemetry import trace
+        tracer = trace.get_tracer("jubilant_goggles.ambient")
+        with tracer.start_as_current_span(name) as span:
+            for key, value in (attributes or {}).items():
+                try:
+                    span.set_attribute(key, value)
+                except Exception:
+                    pass
+            yield span
+    except Exception:
+        yield None
 
 
 def build_runtime_request_event(
@@ -33,6 +65,7 @@ def build_runtime_request_event(
         "status_code": status_code,
         "duration_ms": duration_ms,
         "trace_id": trace_id,
+        "provider": "opentelemetry" if opentelemetry_available() else "ambient_runtime_timer",
     }
     if extra:
         payload.update(extra)
@@ -51,20 +84,14 @@ def build_runtime_request_event(
 async def ambient_fastapi_middleware(request, call_next, emit_event):
     """FastAPI middleware helper for runtime request observation.
 
-    Usage in an app that wants to emit ambient events:
-
-    ```python
-    @app.middleware("http")
-    async def ambient_runtime(request, call_next):
-        return await ambient_fastapi_middleware(request, call_next, emit_event)
-    ```
-
-    `emit_event` must accept an AmbientEvent. This helper intentionally does not
-    import FastAPI or OpenTelemetry so it remains testable without optional deps.
+    `emit_event` must accept an AmbientEvent. The helper uses vendored/installed
+    OpenTelemetry as an implementation detail when available and otherwise emits
+    the same ambient event using wall-clock timing.
     """
 
     started = time.perf_counter()
-    response = await call_next(request)
+    with ambient_trace_span("ambient.http_request", {"http.method": request.method, "http.path": str(request.url.path)}):
+        response = await call_next(request)
     duration_ms = int((time.perf_counter() - started) * 1000)
 
     session_id = request.headers.get(SESSION_HEADER)

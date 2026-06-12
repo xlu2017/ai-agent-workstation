@@ -8,6 +8,7 @@ from typing import Any
 from ambient.config import AmbientCollectorConfig, get_ambient_config
 from ambient.context_packet import build_context_packet
 from ambient.collectors.browser_cdp import BrowserCdpCollector
+from ambient.collectors.code_structure import CodeStructureCollector
 from ambient.collectors.desktop_window import DesktopWindowCollector
 from ambient.collectors.repo_watcher import RepoSnapshotCollector
 from ambient.event_log import load_ambient_events, persist_many
@@ -15,6 +16,7 @@ from ambient.evidence_graph import write_evidence_graph
 from ambient.legacy_context import collect_legacy_context_events
 from ambient.reducers import reduce_ambient_events
 from ambient.types import AmbientEvent, ContextPacket
+from ambient.vendor_registry import ambient_vendor_status
 
 
 @dataclass
@@ -51,10 +53,10 @@ class CollectionResult:
 class AmbientObservationService:
     """Session-scoped ambient observation orchestrator.
 
-    This service is deliberately tolerant of server changes: each collector is
-    optional, config is environment-backed, session metadata is read with
-    fallbacks, and unavailable subsystems produce low-confidence status events
-    instead of failing the entire collection pass.
+    Vendored provider source is treated as repository-owned implementation detail
+    behind first-party collector contracts. Each provider remains optional at
+    runtime so the collection pass degrades instead of failing when a vendor is
+    not installed or not importable.
     """
 
     def __init__(self, config: AmbientCollectorConfig | None = None):
@@ -96,13 +98,27 @@ class AmbientObservationService:
                     worktree_id=str(worktree_path),
                 )
                 events.append(repo_event)
-                statuses.append(CollectorStatus("repo", True, "ok" if repo_event.payload.get("available") else "degraded", details={"path": str(worktree_path)}))
+                statuses.append(CollectorStatus("repo", True, "ok" if repo_event.payload.get("available") else "degraded", details={"path": str(worktree_path), "provider": repo_event.payload.get("provider")}))
             except Exception as exc:
                 statuses.append(CollectorStatus("repo", True, "error", str(exc)[:240], {"path": str(worktree_path)}))
+
+            try:
+                code_event = CodeStructureCollector(worktree_path).build_event(
+                    session_id,
+                    repo_id=repo_id,
+                    worktree_id=str(worktree_path),
+                    branch=branch,
+                )
+                events.append(code_event)
+                statuses.append(CollectorStatus("code_structure", True, "ok" if code_event.payload.get("available") else "degraded", details={"path": str(worktree_path), "symbols": len(code_event.payload.get("symbols", [])), "parser_provider": code_event.payload.get("parser_provider")}))
+            except Exception as exc:
+                statuses.append(CollectorStatus("code_structure", True, "error", str(exc)[:240], {"path": str(worktree_path)}))
         elif self.config.repo_enabled:
             statuses.append(CollectorStatus("repo", True, "degraded", "No repo/worktree path could be resolved."))
+            statuses.append(CollectorStatus("code_structure", True, "degraded", "No repo/worktree path could be resolved."))
         else:
             statuses.append(CollectorStatus("repo", False, "disabled"))
+            statuses.append(CollectorStatus("code_structure", False, "disabled"))
 
         if self.config.desktop_enabled:
             try:
@@ -166,6 +182,7 @@ class AmbientObservationService:
                 "max_events_per_collect": self.config.max_events_per_collect,
             },
             "browser": browser_health,
+            "ambient_vendors": ambient_vendor_status(),
             "sessions": session_ids,
         }
 
