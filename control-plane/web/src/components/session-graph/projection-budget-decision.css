@@ -1,0 +1,41 @@
+.sg-budget-decision {
+  margin-top: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #f8fbff;
+  padding: 12px;
+}
+
+.sg-budget-decision-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.sg-budget-decision-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sg-budget-decision-title strong {
+  font-size: 13px;
+}
+
+.sg-budget-decision-title small,
+.sg-budget-decision p,
+.sg-budget-edit-hint {
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.sg-budget-decision p {
+  margin: 10px 0 0;
+}
+
+.sg-budget-edit-hint {
+  margin-top: 10px;
+  border-top: 1px solid #dbeafe;
+  padding-top: 8px;
+}
