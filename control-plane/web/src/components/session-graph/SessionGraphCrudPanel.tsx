@@ -45,6 +45,8 @@ export default function SessionGraphCrudPanel({
   const [deleteCascade, setDeleteCascade] = useState(false)
   const [childKind, setChildKind] = useState('work')
   const [childTitle, setChildTitle] = useState('')
+  const [siblingKind, setSiblingKind] = useState('work')
+  const [siblingTitle, setSiblingTitle] = useState('')
 
   const [edgeType, setEdgeType] = useState('references')
   const [edgeSourceId, setEdgeSourceId] = useState('')
@@ -56,6 +58,7 @@ export default function SessionGraphCrudPanel({
     setEditSummary(selectedSession?.summary || '')
     setEditStatus(selectedSession?.status || 'proposed')
     setChildTitle(selectedSession ? `Child of ${selectedSession.title}` : '')
+    setSiblingTitle(selectedSession ? `Sibling of ${selectedSession.title}` : '')
   }, [selectedSession?.id, selectedSession?.title, selectedSession?.summary, selectedSession?.status])
 
   useEffect(() => {
@@ -141,6 +144,28 @@ export default function SessionGraphCrudPanel({
     }, 'Child session created.')
   }
 
+  function createSiblingSession() {
+    if (!selectedSession) return
+    return run(async () => {
+      const response = await apiFetch<{ session: SessionView }>('/api/session-graph/sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: siblingKind,
+          title: siblingTitle.trim() || `Sibling of ${selectedSession.title}`,
+          summary: `Sibling session of ${selectedSession.title}.`,
+          parent_id: selectedSession.parent_id || null,
+          root_id: selectedSession.root_id || selectedSession.id,
+          metadata: {
+            source: 'session-graph-create-sibling-action',
+            sibling_of_session_id: selectedSession.id,
+            sibling_of_session_title: selectedSession.title,
+          },
+        }),
+      })
+      onSelectSession(response.session.id)
+    }, 'Sibling session created.')
+  }
+
   function updateSession() {
     if (!selectedSession) return
     return run(async () => {
@@ -218,6 +243,11 @@ export default function SessionGraphCrudPanel({
               <label><span>Child kind</span><select value={childKind} onChange={event => setChildKind(event.target.value)}>{sessionKinds.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select></label>
               <label><span>Child title</span><input value={childTitle} onChange={event => setChildTitle(event.target.value)} placeholder="Child session title" /></label>
               <button className="sg-button" type="button" disabled={busy || !childTitle.trim()} onClick={createChildSession}><Plus size={14} /> Create child</button>
+            </div>
+            <div className="sg-child-action">
+              <label><span>Sibling kind</span><select value={siblingKind} onChange={event => setSiblingKind(event.target.value)}>{sessionKinds.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select></label>
+              <label><span>Sibling title</span><input value={siblingTitle} onChange={event => setSiblingTitle(event.target.value)} placeholder="Sibling session title" /></label>
+              <button className="sg-button" type="button" disabled={busy || !siblingTitle.trim()} onClick={createSiblingSession}><Plus size={14} /> Create sibling</button>
             </div>
             <label className="sg-crud-check"><input type="checkbox" checked={deleteCascade} onChange={event => setDeleteCascade(event.target.checked)} /> Cascade related edges/projections</label>
             <button className="sg-button sg-button-danger" type="button" disabled={busy} onClick={deleteSession}><Trash2 size={14} /> Delete session</button>
