@@ -110,6 +110,10 @@ function toMap(capabilities: UiCapability[]): Record<string, UiCapability> {
   }, {})
 }
 
+function fallbackMap(): Record<string, UiCapability> {
+  return toMap(RULES.map(rule => rule.fallback))
+}
+
 function shouldRender(capability: UiCapability): boolean {
   return capability.enabled && capability.visibility === 'render'
 }
@@ -175,22 +179,24 @@ async function loadCapabilities(): Promise<Record<string, UiCapability>> {
     const data = await response.json() as UiCapabilitiesResponse
     return toMap(data.capabilities || [])
   } catch {
-    return toMap(RULES.map(rule => rule.fallback))
+    return fallbackMap()
   }
 }
 
 export function installCapabilityDomGuard() {
-  let latest: Record<string, UiCapability> | null = null
+  let latest: Record<string, UiCapability> = fallbackMap()
   let scheduled = false
 
   function scheduleApply() {
-    if (!latest || scheduled) return
+    if (scheduled) return
     scheduled = true
     requestAnimationFrame(() => {
       scheduled = false
-      if (latest) applyCapabilities(latest)
+      applyCapabilities(latest)
     })
   }
+
+  applyCapabilities(latest)
 
   loadCapabilities().then(capabilities => {
     latest = capabilities
