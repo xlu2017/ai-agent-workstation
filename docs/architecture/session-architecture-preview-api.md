@@ -1,18 +1,19 @@
-# Session Architecture Preview API
+# Session Architecture Preview and Apply API
 
 ## Intent
 
-`control-plane/api/session_architecture.py` provides a preview-only router for session architecture changes. It exposes deterministic planning endpoints that return a `SessionArchitecturePlan` without mutating the session graph.
+`control-plane/api/session_architecture.py` provides a router for session architecture changes. It exposes deterministic planning endpoints that return a `SessionArchitecturePlan` and matching apply endpoints that persist the proposal through the existing session graph store.
 
-The router is intentionally separate from the existing `/api/session-graph` execution routes. Preview and apply remain two steps:
+The API keeps preview and apply separate:
 
 ```text
 preview session architecture proposal
 → inspect returned SessionUpdateProposal or MountSessionRequest
-→ call /api/session-graph/session-update/apply to persist
+→ apply the same operation through /api/session-architecture/apply/*
+→ SessionGraphStore.apply_update_proposal persists the graph change
 ```
 
-This keeps the planner from becoming an execution or authorization layer.
+This keeps the planner from becoming an execution or authorization layer. The planner still proposes. The graph store and adapter engine still persist and enforce structural constraints.
 
 ## Router
 
@@ -21,9 +22,7 @@ prefix: /api/session-architecture
 tag: session-architecture
 ```
 
-The router is scaffolded but should be explicitly mounted in `control-plane/api/server.py` before it is available from the running FastAPI app.
-
-Expected server wiring:
+The router is implemented in `control-plane/api/session_architecture.py`. It should be mounted in `control-plane/api/server.py` before it is available from the running FastAPI app:
 
 ```python
 from api.session_architecture import router as session_architecture_router
@@ -31,7 +30,18 @@ from api.session_architecture import router as session_architecture_router
 app.include_router(session_architecture_router)
 ```
 
-## Endpoints
+## Scope headers
+
+The router accepts the same lightweight workspace headers used by the session graph API:
+
+```text
+X-Workspace-Id: workspace id, defaults to default
+X-User-Id: optional user id for private session visibility
+```
+
+Created sessions are stamped with `workspace_id` and, when provided, `owner_user_id`. Existing source, target, parent, and active sessions are checked for workspace/private visibility before preview or apply.
+
+## Preview endpoints
 
 ### `POST /api/session-architecture/preview/create-root`
 
@@ -78,9 +88,19 @@ Return deterministic candidate source session IDs for future context projection.
 
 This is placeholder ranking logic. A retrieval-backed context router can replace the scoring later without changing the response contract.
 
-## Contract
+## Apply endpoints
 
-The preview API returns:
+Apply endpoints construct the same proposal as their preview counterpart and then call `SessionGraphStore.apply_update_proposal`.
+
+```text
+POST /api/session-architecture/apply/create-root
+POST /api/session-architecture/apply/create-child
+POST /api/session-architecture/apply/create-sibling
+POST /api/session-architecture/apply/move-under
+POST /api/session-architecture/apply/question-only
+```
+
+Apply responses include both the planner output and the updated graph snapshot:
 
 ```json
 {
@@ -100,24 +120,39 @@ The preview API returns:
     },
     "rationale": "...",
     "warnings": ["..."]
+  },
+  "graph": {
+    "sessions": [],
+    "edges": [],
+    "events": [],
+    "projections": []
   }
 }
 ```
 
 ## Non-goals
 
-The preview API must not:
+The architecture API must not:
 
 ```text
-save the graph
-call mount_session directly
 allocate a worktree
 start a workflow
 call agent-core
 call OpenHands or fallback executor
-bypass session policy
+execute code
+commit, push, deploy, or mutate repo files
+bypass graph validation or session policy
 ```
 
 ## Why this exists
 
-The main session graph and adapter engine already support direct graph mutation and semantic mounts. The preview API gives the prompt router and UI a safe planning surface so users can inspect proposed session topology changes before persistence.
+The main session graph and adapter engine already support graph mutation and semantic mounts. This API gives the prompt router and UI a safe planning surface and a focused persistence surface for topology changes.
+
+The core invariant remains:
+
+```text
+Planner proposes.
+Graph store persists.
+Adapter engine projects.
+Executors do not participate in topology changes.
+```
