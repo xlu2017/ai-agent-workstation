@@ -58,17 +58,20 @@ function JsonPreview({ value }: { value: unknown }) {
 function SessionWorkflowGuide() {
   return (
     <section className="sg-card sg-workflow-card">
-      <div className="sg-card-header sg-card-header-split"><div><CheckCircle size={16} /><h3>Session creation flow</h3></div><span className="sg-count-pill">scope before execution</span></div>
-      <p className="sg-muted">Create the semantic session first, attach durable repo scope when it is relevant, then start a runtime/worktree session only when execution is needed.</p>
+      <div className="sg-card-header sg-card-header-split"><div><CheckCircle size={16} /><h3>Common software development workflow</h3></div><span className="sg-count-pill">graph before execution</span></div>
+      <p className="sg-muted">A normal coding task is modeled as durable graph topology first. File edits, commands, screenshots, test runs, and agent actions attach later as events, facets, projections, or artifacts.</p>
       <div className="sg-workflow-steps">
-        <div><strong>1</strong><span>Intent session</span><small>Ask, plan, implement, fix, review, or integrate. Planning/question sessions may be unscoped.</small></div>
-        <div><strong>2</strong><span>Repo scope</span><small>Repo is durable identity and should be represented as a repo session.</small></div>
-        <div><strong>3</strong><span>Folder or file focus</span><small>Folder and file selections narrow context; they should not become the root session identity.</small></div>
-        <div><strong>4</strong><span>Runtime later</span><small>Worktree/runtime creation is separate from graph topology and should happen after scope is clear.</small></div>
+        <div><strong>1</strong><span>Repo session</span><small>Create or select the repo session that owns codebase identity, path, commands, ownership, and capability metadata.</small></div>
+        <div><strong>2</strong><span>Goal session</span><small>Create the requested feature, bug fix, refactor, review, or integration as a goal session.</small></div>
+        <div><strong>3</strong><span>Mount + adapter</span><small>Mount the repo under the goal and create an adapter/projection when context needs translation or filtering.</small></div>
+        <div><strong>4</strong><span>Work session</span><small>Create a work session for the implementation attempt. Plans and user interjections belong here.</small></div>
+        <div><strong>5</strong><span>Runtime session</span><small>Create runtime only when actions need a server, terminal, browser, emulator, container, or worktree.</small></div>
+        <div><strong>6</strong><span>Validation session</span><small>Represent tests, lint, typecheck, screenshot checks, manual review, and acceptance evidence.</small></div>
+        <div><strong>7</strong><span>PR or artifact</span><small>Create a pull_request, deployment, or artifact session for reviewable output and handoff.</small></div>
       </div>
       <div className="sg-workflow-policy">
-        <div className="is-ok">No repo required for question or architecture planning sessions.</div>
-        <div className="is-warning">Repo scope should be selected before implementation, bug fix, code review, or integration execution.</div>
+        <div className="is-ok">Everything durable and user-visible is a graph session.</div>
+        <div className="is-warning">Single commands, log lines, file edits, and temporary UI state are not sessions; attach them to the nearest durable session.</div>
       </div>
     </section>
   )
@@ -261,7 +264,7 @@ export default function SessionGraphExplorer() {
 
   return (
     <div className="sg-page">
-      <header className="sg-header"><div><div className="sg-eyebrow"><Layers size={14} /> Session graph</div><h2>Everything is a session</h2><p>Inspect sessions, mount sources, preview adapters, enforce policy, and see projected context before execution.</p></div><button className="sg-button" onClick={refresh} disabled={loading || busy}><RefreshCw size={14} /> Refresh</button></header>
+      <header className="sg-header"><div><div className="sg-eyebrow"><Layers size={14} /> Session graph</div><h2>Everything durable is a session</h2><p>Model the development workflow as graph sessions first, then attach actions, events, and projected context before execution.</p></div><button className="sg-button" onClick={refresh} disabled={loading || busy}><RefreshCw size={14} /> Refresh</button></header>
       {error && <div className="sg-error"><AlertTriangle size={15} /> {error}</div>}
       <div className="sg-summary"><div><strong>{graph.sessions.length}</strong><span>sessions</span></div><div><strong>{graph.edges.length}</strong><span>edges</span></div><div><strong>{graph.projections.length}</strong><span>projections</span></div><div><strong>{adapterCount}</strong><span>adapters</span></div><div><strong>{mountedCount}</strong><span>mounts</span></div><div><strong>{graph.events.length}</strong><span>events</span></div></div>
       <div className="sg-toolbar sg-card"><label className="sg-search"><Search size={15} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions by title, summary, or id" /></label><label><span>Kind</span><select value={kindFilter} onChange={event => setKindFilter(event.target.value)}><option value="all">All kinds</option>{kinds.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select></label></div>
@@ -269,7 +272,7 @@ export default function SessionGraphExplorer() {
         <main className="sg-main-stack">
           <SessionWorkflowGuide />
           <SessionGraphCrudPanel sessions={graph.sessions} edges={graph.edges} selectedSession={selectedSession} selectedEdgeId={selectedEdgeId} onRefresh={refresh} onSelectSession={setSelectedSessionId} />
-          <section className="sg-card sg-main-card"><div className="sg-card-header sg-card-header-split"><div><Network size={16} /><h3>Graph canvas</h3></div><span className="sg-count-pill">{filteredSessions.length} visible</span></div>{loading ? <p className="sg-muted">Loading session graph...</p> : graph.sessions.length === 0 ? <p className="sg-muted">No graph sessions have been persisted yet. Use the creation flow above and then mount repos under semantic sessions.</p> : <GraphCanvas sessions={filteredSessions} edges={visibleEdges} selectedSessionId={selectedSessionId} selectedEdgeId={selectedEdgeId} onSelectSession={setSelectedSessionId} onSelectEdge={setSelectedEdgeId} />}</section>
+          <section className="sg-card sg-main-card"><div className="sg-card-header sg-card-header-split"><div><Network size={16} /><h3>Graph canvas</h3></div><span className="sg-count-pill">{filteredSessions.length} visible</span></div>{loading ? <p className="sg-muted">Loading session graph...</p> : graph.sessions.length === 0 ? <p className="sg-muted">No graph sessions have been persisted yet. Create repo and goal sessions, mount the repo under the goal, then add work, runtime, validation, and PR sessions as the task progresses.</p> : <GraphCanvas sessions={filteredSessions} edges={visibleEdges} selectedSessionId={selectedSessionId} selectedEdgeId={selectedEdgeId} onSelectSession={setSelectedSessionId} onSelectEdge={setSelectedEdgeId} />}</section>
           <MountForm sessions={graph.sessions} draft={mountDraft} setDraft={setMountDraft} onPreview={previewMount} onClear={() => { setMountDraft(defaultMountDraft); setPreviewResult(null) }} busy={busy} />
           <MountPreviewPanel result={previewResult} onApply={applyMount} applying={busy} />
         </main>
