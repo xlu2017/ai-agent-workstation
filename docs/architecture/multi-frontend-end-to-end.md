@@ -2,17 +2,19 @@
 
 ## What is now end-to-end
 
-The implementation has two working paths:
+The dedicated multi-frontend API is mounted in `control-plane/api/server.py` and is the primary runtime path:
 
 ```text
-Preferred API path
-  web panel -> /api/multi-frontend/* -> MultiFrontendSessionController -> session graph
-
-Current-server fallback path
-  web panel -> /api/session-graph/sessions and /api/session-graph/edges -> session graph
+web panel -> /api/multi-frontend/* -> MultiFrontendSessionController -> session graph
 ```
 
-The fallback path exists because the current control-plane server already mounts the session graph router. It lets the UI create and render a topology without waiting for a full edit of the large server module.
+The web panel still keeps a defensive fallback path through the already-mounted session graph CRUD routes:
+
+```text
+web panel -> /api/session-graph/sessions and /api/session-graph/edges -> session graph
+```
+
+The fallback is retained for development environments that have not restarted onto the latest server code, but it is no longer the intended primary path.
 
 ## User workflow
 
@@ -42,31 +44,26 @@ multi_frontend_topology state on the root app session
 ## Files added for the end-to-end path
 
 ```text
+control-plane/api/multi_frontend.py
+control-plane/api/models/multi_frontend.py
+control-plane/api/services/multi_frontend_session_controller.py
 control-plane/web/src/multi-frontend-panel.ts
 control-plane/web/src/multi-frontend-panel.css
 control-plane/tests/test_multi_frontend_api_router.py
 ```
 
-`control-plane/web/src/main.tsx` imports the panel and CSS so the feature appears in the existing app bundle.
+`control-plane/web/src/main.tsx` imports the panel and CSS so the feature appears in the existing app bundle. `control-plane/api/server.py` imports and includes the multi-frontend router so `/api/multi-frontend/*` is live after the server restarts.
 
 ## Dedicated API status
 
-The dedicated API router exists:
-
-```text
-control-plane/api/multi_frontend.py
-```
-
-It should eventually be mounted directly in `control-plane/api/server.py`:
+Mounted in `control-plane/api/server.py`:
 
 ```python
 from api.multi_frontend import router as multi_frontend_router
 app.include_router(multi_frontend_router)
 ```
 
-Until that direct mount is applied, the UI still works by using generic session graph CRUD endpoints.
-
-## Why this fallback is acceptable
+## Why the fallback remains acceptable
 
 The source of truth is the session graph. The fallback writes the same graph shape as the controller:
 
@@ -77,7 +74,7 @@ SessionRecord(kind=runtime, role=frontend_client, parent_id=root_app_session)
 SessionEdge(type=depends_on, frontend -> backend)
 ```
 
-That means a later server mount does not require data migration.
+That means the fallback does not create a divergent schema or require data migration.
 
 ## Verification
 
@@ -88,4 +85,5 @@ npm run build
 cd ..
 pytest tests/test_multi_frontend_session_controller.py -q
 pytest tests/test_multi_frontend_api_router.py -q
+python -m py_compile api/server.py api/multi_frontend.py api/services/multi_frontend_session_controller.py
 ```
