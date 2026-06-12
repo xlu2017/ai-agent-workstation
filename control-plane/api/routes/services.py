@@ -1,12 +1,19 @@
-"""Service management routes (list, start, stop, restart, update)."""
+"""Service management routes (list, start, stop, restart, update, repo sources)."""
 
 import os
 import subprocess as sp
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from api.repo_source_registry import (
+    get_repo_source,
+    list_repo_sources,
+    reset_repo_source,
+    update_repo_source,
+)
 from api.service_updater import (
     SERVICE_CONFIGS,
     get_service_update_metadata,
@@ -25,6 +32,22 @@ router = APIRouter(tags=["services"])
 
 class UpdateLatestBody(BaseModel):
     restart: bool = True
+
+
+class RepoSourcePatch(BaseModel):
+    enabled: bool | None = None
+    repo_provider: str | None = Field(default=None, description="Source host provider such as github.")
+    owner: str | None = None
+    repo: str | None = None
+    repo_url: str | None = None
+    branch: str | None = None
+    path: str | None = None
+    install_commands: list[str] | None = None
+    build_commands: list[str] | None = None
+    restart_command: str | None = None
+
+    def patch(self) -> dict[str, Any]:
+        return {key: value for key, value in self.model_dump().items() if value is not None}
 
 
 @router.get("/api/services")
@@ -72,7 +95,43 @@ def list_services():
         svc["update_supported"] = meta.get("update_supported", False)
         svc["update_in_progress"] = meta.get("update_in_progress", False)
         svc["last_update"] = meta.get("last_update")
+        svc["repo_source"] = {
+            "repo_provider": meta.get("repo_provider"),
+            "owner": meta.get("owner"),
+            "repo": meta.get("repo"),
+            "repo_url": meta.get("repo_url"),
+            "branch": meta.get("branch"),
+            "path": meta.get("path"),
+        } if meta else None
     return {"services": services}
+
+
+@router.get("/api/repo-sources")
+def repo_sources() -> dict[str, object]:
+    return {"services": list_repo_sources()}
+
+
+@router.get("/api/repo-sources/{service_name}")
+def repo_source(service_name: str) -> dict[str, object]:
+    source = get_repo_source(service_name)
+    if source is None:
+        raise HTTPException(404, {"ok": False, "error": {"code": "UNKNOWN_SERVICE", "message": f"No repo source is configured for {service_name}."}})
+    return {"service": source}
+
+
+@router.put("/api/repo-sources/{service_name}")
+def repo_source_update(service_name: str, body: RepoSourcePatch) -> dict[str, object]:
+    source = update_repo_source(service_name, body.patch())
+    return {"ok": True, "service": source}
+
+
+@router.post("/api/repo-sources/{service_name}/reset")
+def repo_source_reset(service_name: str) -> dict[str, object]:
+    try:
+        source = reset_repo_source(service_name)
+    except KeyError:
+        raise HTTPException(404, {"ok": False, "error": {"code": "UNKNOWN_SERVICE", "message": f"No default repo source exists for {service_name}."}})
+    return {"ok": True, "service": source}
 
 
 @router.post("/api/v2/services/{service_name}/update-latest")
