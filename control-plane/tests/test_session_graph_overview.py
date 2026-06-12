@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from api.session_graph import router as session_graph_router  # noqa: E402
+from api.routes.session_graph.router import router as session_graph_router  # noqa: E402
 from api.session_graph_overview import router as overview_router  # noqa: E402
 
 
