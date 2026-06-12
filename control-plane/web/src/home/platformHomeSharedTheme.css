@@ -1,0 +1,54 @@
+:root {
+  --platform-bg: #f8fafc;
+  --platform-surface: #ffffff;
+  --platform-surface-soft: #f1f5f9;
+  --platform-border: #e2e8f0;
+  --platform-border-strong: #cbd5e1;
+  --platform-text: #0f172a;
+  --platform-muted: #64748b;
+  --platform-accent: #4f46e5;
+  --platform-accent-soft: #eef2ff;
+  --platform-accent-border: #c7d2fe;
+  --platform-success: #166534;
+  --platform-success-bg: #f0fdf4;
+  --platform-warning: #92400e;
+  --platform-warning-bg: #fffbeb;
+  --platform-danger: #991b1b;
+  --platform-danger-bg: #fef2f2;
+  --platform-radius-sm: 8px;
+  --platform-radius-md: 12px;
+  --platform-radius-lg: 18px;
+  --platform-radius-xl: 24px;
+  --platform-sidebar-width: 280px;
+  --platform-right-pane-width: 360px;
+  --platform-shadow: 0 18px 50px rgba(15, 23, 42, .08);
+  --platform-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.platform-button-plain {
+  border: 1px solid var(--platform-border);
+  background: var(--platform-surface);
+  color: var(--platform-text);
+  border-radius: var(--platform-radius-md);
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.platform-button-plain:hover {
+  background: var(--platform-surface-soft);
+}
+
+.platform-button-primary {
+  border: 1px solid var(--platform-accent);
+  background: var(--platform-accent);
+  color: white;
+  border-radius: var(--platform-radius-md);
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.platform-muted-text {
+  color: var(--platform-muted);
+}
