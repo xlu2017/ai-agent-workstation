@@ -44,22 +44,24 @@ multi_frontend_topology state on the root app session
 ## Files added for the end-to-end path
 
 ```text
+control-plane/api/routes/multi_frontend.py
 control-plane/api/multi_frontend.py
 control-plane/api/models/multi_frontend.py
 control-plane/api/services/multi_frontend_session_controller.py
 control-plane/web/src/multi-frontend-panel.ts
 control-plane/web/src/multi-frontend-panel.css
 control-plane/tests/test_multi_frontend_api_router.py
+control-plane/tests/test_multi_frontend_server_mount.py
 ```
 
-`control-plane/web/src/main.tsx` imports the panel and CSS so the feature appears in the existing app bundle. `control-plane/api/server.py` imports and includes the multi-frontend router so `/api/multi-frontend/*` is live after the server restarts.
+`control-plane/web/src/main.tsx` imports the panel and CSS so the feature appears in the existing app bundle. `control-plane/api/server.py` imports and includes the multi-frontend router so `/api/multi-frontend/*` is live after the server restarts. `control-plane/api/multi_frontend.py` remains as a compatibility shim that re-exports the router.
 
 ## Dedicated API status
 
 Mounted in `control-plane/api/server.py`:
 
 ```python
-from api.multi_frontend import router as multi_frontend_router
+from api.routes.multi_frontend import router as multi_frontend_router
 app.include_router(multi_frontend_router)
 ```
 
@@ -85,5 +87,6 @@ npm run build
 cd ..
 pytest tests/test_multi_frontend_session_controller.py -q
 pytest tests/test_multi_frontend_api_router.py -q
-python -m py_compile api/server.py api/multi_frontend.py api/services/multi_frontend_session_controller.py
+pytest tests/test_multi_frontend_server_mount.py -q
+python -m py_compile api/server.py api/routes/multi_frontend.py api/multi_frontend.py api/services/multi_frontend_session_controller.py
 ```
