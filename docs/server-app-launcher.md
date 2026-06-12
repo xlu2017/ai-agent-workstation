@@ -33,8 +33,7 @@ If that endpoint is not present, it uses the bundled popular-app catalog and sti
 
 ```text
 control-plane/api/services/platform_apps.py
-control-plane/api/routes/platform_apps.py              (top-level route)
-control-plane/api/routes/session_graph/platform_apps.py (session-graph scoped)
+control-plane/api/routes/session_graph/platform_apps.py
 ```
 
 The service provides:
@@ -83,13 +82,15 @@ XAUTHORITY=/home/agent/.Xauthority
 
 ## Route wiring
 
-The platform apps endpoint is fully wired into the FastAPI app via the decomposed route modules:
+The platform apps endpoint is owned by the decomposed session graph router:
 
 ```python
 GET /api/session-graph/platform-apps?q=terminal
 ```
 
-The route is registered through the session graph composite router in `api/routes/session_graph/router.py`, which includes `api/routes/session_graph/platform_apps.py`. The route delegates to `api/services/platform_apps.py` for resolver logic.
+The route is registered through `api/routes/session_graph/router.py`, which includes `api/routes/session_graph/platform_apps.py`. The route delegates to `api/services/platform_apps.py` for resolver logic.
+
+The old `api.session_graph` import path is now a small compatibility wrapper around `api.routes.session_graph.router`, so legacy tests or imports keep working without preserving the former monolithic route file.
 
 The frontend calls this route and falls back to its bundled catalog only if the backend route returns an error.
 
@@ -108,22 +109,21 @@ api/routes/services.py         — /api/services/* (list, start, stop, restart, 
 api/routes/models.py           — GET /api/models
 api/routes/knowledge.py        — /api/knowledge/*
 api/routes/filesystem.py       — /api/browse, /api/logs, /api/open-file-manager, /api/pick-folder
-api/routes/platform_apps.py    — GET /api/session-graph/platform-apps
 ```
 
 ### Session graph sub-routes (`api/routes/session_graph/`)
 
 ```text
-api/routes/session_graph/router.py       — composite router (includes all sub-routers)
-api/routes/session_graph/helpers.py      — shared helpers, context, visibility checks
-api/routes/session_graph/sessions.py     — session CRUD
-api/routes/session_graph/edges.py        — edge CRUD
-api/routes/session_graph/projections.py  — context projection CRUD
-api/routes/session_graph/adapters.py     — mount, unmount, adapt, adapter mappings
-api/routes/session_graph/events.py       — event listing
-api/routes/session_graph/settings.py     — observability settings
-api/routes/session_graph/platform_apps.py — platform app discovery (scoped under /api/session-graph)
-api/routes/session_graph/snapshot.py     — graph snapshot, session-update apply
+api/routes/session_graph/router.py        — composite router (includes all sub-routers)
+api/routes/session_graph/helpers.py       — shared helpers, context, visibility checks
+api/routes/session_graph/sessions.py      — session CRUD
+api/routes/session_graph/edges.py         — edge CRUD
+api/routes/session_graph/projections.py   — context projection CRUD
+api/routes/session_graph/adapters.py      — mount, unmount, adapt, adapter mappings
+api/routes/session_graph/events.py        — event listing
+api/routes/session_graph/settings.py      — observability settings
+api/routes/session_graph/platform_apps.py — platform app discovery
+api/routes/session_graph/snapshot.py      — graph snapshot, session-update apply
 ```
 
 ### Shared modules
@@ -132,12 +132,13 @@ api/routes/session_graph/snapshot.py     — graph snapshot, session-update appl
 api/config.py                       — shared constants (paths, URLs, env defaults)
 api/services/remote_desktop.py      — Guacamole config, token, health-check helpers
 api/services/process_control.py     — service start/stop/restart, port-check helpers
-api/services/platform_apps.py       — canonical app resolver (unchanged)
+api/services/platform_apps.py       — canonical app resolver
 ```
 
 ## Tests
 
 ```text
+control-plane/tests/test_api_route_composition.py
 control-plane/tests/test_server_apps_panel.py
 control-plane/tests/test_platform_apps_service.py
 control-plane/tests/test_remote_desktop.py
@@ -145,4 +146,4 @@ control-plane/tests/test_session_graph.py
 control-plane/tests/test_session_graph_crud_api.py
 ```
 
-These tests verify frontend wiring, canonical search behavior, `.desktop` alias matching, process detection, resolver evidence fields, remote desktop endpoints, and session graph CRUD operations.
+These tests verify frontend wiring, canonical search behavior, `.desktop` alias matching, process detection, resolver evidence fields, route ownership, remote desktop endpoints, and session graph CRUD operations.
