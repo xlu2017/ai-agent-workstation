@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle, Clock, Database, Eye, Folder, GitBranch, La
 import MountedSourcesPanel from './MountedSourcesPanel'
 import AdapterDetailPanel from './AdapterDetailPanel'
 import ContextProjectionPanel from './ContextProjectionPanel'
+import SessionGraphCrudPanel from './SessionGraphCrudPanel'
 import type { GraphSnapshot, MountResultView, SessionEdgeView, SessionEventView, SessionView } from './sessionGraphTypes'
 import { adapterFacet, formatId, sessionTitle } from './sessionGraphTypes'
 import './session-graph.css'
@@ -267,6 +268,7 @@ export default function SessionGraphExplorer() {
       <div className="sg-layout">
         <main className="sg-main-stack">
           <SessionWorkflowGuide />
+          <SessionGraphCrudPanel sessions={graph.sessions} edges={graph.edges} selectedSession={selectedSession} selectedEdgeId={selectedEdgeId} onRefresh={refresh} onSelectSession={setSelectedSessionId} />
           <section className="sg-card sg-main-card"><div className="sg-card-header sg-card-header-split"><div><Network size={16} /><h3>Graph canvas</h3></div><span className="sg-count-pill">{filteredSessions.length} visible</span></div>{loading ? <p className="sg-muted">Loading session graph...</p> : graph.sessions.length === 0 ? <p className="sg-muted">No graph sessions have been persisted yet. Use the creation flow above and then mount repos under semantic sessions.</p> : <GraphCanvas sessions={filteredSessions} edges={visibleEdges} selectedSessionId={selectedSessionId} selectedEdgeId={selectedEdgeId} onSelectSession={setSelectedSessionId} onSelectEdge={setSelectedEdgeId} />}</section>
           <MountForm sessions={graph.sessions} draft={mountDraft} setDraft={setMountDraft} onPreview={previewMount} onClear={() => { setMountDraft(defaultMountDraft); setPreviewResult(null) }} busy={busy} />
           <MountPreviewPanel result={previewResult} onApply={applyMount} applying={busy} />
