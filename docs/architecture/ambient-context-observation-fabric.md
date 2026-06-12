@@ -2,7 +2,7 @@
 
 ## Intent
 
-The platform should collect ambient context as structured causal evidence, not as periodic screenshots.
+The platform collects ambient context as structured causal evidence, not as periodic screenshots.
 
 Screenshots are allowed only as explicit or low-confidence fallback artifacts. The primary path is:
 
@@ -16,8 +16,6 @@ desktop window metadata
 session event log
 ```
 
-This document defines the collector architecture and the initial library/tool choices for scaffolding.
-
 ## Control-plane boundary
 
 ```text
@@ -30,11 +28,42 @@ agent-core
 
 Ambient context can explain what the session is seeing. It must not authorize filesystem mutation, commits, pushes, deploys, secrets access, or provider actions.
 
+## Implemented runtime flow
+
+```text
+POST /api/sessions/{session_id}/ambient/collect
+  -> AmbientObservationService.collect_once
+  -> browser/repo/desktop/legacy-context collectors
+  -> redaction
+  -> ambient/events.jsonl
+  -> live-feed ambient_context_collected mirror
+  -> ambient/state.json
+  -> ambient/evidence_graph.json
+  -> ambient/context_packet.json
+```
+
+Read endpoints:
+
+```text
+GET /api/sessions/{session_id}/ambient/events
+GET /api/sessions/{session_id}/ambient/state?collect=true
+GET /api/sessions/{session_id}/ambient/context?goal=fix%20this&collect=true
+GET /api/sessions/{session_id}/ambient/health
+```
+
+The same service can also be called internally:
+
+```python
+from ambient.service import AmbientObservationService
+
+result = AmbientObservationService().collect_once("session-id", goal="fix this")
+```
+
 ## Tool and library choices
 
 | Responsibility | Primary tool/library | Why | Fallback |
 |---|---|---|---|
-| Browser state, DOM, console, network | Chrome DevTools Protocol through Playwright CDPSession | CDP is the native structured protocol for Chromium inspection; Playwright gives stable Python control and CDP access | Direct CDP websocket or `/json/list` polling |
+| Browser state, DOM, console, network | Chrome DevTools Protocol through Playwright CDPSession | CDP is the native structured protocol for Chromium inspection; Playwright gives stable Python control and CDP access | Direct CDP `/json/list` polling across configured endpoints |
 | DOM and accessibility context | CDP `DOM`, `DOMSnapshot`, `Accessibility`, `Runtime`, `Network`, `Log`, `Page` domains | Captures semantic page state without pixels | Browser extension content script |
 | DOM-to-source mapping | source maps plus framework dev metadata | Maps generated browser locations back to source files | UI bridge service lookup only |
 | Frontend framework context | Dev-only SDK for React/Vite/Next apps | Captures component stack, route, interaction, and trace id at source | Browser DOM/accessibility only |
@@ -42,23 +71,42 @@ Ambient context can explain what the session is seeing. It must not authorize fi
 | Repo/worktree file changes | `watchfiles` | Fast cross-platform file watching backed by Rust notify | `git status --porcelain` polling |
 | Code structure and symbol graph | Tree-sitter | Incremental multi-language concrete syntax trees | ripgrep/BM25 and LSP references |
 | Editor/LSP context | `pygls`/LSP-compatible bridge | Python implementation for LSP-compatible messages and document sync | editor-specific HTTP bridge |
-| Terminal state | shell integration + PTY event capture, optional `pyte` for terminal screen reconstruction | Command boundaries, cwd, exit code, stack traces, and mentioned files are more useful than terminal screenshots | stdout/stderr chunk capture |
-| Desktop active window | `xdotool`, `wmctrl`, `xprop`, process inspection | Captures active app/window/process without screenshots | remote desktop metadata only |
+| Terminal state | shell integration + PTY event capture, optional `pyte` for terminal screen reconstruction | Command boundaries, cwd, exit code, stack traces, and mentioned files are more useful than terminal screenshots | stdout/stderr chunk capture and legacy latest-terminal-context.md |
+| Desktop active window | `xdotool`, `wmctrl`, `xprop`, process inspection | Captures active app/window/process without screenshots | degraded metadata event when no X11 desktop is available |
 | Event/schema validation | Pydantic models | Matches the existing control-plane stack | JSON schema at API boundary |
 | Redaction | deterministic regex and field-name redaction first | Prevents secret leakage before persistence | optional later secret scanner |
 
-## Event flow
+## Resilience contract
+
+The ambient layer must survive server changes.
+
+Rules:
 
 ```text
-collector
-  -> AmbientEvent
-  -> redaction
-  -> ambient JSONL log
-  -> live-feed mirror event
-  -> reducer
-  -> evidence graph
-  -> context packet
-  -> agent-core context/search/planning
+No single browser port is authoritative.
+No desktop command is required for collection to succeed.
+No worktree path is assumed without session metadata fallback.
+No external service failure should fail the entire collection pass.
+Every collector returns either evidence or a degraded status.
+Reduced outputs are written atomically.
+Raw ambient events are redacted before persistence.
+Legacy latest-*-context.md files remain valid input.
+```
+
+Configuration is environment-backed:
+
+```text
+SESSIONS_DIR=/opt/workstation/sessions
+REPOS_DIR=/opt/workstation/repos
+BRIDGE_URL=http://127.0.0.1:9876
+AMBIENT_BROWSER_DEBUG_URLS=http://127.0.0.1:9222,http://127.0.0.1:9223
+AMBIENT_BROWSER_TIMEOUT_SECONDS=1.5
+AMBIENT_BROWSER_ENABLED=true
+AMBIENT_DESKTOP_ENABLED=true
+AMBIENT_REPO_ENABLED=true
+AMBIENT_LEGACY_CONTEXT_ENABLED=true
+AMBIENT_RUNTIME_ENABLED=true
+AMBIENT_MAX_EVENTS_PER_COLLECT=100
 ```
 
 ## Storage model
@@ -73,11 +121,14 @@ collector
 <sessions_dir>/<session_id>/ambient/evidence_graph.json
   causal graph nodes and edges
 
+<sessions_dir>/<session_id>/ambient/context_packet.json
+  bounded model/planner context packet
+
 <sessions_dir>/<session_id>/events/events.jsonl
   canonical user-visible execution/live-feed event stream
 ```
 
-The ambient log is richer than the transcript. The live-feed mirror should contain only user-safe summaries and references.
+The ambient log is richer than the transcript. The live-feed mirror contains only user-safe summaries and references.
 
 ## Event classes
 
@@ -101,7 +152,7 @@ screenshot.fallback_captured
 
 ## Context packet contract
 
-A context packet is the bounded object sent into planning and routing. It should include:
+A context packet is the bounded object sent into planning and routing. It includes:
 
 ```text
 goal
@@ -137,50 +188,11 @@ before/after visual UI proof is needed
 
 All screenshots must be session-scoped, short-retention, and redacted where possible. Screenshots are evidence, not primary context.
 
-## Phased implementation
-
-### Phase 1: event substrate
-
-- Add ambient event schemas.
-- Add redaction.
-- Add ambient event persistence.
-- Add state reducer.
-- Add context packet builder.
-- Mirror safe summaries into the live-feed event log.
-
-### Phase 2: low-risk collectors
-
-- Terminal command events.
-- Git/worktree state snapshots.
-- Desktop active window metadata.
-- Browser `/json/list` target polling.
-- Editor selection bridge event builder.
-
-### Phase 3: browser and source mapping
-
-- Playwright CDPSession collector.
-- DOM/accessibility snapshot events.
-- Console and network events.
-- Source map lookup through UI bridge.
-- Framework SDK events.
-
-### Phase 4: runtime correlation
-
-- Request id injection.
-- OpenTelemetry/FastAPI instrumentation.
-- Backend route/log/database query correlation.
-- Evidence graph linking browser interaction to backend behavior.
-
-### Phase 5: planning integration
-
-- Feed context packets to agent-core.
-- Show context packet preview in UI.
-- Let the next-action controller use ambient focus and evidence ids.
-
-## Initial scaffold files
+## Implemented files
 
 ```text
 control-plane/ambient/
+  config.py
   types.py
   redaction.py
   event_log.py
@@ -188,6 +200,8 @@ control-plane/ambient/
   evidence_graph.py
   context_packet.py
   source_mapping.py
+  legacy_context.py
+  service.py
   collectors/
     browser_cdp.py
     editor_bridge.py
@@ -198,5 +212,6 @@ control-plane/ambient/
 
 control-plane/api/ambient.py
 control-plane/tests/test_ambient_context.py
+control-plane/tests/test_ambient_service.py
 requirements-ambient-optional.txt
 ```
