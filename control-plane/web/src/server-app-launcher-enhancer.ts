@@ -12,6 +12,7 @@ const API = '/api'
 const CONTROL_API = window.location.port === '5173'
   ? `${window.location.protocol}//${window.location.hostname}:9877/api`
   : API
+const HTML_ENTITIES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }
 
 let currentApps = POPULAR_SERVER_APPS
 let currentQuery = ''
@@ -28,7 +29,7 @@ function currentSessionId(): string | null {
 }
 
 function escapeHtml(value: string): string {
-  return value.replace(/[&<>'"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[ch] || ch))
+  return value.replace(/[&<>'"]/g, ch => HTML_ENTITIES[ch] || ch)
 }
 
 function rightPane(): HTMLElement | null {
@@ -94,13 +95,6 @@ async function launchApp(app: ServerAppEntry): Promise<void> {
   } catch (err) {
     renderAppTab(app, `Launch request failed: ${(err as Error).message}`)
   }
-}
-
-function activateBuiltInTab(tabName: string): void {
-  const strip = tabStrip()
-  const button = Array.from(strip?.querySelectorAll<HTMLButtonElement>('.as-tab') || [])
-    .find(candidate => candidate.textContent?.trim().toLowerCase() === tabName)
-  button?.click()
 }
 
 function deactivateCustomTabs(): void {
