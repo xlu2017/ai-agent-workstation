@@ -18,6 +18,10 @@ def test_platform_apps_route_is_registered_once():
     assert _route_paths().count("/api/session-graph/platform-apps") == 1
 
 
+def test_session_graph_overview_route_is_registered_once():
+    assert _route_paths().count("/api/session-graph/overview") == 1
+
+
 def test_platform_apps_endpoint_returns_applications(monkeypatch):
     monkeypatch.setattr(
         "api.routes.session_graph.platform_apps.discover_popular_applications",
