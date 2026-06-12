@@ -31,6 +31,7 @@ export default function AdapterDetailPanel({
             const facet = adapterFacet(session)
             const mappings = facet.mappings || []
             const selected = session.id === selectedSessionId
+            const hasConstraints = Boolean(facet.constraints?.length || facet.non_goals?.length)
             return (
               <article key={session.id} className={`sg-adapter ${selected ? 'is-selected' : ''}`} onClick={() => onSelectSession?.(session.id)}>
                 <div className="sg-row-split">
@@ -71,7 +72,7 @@ export default function AdapterDetailPanel({
                     </div>
                   </details>
                 )}
-                {(facet.constraints?.length || facet.non_goals?.length) && (
+                {hasConstraints && (
                   <details className="sg-details">
                     <summary>Constraints and non-goals</summary>
                     {facet.constraints?.length ? <ul>{facet.constraints.map(item => <li key={item}>{item}</li>)}</ul> : null}
