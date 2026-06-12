@@ -12,11 +12,13 @@
   display: none !important;
 }
 
-/* Sidebar destinations that currently only change active state without opening a real page. */
+/* Sidebar destinations that currently only change active state or route too broadly. */
 .sidebar-primary-nav .sidebar-nav-item[aria-label="Ask"],
+.sidebar-primary-nav .sidebar-nav-item[aria-label="Knowledge"],
 .sidebar-primary-nav .sidebar-nav-item[aria-label="Review"],
 .sidebar-primary-nav .sidebar-nav-item[aria-label="Automations"],
 .sidebar-collapsed-nav .sidebar-icon-btn[aria-label="Ask"],
+.sidebar-collapsed-nav .sidebar-icon-btn[aria-label="Knowledge"],
 .sidebar-collapsed-nav .sidebar-icon-btn[aria-label="Review"],
 .sidebar-collapsed-nav .sidebar-icon-btn[aria-label="Automations"] {
   display: none !important;
