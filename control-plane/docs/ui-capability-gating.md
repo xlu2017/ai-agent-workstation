@@ -6,11 +6,23 @@ The control plane should not use CSS as the durable mechanism for deciding wheth
 
 This document records the intent behind the UI capability scaffold so future agents do not reintroduce global CSS selectors as feature gates.
 
+## Current implementation state
+
+The capability contract is now wired end-to-end:
+
+1. Backend source of truth: `GET /api/ui/capabilities`.
+2. Typed React helper: `control-plane/web/src/capabilities.tsx`.
+3. Transitional runtime guard: `control-plane/web/src/capability-dom-guard.ts`.
+4. App entrypoint import: `control-plane/web/src/main.tsx` imports the runtime guard.
+5. The previous `no-placeholder-actions.css` quarantine is no longer imported by `main.tsx`.
+
+The DOM guard is transitional. It exists so the platform can stop using CSS selectors as the behavior layer immediately, while larger React components are migrated incrementally to `FeatureGate` and `CapabilityButton`.
+
 ## Problem being corrected
 
-The current platform contains `control-plane/web/src/no-placeholder-actions.css`. That file is an explicit quarantine layer for UI controls that are not yet backed by a route, mutation, inspection view, copy action, or external target.
+The platform previously used `control-plane/web/src/no-placeholder-actions.css` as an explicit quarantine layer for UI controls that were not yet backed by a route, mutation, inspection view, copy action, or external target.
 
-That quarantine is acceptable as a short-term safety net, but it is not the target architecture because it has these failure modes:
+That quarantine was acceptable as a short-term safety net, but it is not the target architecture because it has these failure modes:
 
 - Product logic is hidden in selectors instead of component code.
 - Selectors depend on labels and class names that can drift.
@@ -57,14 +69,16 @@ Use `omit` when a control has no meaningful behavior. Use `disabled` when the be
 
 ## Migration rule
 
-When removing a selector from `no-placeholder-actions.css`, perform the migration in this order:
+When removing a selector from the transitional DOM guard, perform the migration in this order:
 
 1. Add or update a capability record in `control-plane/api/routes/ui_capabilities.py`.
 2. Import `useUiCapabilities`, `FeatureGate`, or `CapabilityButton` into the relevant frontend component.
 3. Render the control only through the capability contract.
 4. Preserve accessibility labels and disabled reasons.
-5. Delete the matching quarantine selector from `no-placeholder-actions.css`.
+5. Delete the matching selector from `control-plane/web/src/capability-dom-guard.ts`.
 6. Document any newly required endpoint or route.
+
+`no-placeholder-actions.css` should not receive new selectors. If it remains in the repository, treat it as historical documentation and delete it once the DOM guard and React gates fully cover the migration path.
 
 ## Non-goals
 
@@ -97,6 +111,7 @@ CSS must not control:
 
 - `control-plane/api/routes/ui_capabilities.py`
 - `control-plane/web/src/capabilities.tsx`
+- `control-plane/web/src/capability-dom-guard.ts`
 - `control-plane/docs/ui-capability-gating.md`
 
 ## Intended endpoint
