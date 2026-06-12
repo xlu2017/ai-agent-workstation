@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from api.routes.session_graph.actions import router as actions_router
 from api.routes.session_graph.adapters import router as adapters_router
 from api.routes.session_graph.dev_workflow import router as dev_workflow_router
 from api.routes.session_graph.edges import router as edges_router
@@ -25,3 +26,4 @@ router.include_router(platform_apps_router)
 router.include_router(snapshot_router)
 router.include_router(options_router)
 router.include_router(dev_workflow_router)
+router.include_router(actions_router)
