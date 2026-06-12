@@ -1,0 +1,10 @@
+*.iml
+*.log
+.idea
+.DS_Store
+node_modules/*
+build/
+bench/*.svg
+bench/dist/
+bench/node_modules
+coverage/
