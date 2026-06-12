@@ -214,4 +214,34 @@ control-plane/api/ambient.py
 control-plane/tests/test_ambient_context.py
 control-plane/tests/test_ambient_service.py
 requirements-ambient-optional.txt
+
+control-plane/ambient/vendor_registry.py
+control-plane/api/ambient_vendor/
+  __init__.py
+  models.py
+  registry.py
+  github_fetcher.py
+  service.py
+control-plane/api/routes/ambient_vendors.py
+control-plane/scripts/vendor_ambient_context_tools.py
+control-plane/vendor/ambient-context/manifest.json
+control-plane/tests/test_ambient_vendor_registry.py
+control-plane/tests/test_ambient_vendor_fetcher.py
 ```
+
+## Vendored provider source
+
+Ambient collectors are first-party control-plane contracts.  The vendored tools
+under `control-plane/vendor/ambient-context/` are patchable implementation
+sources — not policy authorities.
+
+All upstream fetching is server-authenticated via the GitHub REST API archive
+endpoint.  SSH is never used.  The browser/client never receives GitHub
+credentials.
+
+When vendor source is absent the ambient layer degrades gracefully: collectors
+continue to function using their existing library dependencies.  Vendored
+source is never imported at Python runtime by the control-plane; it exists to
+support patching and reference.
+
+Screenshots remain fallback evidence, not primary ambient context.
