@@ -1,26 +1,28 @@
 """
-Session types and models.
+Deprecated execution-session compatibility models.
 
-Session types:
-  root_session    — initial user task
-  child_session   — related task sharing repo/worktree/context lineage
-  parallel_session — independent task, usually separate worktree or executor
-  queued_session  — task waiting for resources or user approval
+These dataclasses persist ``session-meta.json`` execution state and remain only
+for internal executor compatibility while the platform moves to graph-native
+session identity. New product/session features must not create new canonical
+session objects here. Use ``api.models.session_graph.SessionRecord`` and
+``SessionGraphStore`` for canonical session identity.
 
-Persists: parent_session_id, root_session_id, repo_id, worktree_id,
-          executor_id, status, active_plan_id, created_from_prompt_id
+Do not migrate old session objects into the graph automatically. If a caller
+needs graph state, it must create explicit graph sessions through the graph API.
 """
 
 from __future__ import annotations
 
 import json
-import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+
+LEGACY_SESSION_OBJECTS_DEPRECATED = True
+CANONICAL_SESSION_MODEL = "api.models.session_graph.SessionRecord"
 
 
 class SessionType(str, Enum):
@@ -47,6 +49,13 @@ class SessionStatus(str, Enum):
 
 @dataclass
 class Session:
+    """Deprecated executor compatibility record.
+
+    This is not a canonical user-visible session object. The session graph is
+    the only canonical session model for product features, topology, context,
+    mounts, projections, and policy.
+    """
+
     session_id: str = field(default_factory=lambda: f"session-{uuid.uuid4().hex[:12]}")
     session_type: SessionType = SessionType.ROOT
     status: SessionStatus = SessionStatus.CREATED
@@ -70,14 +79,21 @@ class Session:
         d = asdict(self)
         d["session_type"] = self.session_type.value
         d["status"] = self.status.value
+        d["deprecated"] = True
+        d["canonical_session_model"] = CANONICAL_SESSION_MODEL
         return d
 
 
 class SessionStore:
-    """Persists sessions to JSON files.
+    """Deprecated JSON execution-state store retained for executor internals.
 
     Storage: <sessions_dir>/<session_id>/session-meta.json
+
+    This store must not be used by product APIs as canonical session state. It
+    is deliberately not migrated into the session graph.
     """
+
+    deprecated = True
 
     def __init__(self, sessions_dir: str | Path = "/opt/workstation/sessions"):
         self.sessions_dir = Path(sessions_dir)
