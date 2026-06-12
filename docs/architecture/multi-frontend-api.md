@@ -5,15 +5,19 @@
 ```text
 control-plane/api/models/multi_frontend.py
 control-plane/api/services/multi_frontend_session_controller.py
+control-plane/api/routes/multi_frontend.py
 control-plane/api/multi_frontend.py
 control-plane/api/server.py
 control-plane/tests/test_multi_frontend_session_controller.py
 control-plane/tests/test_multi_frontend_api_router.py
+control-plane/tests/test_multi_frontend_server_mount.py
 ```
+
+`control-plane/api/multi_frontend.py` is a compatibility shim that re-exports the router from `api.routes.multi_frontend`.
 
 ## API endpoints
 
-The router lives in `control-plane/api/multi_frontend.py` and is mounted by `control-plane/api/server.py`.
+The router lives in `control-plane/api/routes/multi_frontend.py` and is mounted by `control-plane/api/server.py`.
 
 ```text
 POST /api/multi-frontend/topologies
@@ -28,7 +32,7 @@ POST /api/multi-frontend/traces
 Mounted in `control-plane/api/server.py`:
 
 ```python
-from api.multi_frontend import router as multi_frontend_router
+from api.routes.multi_frontend import router as multi_frontend_router
 app.include_router(multi_frontend_router)
 ```
 
