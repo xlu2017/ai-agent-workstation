@@ -1,10 +1,11 @@
-"""Composite session graph router — includes all session-graph sub-routers."""
+"""Composite session graph router."""
 
 from fastapi import APIRouter
 
 from api.routes.session_graph.adapters import router as adapters_router
 from api.routes.session_graph.edges import router as edges_router
 from api.routes.session_graph.events import router as events_router
+from api.routes.session_graph.options import router as options_router
 from api.routes.session_graph.platform_apps import router as platform_apps_router
 from api.routes.session_graph.projections import router as projections_router
 from api.routes.session_graph.sessions import router as sessions_router
@@ -21,3 +22,4 @@ router.include_router(events_router)
 router.include_router(settings_router)
 router.include_router(platform_apps_router)
 router.include_router(snapshot_router)
+router.include_router(options_router)
