@@ -22,13 +22,7 @@ prefix: /api/session-architecture
 tag: session-architecture
 ```
 
-The router is implemented in `control-plane/api/session_architecture.py`. It should be mounted in `control-plane/api/server.py` before it is available from the running FastAPI app:
-
-```python
-from api.session_architecture import router as session_architecture_router
-
-app.include_router(session_architecture_router)
-```
+The router is implemented in `control-plane/api/session_architecture.py`. It is mounted during control-plane startup by `control-plane/api/service_updater.py`, which is already imported by `control-plane/api/server.py` before the FastAPI app includes the session graph router. The bootstrap installs the session architecture router when the app includes `/api/session-graph`, keeping the public route prefix at `/api/session-architecture`.
 
 ## Scope headers
 
