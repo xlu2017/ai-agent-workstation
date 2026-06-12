@@ -23,7 +23,6 @@ sys.path.insert(0, str(CONTROL_PLANE_ROOT / "core"))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.multi_frontend import router as multi_frontend_router
 from api.routes.health import router as health_router
 from api.routes.remote_desktop import router as remote_desktop_router
 from api.routes.sessions import router as sessions_router
@@ -32,6 +31,7 @@ from api.routes.services import router as services_router
 from api.routes.models import router as models_router
 from api.routes.knowledge import router as knowledge_router
 from api.routes.filesystem import router as filesystem_router
+from api.routes.multi_frontend import router as multi_frontend_router
 from api.routes.session_graph.router import router as session_graph_router
 
 app = FastAPI(title="Workstation Control Plane", version="0.1.0")
