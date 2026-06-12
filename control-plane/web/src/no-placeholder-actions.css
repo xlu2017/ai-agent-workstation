@@ -1,10 +1,9 @@
 /*
- * Remove UI controls that do not currently trigger a meaningful route,
+ * Hide only controls that do not currently trigger a meaningful route,
  * mutation, inspection view, copy action, or external target.
  *
- * This file is intentionally narrow: implemented controls remain visible, while
- * placeholder menu items and inert historical action buttons are hidden until
- * they have real handlers or routes.
+ * Implemented controls remain visible. When a control is wired to a backend
+ * endpoint or a browser-local action, do not hide it here.
  */
 
 /* Workspace menu placeholders. Settings remains available. */
@@ -15,11 +14,9 @@
 
 /* Sidebar destinations that currently only change active state without opening a real page. */
 .sidebar-primary-nav .sidebar-nav-item[aria-label="Ask"],
-.sidebar-primary-nav .sidebar-nav-item[aria-label="Knowledge"],
 .sidebar-primary-nav .sidebar-nav-item[aria-label="Review"],
 .sidebar-primary-nav .sidebar-nav-item[aria-label="Automations"],
 .sidebar-collapsed-nav .sidebar-icon-btn[aria-label="Ask"],
-.sidebar-collapsed-nav .sidebar-icon-btn[aria-label="Knowledge"],
 .sidebar-collapsed-nav .sidebar-icon-btn[aria-label="Review"],
 .sidebar-collapsed-nav .sidebar-icon-btn[aria-label="Automations"] {
   display: none !important;
@@ -32,11 +29,6 @@
 
 /* Footer help is currently not routed to docs or a help panel. Settings remains available. */
 .sidebar-footer .sidebar-icon-btn[aria-label="Help"] {
-  display: none !important;
-}
-
-/* Transcript message action buttons are placeholders until source, copy, and permalink handlers are wired. */
-.as-msg-actions .as-icon-btn {
   display: none !important;
 }
 
