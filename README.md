@@ -1,6 +1,6 @@
 # AI Coding Agent Workstation
 
-A production-quality, self-hosted development workstation for AI coding agents. Runs OpenHands with DeepSeek models via LiteLLM Proxy on Hetzner Cloud, with multi-agent worktree isolation, knowledge system, observability, and UI-to-code bridging.
+A production-quality, self-hosted development workstation for AI coding agents. Runs OpenHands with DeepSeek models via LiteLLM Proxy on Hetzner Cloud, with multi-agent worktree isolation, knowledge system, observability, and control-plane-owned UI/context automation.
 
 ## Session Platform Intent
 
@@ -11,6 +11,7 @@ Normative docs:
 - [Session platform intent](docs/session-platform-intent.md)
 - [Session graph API](docs/api-session-graph.md)
 - [Session adapter control-plane behavior](docs/session-adapter-control-plane.md)
+- [Deprecated top-level folders](docs/deprecated-top-level-folders.md)
 
 Future work should keep the FastAPI models, API routes, SQL scaffold, UI panels, and `agent-core` contracts aligned. Divergence between those surfaces should be treated as a bug.
 
@@ -54,7 +55,7 @@ ssh -L 9877:localhost:9877 -L 4000:localhost:4000 agent@<tailscale-hostname>
 
 ## Architecture
 
-```
+```text
 Hetzner Cloud CCX33 ($74/mo)
 ├── OpenHands (AI agent runtime, port 3000 / allocated 3010+)
 ├── LiteLLM Proxy (model gateway, port 4000)
@@ -71,7 +72,7 @@ Hetzner Cloud CCX33 ($74/mo)
 ├── Chrome (remote debugging :9222)
 ├── xRDP + XFCE4 (remote desktop :3389)
 ├── Apache Guacamole (browser remote desktop via private :8080 / proxy)
-├── UI-Bridge Service (source map resolution :9876)
+├── Control-plane UI/context automation routes (:9877)
 └── Security (Tailscale SSH, provider firewall, chrony, SSH key-only fallback)
 ```
 
@@ -79,55 +80,35 @@ See [docs/architecture.md](docs/architecture.md) for full details.
 
 ## Repository Structure
 
-```
+```text
 .
-├── docker-compose.yml              # Service orchestration
-├── setup.sh                        # Idempotent server setup
-├── .env.example                    # API key template
-├── config/
-│   └── litellm_config.yaml         # Model routing + budget limits
-├── scripts/
-│   ├── create-worktree.sh          # Create isolated agent workspace
-│   ├── destroy-worktree.sh         # Clean up worktree + resources
-│   ├── list-worktrees.sh           # Show active worktrees
-│   ├── backup-now.sh               # Manual BorgBackup
-│   ├── knowledge-loader.py         # Context-aware knowledge activation
-│   └── server/
-│       ├── workstation-startup.sh
-│       └── configure-tailscale-ssh-only.sh
-├── knowledge/
-│   ├── example-react.yaml          # React patterns knowledge
-│   └── example-python.yaml         # Python patterns knowledge
-├── browser-extension/              # UI-to-Code bridge (Phase 1)
-│   ├── manifest.json
-│   ├── content.js
-│   ├── background.js
-│   └── popup.html
-├── ui-bridge-service/              # Source map resolution server
-│   ├── server.py
-│   └── ARCHITECTURE.md
-├── docs/
-│   ├── architecture.md             # System architecture
-│   ├── session-platform-intent.md  # Session platform intent and invariants
-│   ├── api-session-graph.md        # Session graph API semantics
-│   ├── session-adapter-control-plane.md # Adapter control-plane behavior
-│   ├── operations/remote-desktop.md # Browser remote desktop via Guacamole
-│   ├── provider-comparison.md      # Infra & API comparison
-│   ├── cost-model.md               # Budget projections
-│   ├── operations.md               # Day-to-day operations
-│   ├── troubleshooting.md          # Common issues & fixes
-│   ├── upgrade.md                  # Upgrade procedures
-│   └── backup.md                   # Backup & restore
-└── rfcs/
-    ├── RFC-001-multi-agent-scheduler.md
-    ├── RFC-002-source-aware-ui-selection.md
-    ├── RFC-003-react-native-bridge.md
-    ├── RFC-004-flutter-bridge.md
-    ├── RFC-005-android-emulator-integration.md
-    ├── RFC-006-burst-gpu-workers.md
-    ├── RFC-007-persistent-agent-memory.md
-    └── RFC-008-vm-snapshot-management.md
+├── control-plane/                 # Active FastAPI control plane, web UI, CLI, routes, tests
+├── config/                        # LiteLLM and service configuration
+├── scripts/                       # Worktree, backup, workstation, and local-client scripts
+├── ops/                           # Active operational stacks such as Guacamole remote desktop
+├── knowledge/                     # YAML knowledge files
+├── docs/                          # Architecture, operations, API, and deprecation docs
+├── rfcs/                          # Forward-looking design proposals
+├── bench-scripts/                 # Benchmark runner scripts
+├── bench-tasks/                   # Benchmark task fixtures
+├── bench-results/                 # Benchmark output artifacts
+├── docker-compose.yml             # Service orchestration
+├── setup.sh                       # Idempotent server setup
+└── .env.example                   # API key template
 ```
+
+### Deprecated top-level folders
+
+The following root folders are retained only as legacy references and must not receive new product behavior:
+
+```text
+glue/                  # Deprecated standalone glue layer and legacy session CLI
+demo/                  # Deprecated hard-coded legacy demo scripts
+browser-extension/     # Deprecated standalone Chrome extension prototype
+ui-bridge-service/     # Deprecated standalone source-resolution service
+```
+
+Use `control-plane/` for product behavior, session identity, UI/context routing, visual automation, and capability gating. See [Deprecated top-level folders](docs/deprecated-top-level-folders.md) for the governing rules.
 
 ## Multi-Agent Worktrees
 
@@ -157,7 +138,7 @@ Target posture:
 - **Public internet:** denied by the provider firewall by default. Allow public TCP/22 only temporarily for break-glass recovery.
 - **Tailscale:** primary admin path. Tailscale SSH handles tailnet port 22.
 - **OpenSSH fallback:** ordinary OpenSSH is moved to `127.0.0.1:2222` by `scripts/server/configure-tailscale-ssh-only.sh`.
-- **Admin services:** Control Plane, LiteLLM, OpenHands, xRDP, metrics, and UI-Bridge are private; access them through Tailscale policy or SSH forwarding.
+- **Admin services:** Control Plane, LiteLLM, OpenHands, xRDP, metrics, and browser/context automation surfaces are private; access them through Tailscale policy or SSH forwarding.
 
 After Tailscale is authenticated and reachable from an admin device:
 
