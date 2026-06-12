@@ -69,6 +69,8 @@ async def ambient_fastapi_middleware(request, call_next, emit_event):
 
     session_id = request.headers.get(SESSION_HEADER)
     if session_id:
+        scope = getattr(request, "scope", {}) or {}
+        route = scope.get("path") if isinstance(scope, dict) else None
         event = build_runtime_request_event(
             session_id=session_id,
             method=request.method,
@@ -77,7 +79,7 @@ async def ambient_fastapi_middleware(request, call_next, emit_event):
             duration_ms=duration_ms,
             trace_id=request.headers.get(TRACE_HEADER),
             worktree_id=request.headers.get(WORKTREE_HEADER),
-            route=getattr(getattr(request, "scope", {}), "path", None),
+            route=route,
         )
         emit_event(event)
     return response
