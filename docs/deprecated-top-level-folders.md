@@ -6,7 +6,7 @@ The following top-level folders are deprecated without migration:
 
 | Folder | Status | Replacement |
 | --- | --- | --- |
-| `glue/` | Deprecated legacy glue layer. Retained only for historical reference while any useful implementation details are copied into `control-plane/`. | `control-plane/api`, `control-plane/web`, `control-plane/cli`, and the session graph API. |
+| `glue/` | Deprecated legacy glue layer. A coverage audit now exists at `glue/DEPRECATION-AUDIT.md`; active control-plane replacements cover useful browser/editor/terminal ambient-context behavior. Remaining glue-only items are stale setup/demo code or intentionally unsupported direct `session.json` lifecycle behavior. | `control-plane/api`, `/api/session-graph`, `/api/sessions/{id}/ambient/*`, `/api/visual-automation/*`, `/api/app-automation/*`, `control-plane/extension`, and session graph events/projections. |
 | `demo/` | Deprecated legacy demonstration scripts. The scripts hard-code old `/opt/workstation/glue` paths, direct `session.json` objects, and old bridge endpoints. | Control-plane tests, session graph fixtures, and benchmark tasks. |
 | `browser-extension/` | Deprecated standalone Chrome extension prototype. It still points at the old UI bridge service and must not be extended in place. | Future browser integration should be installed, versioned, and configured through the control plane. |
 | `ui-bridge-service/` | Deprecated standalone source-resolution server. It is a Phase 1 stub and must not be used as a product authority. | Control-plane UI/context, visual automation, and multi-frontend routes. |
