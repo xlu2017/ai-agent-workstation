@@ -32,7 +32,17 @@ class AmbientVendor:
         path = self.source_path
         return path.exists() and any(path.iterdir())
 
+    def candidate_python_paths(self) -> list[Path]:
+        source = self.source_path
+        candidates = [source, source / "src", source / "python", source / "packages"]
+        candidates.extend(path for path in source.glob("*/src") if path.is_dir()) if source.exists() else None
+        return [path for path in candidates if path.exists()]
+
     def module_available(self) -> bool:
+        for path in self.candidate_python_paths():
+            path_text = str(path)
+            if path_text not in sys.path:
+                sys.path.insert(0, path_text)
         for module_name in self.python_path_hints:
             if importlib.util.find_spec(module_name) is not None:
                 return True
@@ -52,6 +62,7 @@ class AmbientVendor:
             "repo_url": self.repo_url,
             "target_dir": self.target_dir,
             "source_present": self.source_present,
+            "candidate_python_paths": [str(path) for path in self.candidate_python_paths()],
             "module_available": self.module_available(),
             "role": self.role,
             "collector_targets": self.collector_targets,
@@ -117,18 +128,20 @@ def _collector_target_map(vendors: list[AmbientVendor]) -> dict[str, list[str]]:
 
 
 def ensure_vendor_python_path(vendor_id: str) -> Path | None:
-    """Add a vendored source path to sys.path when present.
+    """Add vendored source paths to sys.path when present.
 
-    This helper keeps vendored source optional. It never imports vendored modules
-    at process start and only mutates sys.path for a requested provider.
+    Vendored code is treated as repository-owned implementation code, but it is
+    still optional at import time so the server can boot before every vendor is
+    cloned or built.
     """
 
     vendor = get_ambient_vendor(vendor_id)
     if not vendor or not vendor.source_present:
         return None
-    source_path = str(vendor.source_path)
-    if source_path not in sys.path:
-        sys.path.insert(0, source_path)
+    for path in vendor.candidate_python_paths():
+        path_text = str(path)
+        if path_text not in sys.path:
+            sys.path.insert(0, path_text)
     return vendor.source_path
 
 
