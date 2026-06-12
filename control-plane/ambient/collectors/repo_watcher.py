@@ -8,16 +8,25 @@ from ambient.types import AmbientEvent, AmbientEventType, AmbientSource
 
 
 class RepoSnapshotCollector:
-    """Collect repo/worktree state.
-
-    Preferred live path: watchfiles for file-change batches plus git snapshotting.
-    Dependency-free scaffold path: `git status --porcelain` and `git rev-parse`.
-    """
+    """Collect repo/worktree state without assuming a stable worktree path."""
 
     def __init__(self, repo_root: str | Path):
         self.repo_root = Path(repo_root)
 
     def snapshot(self) -> dict[str, Any]:
+        exists = self.repo_root.exists()
+        is_git = exists and ((self.repo_root / ".git").exists() or bool(self._git(["rev-parse", "--git-dir"])))
+        if not exists or not is_git:
+            return {
+                "repo_root": str(self.repo_root),
+                "available": False,
+                "exists": exists,
+                "is_git": is_git,
+                "branch": None,
+                "commit": None,
+                "dirty_files": [],
+            }
+
         branch = self._git(["rev-parse", "--abbrev-ref", "HEAD"]).strip() or None
         commit = self._git(["rev-parse", "HEAD"]).strip() or None
         status = self._git(["status", "--porcelain=v1"])
@@ -28,6 +37,9 @@ class RepoSnapshotCollector:
             dirty_files.append({"status": line[:2].strip(), "path": line[3:].strip()})
         return {
             "repo_root": str(self.repo_root),
+            "available": True,
+            "exists": True,
+            "is_git": True,
             "branch": branch,
             "commit": commit,
             "dirty_files": dirty_files,
@@ -48,6 +60,7 @@ class RepoSnapshotCollector:
             repo_id=repo_id,
             worktree_id=worktree_id,
             branch=snap.get("branch"),
+            confidence=0.95 if snap.get("available") else 0.25,
             payload=snap,
         )
 
