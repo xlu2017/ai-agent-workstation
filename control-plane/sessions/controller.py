@@ -45,7 +45,6 @@ DEFAULT_ALLOWED_ACTIONS = [
     "run_tests",
     "summarize_diff",
     "request_approval",
-    "commit",
 ]
 
 
@@ -358,7 +357,7 @@ class SessionController:
             self.session_store.update_status(session_id, SessionStatus.FAILED)
             return {"error": "Plan validation failed", "validation_errors": errors}
 
-        # 6. Emit PLAN_GENERATED
+        # 6. Emit PLAN_GENERATED. Do not persist raw LLM prompts/messages here.
         self.event_store.append(
             create_event(
                 EventType.PLAN_GENERATED, session_id,
