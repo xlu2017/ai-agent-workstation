@@ -1,3 +1,5 @@
+import './repo-source-panel'
+
 type RepoProviderId = 'personal_access_token' | 'github_oauth' | 'none'
 
 type RepoProvider = {
