@@ -22,7 +22,7 @@ def load_manifest(manifest_path: Path | None = None) -> dict[str, Any]:
 
 
 def _tool_source_dir(tool: dict[str, Any], manifest_path: Path | None = None) -> Path:
-    root = (manifest_path or MANIFEST_PATH).resolve().parents[2]
+    root = (manifest_path or MANIFEST_PATH).resolve().parents[3]
     return root / tool["target_dir"]
 
 

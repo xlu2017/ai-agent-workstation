@@ -34,12 +34,40 @@ def test_expected_vendor_ids_exist():
     assert expected == ids
 
 
-def test_registry_reports_source_present_false_for_empty_dirs():
+def test_registry_reports_source_present_true_after_vendor_fetch():
     from ambient.vendor_registry import list_vendors
 
     vendors = list_vendors()
     for v in vendors:
-        assert v["source_present"] is False, f"{v['id']} should report source_present=False"
+        assert v["source_present"] is True, f"{v['id']} should report source_present=True after fetch"
+
+
+def test_registry_reports_source_present_false_for_empty_dirs(tmp_path):
+    import json
+    from ambient.vendor_registry import list_vendors
+
+    manifest = {
+        "version": 1,
+        "intent": "test",
+        "selected_tools": [
+            {
+                "id": "empty_tool",
+                "name": "Empty Tool",
+                "repo_url": "https://github.com/example/empty.git",
+                "github_owner": "example",
+                "github_repo": "empty",
+                "target_dir": str(tmp_path / "vendor" / "empty_tool" / "source"),
+                "role": "test",
+                "collector_targets": ["test_target"],
+            }
+        ],
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    (tmp_path / "vendor" / "empty_tool" / "source").mkdir(parents=True)
+
+    vendors = list_vendors(manifest_path)
+    assert vendors[0]["source_present"] is False
 
 
 def test_get_vendor_returns_none_for_unknown():
@@ -59,12 +87,28 @@ def test_collector_target_map_complete():
     assert "source_mapping" in mapping["tree_sitter"]
 
 
-def test_fetched_metadata_returns_none_when_absent():
+def test_fetched_metadata_present_after_vendor_fetch():
     from ambient.vendor_registry import load_manifest, fetched_metadata
 
     manifest = load_manifest()
     for tool in manifest["selected_tools"]:
-        assert fetched_metadata(tool) is None
+        meta = fetched_metadata(tool)
+        assert meta is not None, f"{tool['id']} should have fetched_metadata"
+        assert "owner" in meta
+        assert "repo" in meta
+        assert "fetched_at" in meta
+
+
+def test_fetched_metadata_returns_none_when_absent(tmp_path):
+    import json
+    from ambient.vendor_registry import fetched_metadata
+
+    tool = {
+        "id": "absent_tool",
+        "target_dir": str(tmp_path / "vendor" / "absent" / "source"),
+    }
+    (tmp_path / "vendor" / "absent" / "source").mkdir(parents=True)
+    assert fetched_metadata(tool) is None
 
 
 def test_list_vendors_shape():

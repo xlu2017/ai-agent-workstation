@@ -1,0 +1,226 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - release-*
+  pull_request:
+    branches:
+      - main
+      - release-*
+
+concurrency:
+  # For pull requests, cancel all currently-running jobs for this workflow
+  # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#concurrency
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build-driver:
+    name: Build driver
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '24'
+    - name: Build driver bundles from source
+      run: bash scripts/build_driver.sh
+    - name: Upload driver bundles
+      uses: actions/upload-artifact@v7
+      with:
+        name: driver-bundles
+        path: driver/playwright-*.zip
+        if-no-files-found: error
+        # The bundles are already-compressed zips; skip re-compression.
+        compression-level: 0
+        retention-days: 1
+
+  infra:
+    name: Lint
+    needs: build-driver
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.10"
+    - name: Download driver bundles
+      uses: actions/download-artifact@v8
+      with:
+        name: driver-bundles
+        path: driver/
+    - name: Install dependencies & browsers
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r local-requirements.txt
+        pip install -r requirements.txt
+        pip install -e .
+        python -m build --wheel
+        python -m playwright install --with-deps
+    - name: Lint
+      run: pre-commit run --show-diff-on-failure --color=always --all-files
+    - name: Generate APIs
+      run: bash scripts/update_api.sh
+    - name: Verify generated API is up to date
+      run: git diff --exit-code
+
+  build:
+    name: Build
+    needs: build-driver
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.10', '3.14']
+        browser: [chromium, firefox, webkit]
+        exclude:
+        # WebKit on standard macOS-latest (currently macos-15-arm64) is unstable;
+        # upstream pins paid macos-15-xlarge for cross-browser webkit too.
+        - os: macos-latest
+          browser: webkit
+        include:
+        - os: macos-15-xlarge
+          python-version: '3.10'
+          browser: webkit
+        - os: macos-15-xlarge
+          python-version: '3.14'
+          browser: webkit
+        - os: windows-latest
+          python-version: '3.11'
+          browser: chromium
+        - os: macos-latest
+          python-version: '3.11'
+          browser: chromium
+        - os: ubuntu-latest
+          python-version: '3.11'
+          browser: chromium
+        - os: windows-latest
+          python-version: '3.12'
+          browser: chromium
+        - os: macos-latest
+          python-version: '3.12'
+          browser: chromium
+        - os: ubuntu-latest
+          python-version: '3.12'
+          browser: chromium
+        - os: windows-latest
+          python-version: '3.13'
+          browser: chromium
+        - os: macos-latest
+          python-version: '3.13'
+          browser: chromium
+        - os: ubuntu-latest
+          python-version: '3.13'
+          browser: chromium
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Download driver bundles
+      uses: actions/download-artifact@v8
+      with:
+        name: driver-bundles
+        path: driver/
+    - name: Install dependencies & browsers
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r local-requirements.txt
+        pip install -r requirements.txt
+        pip install -e .
+        python -m build --wheel
+        python -m playwright install --with-deps ${{ matrix.browser }}
+    - name: Common Tests
+      run: pytest tests/common --browser=${{ matrix.browser }} --timeout 90
+    - name: Test Reference count
+      run: pytest tests/test_reference_count_async.py --browser=${{ matrix.browser }}
+    - name: Test Wheel Installation
+      run: pytest tests/test_installation.py --browser=${{ matrix.browser }}
+    - name: Test Sync API
+      if: matrix.os != 'ubuntu-latest'
+      run: pytest tests/sync --browser=${{ matrix.browser }} --timeout 90
+    - name: Test Sync API
+      if: matrix.os == 'ubuntu-latest'
+      run: xvfb-run pytest tests/sync --browser=${{ matrix.browser }} --timeout 90
+    - name: Test Async API
+      if: matrix.os != 'ubuntu-latest'
+      run: pytest tests/async --browser=${{ matrix.browser }} --timeout 90
+    - name: Test Async API
+      if: matrix.os == 'ubuntu-latest'
+      run: xvfb-run pytest tests/async --browser=${{ matrix.browser }} --timeout 90
+
+  test-stable:
+    name: Stable
+    needs: build-driver
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        browser-channel: [chrome]
+        include:
+        - os: windows-latest
+          browser-channel: msedge
+        - os: macos-latest
+          browser-channel: msedge
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.10"
+    - name: Download driver bundles
+      uses: actions/download-artifact@v8
+      with:
+        name: driver-bundles
+        path: driver/
+    - name: Install dependencies & browsers
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r local-requirements.txt
+        pip install -r requirements.txt
+        pip install -e .
+        python -m build --wheel
+        python -m playwright install ${{ matrix.browser-channel }} --with-deps
+    - name: Common Tests
+      run: pytest tests/common --browser=chromium --browser-channel=${{ matrix.browser-channel }} --timeout 90
+    - name: Test Sync API
+      if: matrix.os != 'ubuntu-latest'
+      run: pytest tests/sync --browser=chromium --browser-channel=${{ matrix.browser-channel }} --timeout 90
+    - name: Test Sync API
+      if: matrix.os == 'ubuntu-latest'
+      run: xvfb-run pytest tests/sync --browser=chromium --browser-channel=${{ matrix.browser-channel }} --timeout 90
+    - name: Test Async API
+      if: matrix.os != 'ubuntu-latest'
+      run: pytest tests/async --browser=chromium --browser-channel=${{ matrix.browser-channel }} --timeout 90
+    - name: Test Async API
+      if: matrix.os == 'ubuntu-latest'
+      run: xvfb-run pytest tests/async --browser=chromium --browser-channel=${{ matrix.browser-channel }} --timeout 90
+
+  test_examples:
+    name: Examples
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: examples/todomvc/
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.10'
+    - name: Install dependencies & browsers
+      run: |
+        pip install -r requirements.txt
+        python -m playwright install --with-deps chromium
+    - name: Common Tests
+      run: pytest
