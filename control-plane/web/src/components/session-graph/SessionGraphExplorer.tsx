@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Clock, Database, Eye, GitBranch, Layers, Network, Play, RefreshCw, Search, ShieldCheck, Unplug } from 'lucide-react'
+import { AlertTriangle, CheckCircle, Clock, Database, Eye, Folder, GitBranch, Layers, Network, Play, RefreshCw, Search, ShieldCheck, Unplug } from 'lucide-react'
 import MountedSourcesPanel from './MountedSourcesPanel'
 import AdapterDetailPanel from './AdapterDetailPanel'
 import ContextProjectionPanel from './ContextProjectionPanel'
@@ -51,6 +51,25 @@ function sessionKindOrder(kind: string): number {
 function JsonPreview({ value }: { value: unknown }) {
   if (!value || (typeof value === 'object' && Object.keys(value as Record<string, unknown>).length === 0)) return <p className="sg-muted sg-small">None.</p>
   return <pre className="sg-json">{JSON.stringify(value, null, 2)}</pre>
+}
+
+function SessionWorkflowGuide() {
+  return (
+    <section className="sg-card sg-workflow-card">
+      <div className="sg-card-header sg-card-header-split"><div><CheckCircle size={16} /><h3>Session creation flow</h3></div><span className="sg-count-pill">scope before execution</span></div>
+      <p className="sg-muted">Create the semantic session first, attach durable repo scope when it is relevant, then start a runtime/worktree session only when execution is needed.</p>
+      <div className="sg-workflow-steps">
+        <div><strong>1</strong><span>Intent session</span><small>Ask, plan, implement, fix, review, or integrate. Planning/question sessions may be unscoped.</small></div>
+        <div><strong>2</strong><span>Repo scope</span><small>Repo is durable identity and should be represented as a repo session.</small></div>
+        <div><strong>3</strong><span>Folder or file focus</span><small>Folder and file selections narrow context; they should not become the root session identity.</small></div>
+        <div><strong>4</strong><span>Runtime later</span><small>Worktree/runtime creation is separate from graph topology and should happen after scope is clear.</small></div>
+      </div>
+      <div className="sg-workflow-policy">
+        <div className="is-ok">No repo required for question or architecture planning sessions.</div>
+        <div className="is-warning">Repo scope should be selected before implementation, bug fix, code review, or integration execution.</div>
+      </div>
+    </section>
+  )
 }
 
 function SessionNode({ session, selected, inbound, outbound, onSelect }: { session: SessionView; selected: boolean; inbound: number; outbound: number; onSelect: (id: string) => void }) {
@@ -246,7 +265,8 @@ export default function SessionGraphExplorer() {
       <div className="sg-toolbar sg-card"><label className="sg-search"><Search size={15} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions by title, summary, or id" /></label><label><span>Kind</span><select value={kindFilter} onChange={event => setKindFilter(event.target.value)}><option value="all">All kinds</option>{kinds.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select></label></div>
       <div className="sg-layout">
         <main className="sg-main-stack">
-          <section className="sg-card sg-main-card"><div className="sg-card-header sg-card-header-split"><div><Network size={16} /><h3>Graph canvas</h3></div><span className="sg-count-pill">{filteredSessions.length} visible</span></div>{loading ? <p className="sg-muted">Loading session graph...</p> : graph.sessions.length === 0 ? <p className="sg-muted">No graph sessions have been persisted yet. Use the API scaffold to create or mount sessions.</p> : <GraphCanvas sessions={filteredSessions} edges={visibleEdges} selectedSessionId={selectedSessionId} selectedEdgeId={selectedEdgeId} onSelectSession={setSelectedSessionId} onSelectEdge={setSelectedEdgeId} />}</section>
+          <SessionWorkflowGuide />
+          <section className="sg-card sg-main-card"><div className="sg-card-header sg-card-header-split"><div><Network size={16} /><h3>Graph canvas</h3></div><span className="sg-count-pill">{filteredSessions.length} visible</span></div>{loading ? <p className="sg-muted">Loading session graph...</p> : graph.sessions.length === 0 ? <p className="sg-muted">No graph sessions have been persisted yet. Use the creation flow above and then mount repos under semantic sessions.</p> : <GraphCanvas sessions={filteredSessions} edges={visibleEdges} selectedSessionId={selectedSessionId} selectedEdgeId={selectedEdgeId} onSelectSession={setSelectedSessionId} onSelectEdge={setSelectedEdgeId} />}</section>
           <MountForm sessions={graph.sessions} draft={mountDraft} setDraft={setMountDraft} onPreview={previewMount} onClear={() => { setMountDraft(defaultMountDraft); setPreviewResult(null) }} busy={busy} />
           <MountPreviewPanel result={previewResult} onApply={applyMount} applying={busy} />
         </main>
