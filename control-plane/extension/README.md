@@ -53,15 +53,19 @@ React, Vue, and Angular dev-mode hints are treated as opportunistic enrichment, 
 
 ### Browser-side status feedback
 
-`status.js` scaffolds polling for the active session chat status and a browser toast primitive. This gives the developer feedback after submitting from the page instead of forcing them to switch to the dashboard.
+`status.js` scaffolds a browser toast primitive. The next implementation pass can extend this into active polling for chat status and session events so the developer does not need to switch to the dashboard.
 
-### Prompt templates
+### Prompt catalog
 
-`templates.txt` documents first-pass prompt categories for common front-end work: visual polish, responsive fixes, accessibility, copy changes, interaction bugs, component extraction, loading/error states, and matching nearby style.
+`PROMPT_CATALOG.md` documents first-pass prompt categories for common front-end work: visual polish, responsive fixes, accessibility, copy changes, interaction bugs, component extraction, loading/error states, and matching nearby style.
 
 ### Visual fallback policy
 
 `visual-fallback-policy.md` defines when visual fallback evidence is allowed, how it should be marked, and what should not be retained by default.
+
+### App-side anchors
+
+`anchors.js` provides a tiny helper for apps that want to expose direct component source metadata through `window.__JG_COMPONENT_SOURCE_MAP__` and `data-jg-*` attributes.
 
 ## Files
 
@@ -76,8 +80,11 @@ history.js                    local selection history scaffold
 source-hints.js               framework/source-hint extraction scaffold
 confidence.js                 evidence confidence scoring scaffold
 status.js                     browser-side session status scaffold
-templates.txt                 prompt template catalog
+anchors.js                    app-side source anchor helper
+PROMPT_CATALOG.md             prompt catalog
+ADJACENT_FEATURES.md          feature plan summary
 visual-fallback-policy.md     visual fallback policy
+CONTRACTS.md                  payload, history, source-hint, and session contracts
 ```
 
 ## Backend integration
