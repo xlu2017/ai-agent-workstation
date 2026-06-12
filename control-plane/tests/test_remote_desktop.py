@@ -52,7 +52,7 @@ def test_remote_desktop_token_hides_credentials(monkeypatch):
         "dataSource": "postgresql",
         "availableDataSources": ["postgresql"],
     }
-    with patch("api.server._request_guacamole_token", return_value=token):
+    with patch("api.routes.remote_desktop.request_guacamole_token", return_value=token):
         response = _client().post("/api/v2/remote-desktop/token")
 
     assert response.status_code == 200
@@ -90,8 +90,8 @@ def test_remote_desktop_health_handles_guacamole_down(monkeypatch):
     monkeypatch.setenv("REMOTE_DESKTOP_ENABLED", "true")
     monkeypatch.setenv("RDP_HOST", "dev-server")
 
-    with patch("api.server._check_http", return_value={"status": "unreachable", "error": "down"}):
-        with patch("api.server._check_tcp", return_value={"status": "reachable"}):
+    with patch("api.routes.remote_desktop.check_http", return_value={"status": "unreachable", "error": "down"}):
+        with patch("api.routes.remote_desktop.check_tcp", return_value={"status": "reachable"}):
             response = _client().get("/api/v2/remote-desktop/health")
 
     assert response.status_code == 200
@@ -107,8 +107,8 @@ def test_remote_desktop_health_handles_rdp_unreachable(monkeypatch):
     monkeypatch.setenv("RDP_HOST", "dev-server")
     monkeypatch.setenv("RDP_PORT", "3389")
 
-    with patch("api.server._check_http", return_value={"status": "reachable", "code": 200}):
-        with patch("api.server._check_tcp", return_value={"status": "unreachable", "error": "refused"}):
+    with patch("api.routes.remote_desktop.check_http", return_value={"status": "reachable", "code": 200}):
+        with patch("api.routes.remote_desktop.check_tcp", return_value={"status": "unreachable", "error": "refused"}):
             response = _client().get("/api/v2/remote-desktop/health")
 
     assert response.status_code == 200
