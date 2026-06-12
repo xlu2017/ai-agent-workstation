@@ -2,6 +2,8 @@
 
 The dashboard's **Update latest** action updates allowlisted services from GitHub on the server. The browser never receives a GitHub token.
 
+Repo-backed update credentials now come from the selected repo provider. See [Repo provider authentication](repo-provider-auth.md).
+
 ## Supported services
 
 The service updater currently supports:
@@ -12,9 +14,21 @@ The service updater currently supports:
 
 Service metadata is exposed through `GET /api/services`.
 
-## Token configuration
+## Token and provider configuration
 
-Set one of:
+The active provider is selected through the dashboard's **Repo provider** panel or through:
+
+```text
+POST /api/repo-provider/select
+```
+
+Provider options:
+
+- `personal_access_token` — reads `GITHUB_TOKEN`, `GITHUB_PAT`, or `PAT` from the server environment.
+- `github_oauth` — uses the server-stored GitHub login token created by the OAuth flow.
+- `none` — disables repo-backed credentials.
+
+For the legacy environment provider, set one of:
 
 ```bash
 GITHUB_TOKEN=...
@@ -22,7 +36,14 @@ GITHUB_PAT=...
 PAT=...
 ```
 
-If no token is available, repo-backed services remain visible but update buttons are disabled by the service metadata returned from the API. The read-only check endpoint returns `token_missing` so the UI can explain why freshness cannot be checked.
+For GitHub login, set:
+
+```bash
+GITHUB_OAUTH_CLIENT_ID=...
+GITHUB_OAUTH_CLIENT_SECRET=...
+```
+
+If the selected provider has no token, repo-backed services remain visible but update buttons are disabled by the service metadata returned from the API. The read-only check endpoint returns `token_missing` so the UI can explain why freshness cannot be checked.
 
 ## Branch behavior
 
@@ -59,7 +80,7 @@ Each can be overridden through the matching environment variable.
 The check flow is:
 
 1. Resolve the service allowlist entry.
-2. Read the GitHub token from server environment.
+2. Read the selected repo provider token.
 3. Resolve the branch or remote default branch.
 4. Read the remote branch commit with `git ls-remote`.
 5. Acquire the same per-repo-path lock used by updates.
@@ -114,8 +135,11 @@ This survives control-plane reloads and lets the UI show the final result after 
 
 ## UI behavior
 
-The UI update button is enhanced by `service-update-enhancer.ts`:
+The UI update surface is enhanced by `repo-provider-panel.ts` and `service-update-enhancer.ts`:
 
+- displays the selected repo provider
+- lets the user choose environment PAT, GitHub login, or no provider
+- starts GitHub login when OAuth credentials are configured
 - injects a Check button next to repo-backed Update Latest buttons
 - calls `GET /api/v2/services/{service}/update-check` for read-only freshness checks
 - intercepts Update Latest button clicks before the older inline handler
