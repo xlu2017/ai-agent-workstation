@@ -11,6 +11,9 @@ Event types follow the spec:
   action_blocked, action_completed, action_failed, plan_paused, plan_resumed,
   plan_cancelled, plan_completed, child_session_started, memory_extracted,
   commit_created, pr_created
+
+Ambient context events are mirrored here only as safe summaries. Rich ambient
+payloads live under <sessions_dir>/<session_id>/ambient/events.jsonl.
 """
 
 from __future__ import annotations
@@ -62,6 +65,12 @@ class EventType(str, Enum):
     TEST_RUN = "test_run"
     VALIDATION_COMPLETED = "validation_completed"
     DIFF_SUMMARIZED = "diff_summarized"
+
+    # Ambient observation fabric mirror event types
+    AMBIENT_CONTEXT_COLLECTED = "ambient_context_collected"
+    AMBIENT_STATE_UPDATED = "ambient_state_updated"
+    CONTEXT_PACKET_BUILT = "context_packet_built"
+    SCREENSHOT_FALLBACK_CAPTURED = "screenshot_fallback_captured"
 
 
 @dataclass
