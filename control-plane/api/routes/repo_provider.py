@@ -14,6 +14,7 @@ from api.repo_provider import (
     disconnect_github_login,
     get_repo_provider_status,
     get_repo_provider_token,
+    list_accessible_repositories,
     select_repo_provider,
 )
 
@@ -43,6 +44,12 @@ def _default_redirect_uri(request: Request) -> str:
 def repo_provider_status() -> dict:
     """Return provider choices and selected credential status without secrets."""
     return get_repo_provider_status()
+
+
+@router.get("/repositories")
+def repo_provider_repositories(limit: int = 100) -> dict:
+    """Return repositories visible to the selected GitHub credential."""
+    return list_accessible_repositories(limit=limit)
 
 
 @router.post("/select")
