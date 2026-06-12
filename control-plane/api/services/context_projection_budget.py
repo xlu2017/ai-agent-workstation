@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from api.models.session_graph import (
-    ContextBudgetProfile,
     ContextProjectionBudget,
     MountMode,
     ProjectionSelector,
@@ -19,7 +18,7 @@ FOCUSED_SESSION_KINDS = {SessionKind.GOAL, SessionKind.WORK, SessionKind.QUESTIO
 @dataclass(frozen=True)
 class ProjectionBudgetDecision:
     budget: ContextProjectionBudget
-    profile: ContextBudgetProfile
+    profile: str
     include_selectors: list[ProjectionSelector] = field(default_factory=list)
     exclude_selectors: list[ProjectionSelector] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
@@ -103,12 +102,11 @@ def select_context_projection_budget(
     *,
     mapping_based: bool = False,
 ) -> ProjectionBudgetDecision:
-    """Select a context projection budget for mounted or adapted sessions.
+    """Select a task-scoped context projection budget for mounted or adapted sessions.
 
-    The selected budget is intentionally not a proxy for source size. It is a task-scoped
-    projection envelope. A huge mounted repo under a small goal should project only the
-    context that advances the active target, otherwise the mounted session pollutes and
-    dominates the active goal.
+    The budget is intentionally not a proxy for source size. A huge mounted repo under
+    a small goal should project only the context that advances the active target.
+    Otherwise the mounted session pollutes and dominates the active goal.
     """
     broad_to_focused = _broad_source_under_focused_target(source, target)
     common_evidence = [
@@ -123,15 +121,8 @@ def select_context_projection_budget(
 
     if _direct_ui_action_intent(user_intent, target):
         return ProjectionBudgetDecision(
-            profile=ContextBudgetProfile.DIRECT_UI_ACTION,
-            budget=ContextProjectionBudget(
-                max_tokens=1000,
-                max_files=0,
-                max_events=5,
-                recency_days=1,
-                profile=ContextBudgetProfile.DIRECT_UI_ACTION,
-                notes=["Direct UI actions should use ambient state and recent events, not repository context."],
-            ),
+            profile="direct_ui_action",
+            budget=ContextProjectionBudget(max_tokens=1000, max_files=0, max_events=5, recency_days=1),
             include_selectors=[ProjectionSelector.SUMMARY, ProjectionSelector.SUCCESS_CRITERIA],
             exclude_selectors=[
                 ProjectionSelector.RELEVANT_FILES,
@@ -145,18 +136,8 @@ def select_context_projection_budget(
 
     if _cross_repo_intent(source, target, mount_mode, user_intent):
         return ProjectionBudgetDecision(
-            profile=ContextBudgetProfile.CROSS_REPO_INTEGRATION,
-            budget=ContextProjectionBudget(
-                max_tokens=22000,
-                max_files=32,
-                max_events=160,
-                recency_days=60,
-                profile=ContextBudgetProfile.CROSS_REPO_INTEGRATION,
-                notes=[
-                    "Use selected interface files, adapter mappings, and recent failures instead of whole-repo history.",
-                    "Mounted sessions remain subordinate to the active goal even when their source is large.",
-                ],
-            ),
+            profile="cross_repo_integration",
+            budget=ContextProjectionBudget(max_tokens=22000, max_files=32, max_events=160, recency_days=60),
             include_selectors=[
                 ProjectionSelector.ADAPTER_MAPPINGS,
                 ProjectionSelector.INTERFACES,
@@ -172,20 +153,13 @@ def select_context_projection_budget(
                 ProjectionSelector.UNRELATED_CAPABILITIES,
             ],
             evidence=[*common_evidence, "budget_profile:cross_repo_integration"],
-            rationale="Project interface and adapter context for cross-session integration without importing source history wholesale.",
+            rationale="Project selected interface files, adapter mappings, and recent failures without importing source history wholesale.",
         )
 
     if _architecture_intent(user_intent):
         return ProjectionBudgetDecision(
-            profile=ContextBudgetProfile.ARCHITECTURE_PLANNING,
-            budget=ContextProjectionBudget(
-                max_tokens=20000,
-                max_files=60,
-                max_events=200,
-                recency_days=90,
-                profile=ContextBudgetProfile.ARCHITECTURE_PLANNING,
-                notes=["Architecture work may inspect broad structure but should still exclude unrelated mounted-session noise."],
-            ),
+            profile="architecture_planning",
+            budget=ContextProjectionBudget(max_tokens=20000, max_files=60, max_events=200, recency_days=90),
             include_selectors=[
                 ProjectionSelector.SUMMARY,
                 ProjectionSelector.FACETS,
@@ -201,15 +175,8 @@ def select_context_projection_budget(
 
     if _bug_fix_intent(user_intent):
         return ProjectionBudgetDecision(
-            profile=ContextBudgetProfile.KNOWN_REPO_BUG_FIX,
-            budget=ContextProjectionBudget(
-                max_tokens=6000,
-                max_files=12,
-                max_events=50,
-                recency_days=30,
-                profile=ContextBudgetProfile.KNOWN_REPO_BUG_FIX,
-                notes=["Bug fixes should favor known files, recent failures, and validation evidence."],
-            ),
+            profile="known_repo_bug_fix",
+            budget=ContextProjectionBudget(max_tokens=6000, max_files=12, max_events=50, recency_days=30),
             include_selectors=[
                 ProjectionSelector.SUMMARY,
                 ProjectionSelector.RELEVANT_FILES,
@@ -223,18 +190,8 @@ def select_context_projection_budget(
 
     if broad_to_focused:
         return ProjectionBudgetDecision(
-            profile=ContextBudgetProfile.FOCUSED_MOUNT_PROJECTION,
-            budget=ContextProjectionBudget(
-                max_tokens=4000,
-                max_files=12,
-                max_events=50,
-                recency_days=30,
-                profile=ContextBudgetProfile.FOCUSED_MOUNT_PROJECTION,
-                notes=[
-                    "Do not let the mounted session dominate the active goal.",
-                    "Only project context that can solve the current target.",
-                ],
-            ),
+            profile="focused_mount_projection",
+            budget=ContextProjectionBudget(max_tokens=4000, max_files=12, max_events=50, recency_days=30),
             include_selectors=[
                 ProjectionSelector.CAPABILITIES,
                 ProjectionSelector.BEHAVIORS,
@@ -249,19 +206,12 @@ def select_context_projection_budget(
                 ProjectionSelector.UNRELATED_CAPABILITIES,
             ],
             evidence=[*common_evidence, "budget_profile:focused_mount_projection"],
-            rationale="Project a smaller source view so the mounted session supports rather than replaces the active goal.",
+            rationale="Do not let the mounted session dominate the active goal. Only project enough context to solve the current target.",
         )
 
     return ProjectionBudgetDecision(
-        profile=ContextBudgetProfile.GENERAL_SESSION_CONTEXT,
-        budget=ContextProjectionBudget(
-            max_tokens=12000,
-            max_files=40,
-            max_events=200,
-            recency_days=30,
-            profile=ContextBudgetProfile.GENERAL_SESSION_CONTEXT,
-            notes=["General session context for same-scale or low-risk graph composition."],
-        ),
+        profile="general_session_context",
+        budget=ContextProjectionBudget(max_tokens=12000, max_files=40, max_events=200, recency_days=30),
         include_selectors=[ProjectionSelector.SUMMARY, ProjectionSelector.FACETS, ProjectionSelector.RELATIONSHIPS],
         exclude_selectors=[ProjectionSelector.HISTORICAL_NOISE],
         evidence=[*common_evidence, "budget_profile:general_session_context"],
