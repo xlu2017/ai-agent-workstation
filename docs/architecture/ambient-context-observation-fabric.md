@@ -154,6 +154,7 @@ All screenshots must be session-scoped, short-retention, and redacted where poss
 - Git/worktree state snapshots.
 - Desktop active window metadata.
 - Browser `/json/list` target polling.
+- Editor selection bridge event builder.
 
 ### Phase 3: browser and source mapping
 
@@ -186,8 +187,10 @@ control-plane/ambient/
   reducers.py
   evidence_graph.py
   context_packet.py
+  source_mapping.py
   collectors/
     browser_cdp.py
+    editor_bridge.py
     terminal_collector.py
     repo_watcher.py
     desktop_window.py
