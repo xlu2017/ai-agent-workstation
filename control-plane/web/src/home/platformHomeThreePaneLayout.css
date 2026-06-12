@@ -1,0 +1,128 @@
+.platform-three-pane-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: var(--platform-sidebar-width) minmax(0, 1fr) var(--platform-right-pane-width);
+  background: var(--platform-bg);
+  color: var(--platform-text);
+  font-family: var(--platform-font);
+}
+
+.platform-left-pane,
+.platform-right-pane {
+  background: var(--platform-surface);
+  border-color: var(--platform-border);
+  overflow: auto;
+}
+
+.platform-left-pane {
+  border-right: 1px solid var(--platform-border);
+}
+
+.platform-right-pane {
+  border-left: 1px solid var(--platform-border);
+}
+
+.platform-center-pane {
+  min-width: 0;
+  overflow: auto;
+}
+
+.platform-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px;
+  border-bottom: 1px solid var(--platform-border);
+}
+
+.platform-pane-title {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--platform-muted);
+}
+
+.platform-pane-body {
+  padding: 12px;
+}
+
+.platform-session-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  border-radius: var(--platform-radius-md);
+  padding: 10px;
+  cursor: pointer;
+  color: var(--platform-text);
+}
+
+.platform-session-row:hover,
+.platform-session-row.active {
+  background: var(--platform-accent-soft);
+}
+
+.platform-session-row-title {
+  display: block;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.platform-session-row-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--platform-muted);
+}
+
+.platform-status-pill {
+  display: inline-flex;
+  border: 1px solid var(--platform-border);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--platform-muted);
+}
+
+.platform-context-card {
+  border: 1px solid var(--platform-border);
+  border-radius: var(--platform-radius-lg);
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--platform-surface);
+}
+
+.platform-context-card h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.platform-context-card p {
+  margin: 0;
+  color: var(--platform-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.platform-home-centered-card {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+@media (max-width: 980px) {
+  .platform-three-pane-shell {
+    grid-template-columns: 1fr;
+  }
+  .platform-left-pane,
+  .platform-right-pane {
+    display: none;
+  }
+}
