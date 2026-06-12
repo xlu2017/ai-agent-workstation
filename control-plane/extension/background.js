@@ -1,4 +1,6 @@
 const MENU_ID = 'jg-select-component-for-agent-edit';
+const HISTORY_KEY = 'jgRegionEditHistory';
+const HISTORY_LIMIT = 40;
 const DEFAULT_SETTINGS = {
   controlPlaneUrl: 'http://127.0.0.1:9877',
   sessionId: '',
@@ -124,7 +126,45 @@ async function submitRegionEdit(payload) {
   if (!chatRes.ok) {
     return { ok: false, error: chatJson?.error || chatRes.statusText, sessionId, ambientEventId };
   }
+  await recordHistory({ payload, sessionId, ambientEventId, chat: chatJson });
   return { ok: true, sessionId, ambientEventId, chat: chatJson };
+}
+
+async function recordHistory({ payload, sessionId, ambientEventId, chat }) {
+  const current = await chrome.storage.local.get({ [HISTORY_KEY]: [] });
+  const history = Array.isArray(current[HISTORY_KEY]) ? current[HISTORY_KEY] : [];
+  const item = {
+    id: `region_${Date.now()}`,
+    createdAt: new Date().toISOString(),
+    sessionId,
+    page: payload.page || {},
+    selection: summarizeSelection(payload.selection || {}),
+    prompt: payload.prompt || '',
+    ambientEventId,
+    taskId: chat?.task_id || '',
+    status: chat?.state || 'submitted',
+  };
+  await chrome.storage.local.set({ [HISTORY_KEY]: [item, ...history].slice(0, HISTORY_LIMIT) });
+}
+
+function summarizeSelection(selection) {
+  const elements = Array.isArray(selection.elements) ? selection.elements : [];
+  return {
+    mode: selection.mode || 'drag_region',
+    bounds: selection.bounds || null,
+    elements: elements.slice(0, 30).map((element) => ({
+      tagName: element.tagName || '',
+      selector: element.selector || '',
+      text: truncate(element.text || '', 240),
+      role: element.role || '',
+      testId: element.testId || '',
+      id: element.id || '',
+      framework: element.framework || 'unknown',
+      componentName: element.componentName || '',
+      bounds: element.bounds || null,
+    })),
+    visualFallback: selection.visualFallback ? { available: !!selection.visualFallback.available, kind: selection.visualFallback.kind || '', bounds: selection.visualFallback.bounds || null } : null,
+  };
 }
 
 function truncate(value, max) {
