@@ -46,7 +46,7 @@ def _resolve_tool(tool_id: str, manifest_path: Path | None = None) -> dict[str, 
 
 
 def _target_dir(tool: dict[str, Any], manifest_path: Path | None = None) -> Path:
-    root = (manifest_path or CONTROL_PLANE_ROOT / "vendor" / "ambient-context" / "manifest.json").resolve().parents[2]
+    root = (manifest_path or CONTROL_PLANE_ROOT / "vendor" / "ambient-context" / "manifest.json").resolve().parents[3]
     return root / tool["target_dir"]
 
 
