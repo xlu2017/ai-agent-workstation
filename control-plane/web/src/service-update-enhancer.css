@@ -1,0 +1,12 @@
+.pm-update-info {
+  color: var(--yellow);
+}
+
+.pm-update-enhanced {
+  margin-top: 2px;
+}
+
+.pm-btn-update[aria-busy="true"] {
+  opacity: 0.85;
+  cursor: wait;
+}
