@@ -1,9 +1,18 @@
 /*
- * Hide only controls that do not currently trigger a meaningful route,
- * mutation, inspection view, copy action, or external target.
+ * TEMPORARY QUARANTINE ONLY.
+ *
+ * This stylesheet hides controls that do not currently trigger a meaningful
+ * route, mutation, inspection view, copy action, or external target. It is not
+ * the long-term feature-control layer for the platform.
+ *
+ * Durable product behavior must move to:
+ *   - GET /api/ui/capabilities
+ *   - control-plane/web/src/capabilities.tsx
+ *   - component-level FeatureGate / CapabilityButton rendering
  *
  * Implemented controls remain visible. When a control is wired to a backend
- * endpoint or a browser-local action, do not hide it here.
+ * endpoint or a browser-local action, do not hide it here. When a hidden
+ * control becomes real, delete the matching selector from this quarantine file.
  */
 
 /* Workspace menu placeholders. Settings remains available. */
