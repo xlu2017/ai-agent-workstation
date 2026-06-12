@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle, Clock, Database, Eye, Folder, GitBranch, Layers, Network, Play, RefreshCw, Search, ShieldCheck, Unplug } from 'lucide-react'
+import { AlertTriangle, CheckCircle, Clock, Database, Eye, GitBranch, Layers, Network, Play, RefreshCw, Search, ShieldCheck, Unplug } from 'lucide-react'
 import MountedSourcesPanel from './MountedSourcesPanel'
 import AdapterDetailPanel from './AdapterDetailPanel'
 import ContextProjectionPanel from './ContextProjectionPanel'
 import SessionGraphCrudPanel from './SessionGraphCrudPanel'
+import AutomationSettingsPanel from './AutomationSettingsPanel'
 import type { GraphSnapshot, MountResultView, SessionEdgeView, SessionEventView, SessionView } from './sessionGraphTypes'
 import { adapterFacet, formatId, sessionTitle } from './sessionGraphTypes'
 import './session-graph.css'
@@ -276,6 +277,7 @@ export default function SessionGraphExplorer() {
         <aside className="sg-side">
           <SessionDetail session={selectedSession} edges={graph.edges} events={graph.events} />
           {selectedEdge && <section className="sg-card"><div className="sg-card-header sg-card-header-split"><div><GitBranch size={16} /><h3>Edge detail</h3></div>{selectedEdge.type === 'mounted_under' && <button className="sg-button sg-button-danger" type="button" onClick={() => unmount(selectedEdge)} disabled={busy}><Unplug size={13} /> Unmount</button>}</div><div className="sg-detail-grid"><div><strong>Type</strong><span>{selectedEdge.type}</span></div><div><strong>Source</strong><span>{sessionTitle(sessionById, selectedEdge.source_session_id)}</span></div><div><strong>Target</strong><span>{sessionTitle(sessionById, selectedEdge.target_session_id)}</span></div><div><strong>ID</strong><span>{formatId(selectedEdge.id)}</span></div></div><JsonPreview value={selectedEdge.metadata} /></section>}
+          <AutomationSettingsPanel graph={graph} selectedSession={selectedSession} />
           <MountedSourcesPanel sessions={graph.sessions} edges={graph.edges} selectedEdgeId={selectedEdgeId} onSelectEdge={setSelectedEdgeId} onUnmount={unmount} busy={busy} />
           <AdapterDetailPanel sessions={graph.sessions} selectedSessionId={selectedSessionId} onSelectSession={setSelectedSessionId} />
           <ContextProjectionPanel projections={graph.projections} sessions={graph.sessions} selectedSessionId={selectedSessionId} previewProjection={previewResult?.context_projection_delta || null} />
