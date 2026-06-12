@@ -1,3 +1,5 @@
+@import './repo-source-panel.css';
+
 .repo-provider-panel {
   border: 1px solid var(--border, #334155);
   background: var(--panel, #0f172a);
