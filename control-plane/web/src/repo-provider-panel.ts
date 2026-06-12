@@ -90,7 +90,7 @@ async function selectProvider(provider: RepoProviderId): Promise<void> {
       method: 'POST',
       body: JSON.stringify({ provider }),
     })
-    setMessage(`Repo provider set to ${provider.replaceAll('_', ' ')}.`, 'success')
+    setMessage(`Repo provider set to ${provider.replace(/_/g, ' ')}.`, 'success')
   } catch (error) {
     setMessage(error instanceof Error ? error.message : 'Unable to select repo provider.', 'error')
   }
