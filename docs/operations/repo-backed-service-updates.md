@@ -22,7 +22,7 @@ GITHUB_PAT=...
 PAT=...
 ```
 
-If no token is available, repo-backed services remain visible but update buttons are disabled by the service metadata returned from the API.
+If no token is available, repo-backed services remain visible but update buttons are disabled by the service metadata returned from the API. The read-only check endpoint returns `token_missing` so the UI can explain why freshness cannot be checked.
 
 ## Branch behavior
 
@@ -51,6 +51,34 @@ JUBILANT_GOGGLES_REPO_PATH=/opt/workstation/repos/jubilant-goggles
 ```
 
 Each can be overridden through the matching environment variable.
+
+## Check Latest sequence
+
+`GET /api/v2/services/{service}/update-check` is read-only. It does not run `git fetch`, `git reset`, install, build, or restart commands.
+
+The check flow is:
+
+1. Resolve the service allowlist entry.
+2. Read the GitHub token from server environment.
+3. Resolve the branch or remote default branch.
+4. Read the remote branch commit with `git ls-remote`.
+5. Acquire the same per-repo-path lock used by updates.
+6. Read the local checkout commit if the checkout exists.
+7. Return a structured status.
+
+Returned statuses include:
+
+- `up_to_date`
+- `update_available`
+- `missing_checkout`
+- `invalid_checkout`
+- `token_missing`
+- `branch_resolve_failed`
+- `remote_check_failed`
+- `local_commit_missing`
+- `update_locked`
+
+The UI adds a **Check** button beside **Update Latest** for repo-backed services. This button calls the read-only endpoint and displays whether an update is available before the user mutates the service.
 
 ## Update sequence
 
@@ -88,6 +116,8 @@ This survives control-plane reloads and lets the UI show the final result after 
 
 The UI update button is enhanced by `service-update-enhancer.ts`:
 
+- injects a Check button next to repo-backed Update Latest buttons
+- calls `GET /api/v2/services/{service}/update-check` for read-only freshness checks
 - intercepts Update Latest button clicks before the older inline handler
 - calls `POST /api/v2/services/{service}/update-latest`
 - shows in-progress status
@@ -102,6 +132,7 @@ Structured errors include:
 - `UNKNOWN_SERVICE`
 - `NO_TOKEN`
 - `BRANCH_RESOLVE_FAILED`
+- `REMOTE_CHECK_FAILED`
 - `UPDATE_LOCKED`
 - `CLONE_FAILED`
 - `NOT_A_REPO`
