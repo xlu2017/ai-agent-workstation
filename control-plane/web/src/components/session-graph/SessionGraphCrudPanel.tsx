@@ -2,9 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { Copy, Edit3, GitBranch, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import type { SessionEdgeView, SessionView } from './sessionGraphTypes'
 
-const sessionKinds = ['app', 'repo', 'goal', 'work', 'question', 'validation', 'adapter', 'runtime', 'memory', 'artifact', 'container']
-const sessionStatuses = ['proposed', 'active', 'paused', 'blocked', 'completed', 'cancelled', 'archived']
-const edgeTypes = ['contains', 'references', 'depends_on', 'blocks', 'implements', 'validates', 'produces', 'consumes', 'mounted_under', 'adapted_under', 'component_of', 'sibling_of']
+const fallbackSessionKinds = ['app', 'repo', 'goal', 'work', 'question', 'validation', 'pull_request', 'deployment', 'adapter', 'runtime', 'memory', 'artifact', 'container']
+const fallbackSessionStatuses = ['proposed', 'active', 'paused', 'blocked', 'completed', 'cancelled', 'superseded', 'merged', 'archived']
+const fallbackEdgeTypes = ['contains', 'component_of', 'depends_on', 'blocks', 'derived_from', 'supersedes', 'sibling_of', 'implements', 'validates', 'produces', 'consumes', 'references', 'merged_into', 'forked_from', 'delegates_to', 'deprecated_moved_under', 'mounted_under', 'adapted_under', 'adapts_from', 'adapts_into', 'projects_as', 'semantic_alias_of']
+
+type GraphOptions = {
+  session_kinds?: string[]
+  session_statuses?: string[]
+  edge_types?: string[]
+}
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } })
@@ -33,6 +39,11 @@ export default function SessionGraphCrudPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [options, setOptions] = useState<Required<GraphOptions>>({
+    session_kinds: fallbackSessionKinds,
+    session_statuses: fallbackSessionStatuses,
+    edge_types: fallbackEdgeTypes,
+  })
 
   const [newKind, setNewKind] = useState('goal')
   const [newTitle, setNewTitle] = useState('')
@@ -52,6 +63,29 @@ export default function SessionGraphCrudPanel({
   const [edgeSourceId, setEdgeSourceId] = useState('')
   const [edgeTargetId, setEdgeTargetId] = useState('')
   const [selectedEdgeType, setSelectedEdgeType] = useState('references')
+
+  const sessionKinds = options.session_kinds.length ? options.session_kinds : fallbackSessionKinds
+  const sessionStatuses = options.session_statuses.length ? options.session_statuses : fallbackSessionStatuses
+  const edgeTypes = options.edge_types.length ? options.edge_types : fallbackEdgeTypes
+
+  useEffect(() => {
+    let cancelled = false
+    apiFetch<GraphOptions>('/api/session-graph/options')
+      .then(data => {
+        if (cancelled) return
+        setOptions({
+          session_kinds: data.session_kinds?.length ? data.session_kinds : fallbackSessionKinds,
+          session_statuses: data.session_statuses?.length ? data.session_statuses : fallbackSessionStatuses,
+          edge_types: data.edge_types?.length ? data.edge_types : fallbackEdgeTypes,
+        })
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOptions({ session_kinds: fallbackSessionKinds, session_statuses: fallbackSessionStatuses, edge_types: fallbackEdgeTypes })
+        }
+      })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     setEditTitle(selectedSession?.title || '')
@@ -112,11 +146,7 @@ export default function SessionGraphCrudPanel({
           facets: selectedSession.facets || {},
           policy: selectedSession.policy,
           state: selectedSession.state || {},
-          metadata: {
-            ...(selectedSession.metadata || {}),
-            source: 'session-graph-duplicate-action',
-            duplicated_from_session_id: selectedSession.id,
-          },
+          metadata: { ...(selectedSession.metadata || {}), source: 'session-graph-duplicate-action', duplicated_from_session_id: selectedSession.id },
         }),
       })
       onSelectSession(response.session.id)
@@ -134,10 +164,7 @@ export default function SessionGraphCrudPanel({
           summary: `Child session of ${selectedSession.title}.`,
           parent_id: selectedSession.id,
           root_id: selectedSession.root_id || selectedSession.id,
-          metadata: {
-            source: 'session-graph-create-child-action',
-            parent_session_title: selectedSession.title,
-          },
+          metadata: { source: 'session-graph-create-child-action', parent_session_title: selectedSession.title },
         }),
       })
       onSelectSession(response.session.id)
@@ -155,11 +182,7 @@ export default function SessionGraphCrudPanel({
           summary: `Sibling session of ${selectedSession.title}.`,
           parent_id: selectedSession.parent_id || null,
           root_id: selectedSession.root_id || selectedSession.id,
-          metadata: {
-            source: 'session-graph-create-sibling-action',
-            sibling_of_session_id: selectedSession.id,
-            sibling_of_session_title: selectedSession.title,
-          },
+          metadata: { source: 'session-graph-create-sibling-action', sibling_of_session_id: selectedSession.id, sibling_of_session_title: selectedSession.title },
         }),
       })
       onSelectSession(response.session.id)
@@ -218,7 +241,7 @@ export default function SessionGraphCrudPanel({
         <span className="sg-count-pill">sessions + edges</span>
       </div>
 
-      <p className="sg-muted sg-small">Create and edit graph topology directly. Use mounts for semantic repo projection; use raw edges for explicit graph relationships.</p>
+      <p className="sg-muted sg-small">Create and edit graph topology directly. Option lists come from /api/session-graph/options so the UI tracks the canonical graph schema.</p>
       {error && <div className="sg-error sg-crud-message">{error}</div>}
       {notice && <div className="sg-crud-notice">{notice}</div>}
 
