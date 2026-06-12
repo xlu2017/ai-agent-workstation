@@ -5,11 +5,7 @@ type Topology = { root_session_id: string; backend: AnyRecord; frontends: AnyRec
 
 const MULTI_FRONTEND_API = window.location.port === '5173' ? `${window.location.protocol}//${window.location.hostname}:9877/api` : '/api'
 function apiUrl(path: string): string { return `${MULTI_FRONTEND_API}${path.startsWith('/') ? path : `/${path}`}` }
-async function json<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(apiUrl(path), { ...init, headers: { 'Content-Type': 'application/json' } })
-  if (!response.ok) throw new Error(await response.text() || `${response.status} ${response.statusText}`)
-  return response.json() as Promise<T>
-}
+async function json<T>(path: string, init?: RequestInit): Promise<T> { const response = await fetch(apiUrl(path), { ...init, headers: { 'Content-Type': 'application/json' } }); if (!response.ok) throw new Error(await response.text() || `${response.status} ${response.statusText}`); return response.json() as Promise<T> }
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] { const n = document.createElement(tag); if (className) n.className = className; if (text) n.textContent = text; return n }
 function inputField(label: string, value: string): HTMLLabelElement { const l = el('label', 'mf-field'); const s = el('span', '', label); const i = el('input'); i.value = value; l.append(s, i); return l }
 function safePort(url: string): number | null { try { return Number(new URL(url).port || 0) || null } catch { return null } }
@@ -18,69 +14,22 @@ async function snapshotSessions(): Promise<SessionRecord[]> { return (await json
 async function createSession(payload: AnyRecord): Promise<SessionRecord> { return (await json<{ session: SessionRecord }>('/session-graph/sessions', { method: 'POST', body: JSON.stringify(payload) })).session }
 async function patchSession(sessionId: string, payload: AnyRecord): Promise<void> { await json(`/session-graph/sessions/${encodeURIComponent(sessionId)}`, { method: 'PATCH', body: JSON.stringify(payload) }) }
 async function createEdge(type: string, source: string, target: string, metadata: AnyRecord): Promise<void> { await json('/session-graph/edges', { method: 'POST', body: JSON.stringify({ type, source_session_id: source, target_session_id: target, metadata }) }) }
-function makeFrontend(label: string, os: string, runtime: string, backendId: string, baseUrl: string, width: number, height: number): AnyRecord {
-  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-  return { id: `frontend-${slug}-${Date.now()}`, label, backend_instance_id: backendId, target_base_url: baseUrl, health: 'unknown', current_url: `${baseUrl}/`, auth_identity: `${slug}-user@example.test`, device_profile: { id: `device-${slug}`, label, os_family: os, runtime_kind: runtime, viewport_width: width, viewport_height: height } }
-}
-function demoFrontends(backendId: string, baseUrl: string): AnyRecord[] {
-  return [makeFrontend('Chrome desktop', 'web', 'browser', backendId, baseUrl, 1440, 900), makeFrontend('Android emulator', 'android', 'emulator', backendId, baseUrl, 412, 915), makeFrontend('iOS simulator', 'ios', 'simulator', backendId, baseUrl, 390, 844)]
-}
+function makeFrontend(label: string, os: string, runtime: string, backendId: string, baseUrl: string, width: number, height: number): AnyRecord { const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-'); return { id: `frontend-${slug}-${Date.now()}`, label, backend_instance_id: backendId, target_base_url: baseUrl, health: 'unknown', current_url: `${baseUrl}/`, auth_identity: `${slug}-user@example.test`, device_profile: { id: `device-${slug}`, label, os_family: os, runtime_kind: runtime, viewport_width: width, viewport_height: height } } }
+function demoFrontends(backendId: string, baseUrl: string): AnyRecord[] { return [makeFrontend('Chrome desktop', 'web', 'browser', backendId, baseUrl, 1440, 900), makeFrontend('Android emulator', 'android', 'emulator', backendId, baseUrl, 412, 915), makeFrontend('iOS simulator', 'ios', 'simulator', backendId, baseUrl, 390, 844)] }
 async function createTopology(title: string, baseUrl: string): Promise<void> {
   const backend: AnyRecord = { id: `backend-${Date.now()}`, label: 'API', base_url: baseUrl, health: 'unknown', port: safePort(baseUrl) }
-  try {
-    await json('/multi-frontend/topologies', { method: 'POST', body: JSON.stringify({ app_title: title, intent: 'Process multiple frontends against one backend.', backend, frontends: demoFrontends(backend.id, baseUrl), isolation_mode: 'shared_backend_separate_user' }) })
-    return
-  } catch { /* The dedicated router may not be mounted yet; use session graph CRUD. */ }
+  try { await json('/multi-frontend/topologies', { method: 'POST', body: JSON.stringify({ app_title: title, intent: 'Process multiple frontends against one backend.', backend, frontends: demoFrontends(backend.id, baseUrl), isolation_mode: 'shared_backend_separate_user' }) }); return } catch { /* The dedicated router may not be mounted yet; use session graph CRUD. */ }
   const root = await createSession({ kind: 'app', title, summary: 'Multi-frontend app session.', status: 'active', facets: { app: { multi_frontend: true, isolation_mode: 'shared_backend_separate_user' } }, state: {}, metadata: { created_by: 'multi_frontend_panel' } })
   const backendSession = await createSession({ kind: 'runtime', title: `Backend: ${backend.label}`, summary: 'Shared backend runtime.', status: 'active', parent_id: root.id, root_id: root.id, facets: { runtime: { role: 'backend', backend_instance: backend } }, state: { health: backend.health, base_url: backend.base_url }, metadata: { multi_frontend_role: 'backend' } })
   const frontends = demoFrontends(backend.id, baseUrl)
   const frontendSessions: SessionRecord[] = []
-  for (const frontend of frontends) {
-    const session = await createSession({ kind: 'runtime', title: `Frontend: ${frontend.label}`, summary: 'Isolated frontend client.', status: 'active', parent_id: root.id, root_id: root.id, facets: { runtime: { role: 'frontend_client', frontend_instance: frontend } }, state: { health: frontend.health, current_url: frontend.current_url, target_base_url: frontend.target_base_url }, metadata: { multi_frontend_role: 'frontend', backend_instance_id: backend.id, device_profile_id: frontend.device_profile.id } })
-    frontend.session_id = session.id
-    frontendSessions.push(session)
-  }
-  await createEdge('contains', root.id, backendSession.id, { relationship: 'app_has_shared_backend' })
-  for (const session of frontendSessions) { await createEdge('contains', root.id, session.id, { relationship: 'app_has_frontend_client' }); await createEdge('depends_on', session.id, backendSession.id, { relationship: 'frontend_uses_shared_backend' }) }
+  for (const frontend of frontends) { const session = await createSession({ kind: 'runtime', title: `Frontend: ${frontend.label}`, summary: 'Isolated frontend client.', status: 'active', parent_id: root.id, root_id: root.id, facets: { runtime: { role: 'frontend_client', frontend_instance: frontend } }, state: { health: frontend.health, current_url: frontend.current_url, target_base_url: frontend.target_base_url }, metadata: { multi_frontend_role: 'frontend', backend_instance_id: backend.id, device_profile_id: frontend.device_profile.id } }); frontend.session_id = session.id; frontendSessions.push(session) }
+  for (const session of frontendSessions) await createEdge('depends_on', session.id, backendSession.id, { relationship: 'frontend_uses_shared_backend' })
   const topology: Topology = { root_session_id: root.id, backend: { ...backend, session_id: backendSession.id }, frontends, isolation_mode: 'shared_backend_separate_user', traces: [], updated_at: new Date().toISOString() }
   await patchSession(root.id, { state: { multi_frontend_topology: topology }, reason: 'Store multi-frontend topology created from UI.' })
 }
-async function registerTrace(topology: Topology): Promise<void> {
-  const frontend = topology.frontends[0]; if (!frontend) return
-  const traceId = `trace-${Date.now()}`
-  try { await json('/multi-frontend/traces', { method: 'POST', body: JSON.stringify({ root_session_id: topology.root_session_id, backend_instance_id: topology.backend.id, frontend_instance_id: frontend.id, trace_id: traceId, method: 'GET', url: '/', status_code: 200, backend_route: 'demo.root', user_flow_id: 'demo-flow' }) }); return } catch { /* fallback below */ }
-  const updated: Topology = JSON.parse(JSON.stringify(topology))
-  updated.traces = [...(updated.traces || []), { id: `trace-${Date.now()}`, root_session_id: topology.root_session_id, backend_instance_id: topology.backend.id, frontend_instance_id: frontend.id, trace_id: traceId, method: 'GET', url: '/', status_code: 200, backend_route: 'demo.root', user_flow_id: 'demo-flow', created_at: new Date().toISOString() }]
-  updated.frontends = updated.frontends.map((item) => item.id === frontend.id ? { ...item, latest_trace_id: traceId } : item)
-  updated.updated_at = new Date().toISOString()
-  await patchSession(topology.root_session_id, { state: { multi_frontend_topology: updated }, reason: 'Register multi-frontend trace from UI.' })
-}
-function renderMatrix(container: HTMLElement, topology: Topology): void {
-  container.innerHTML = ''
-  const summary = el('div', 'mf-summary'); summary.append(el('strong', '', topology.backend.label || 'Backend'), el('span', '', topology.backend.base_url || ''), el('span', '', topology.isolation_mode), el('span', '', `${topology.traces?.length || 0} trace(s)`))
-  const table = el('table', 'mf-table'); table.innerHTML = '<thead><tr><th>Frontend</th><th>OS</th><th>Runtime</th><th>URL</th><th>Health</th><th>Latest trace</th></tr></thead>'
-  const body = el('tbody')
-  for (const frontend of topology.frontends) { const row = el('tr'); for (const value of [frontend.label, frontend.device_profile?.os_family, frontend.device_profile?.runtime_kind, frontend.current_url, frontend.health, frontend.latest_trace_id || 'none']) row.append(el('td', '', String(value || ''))); body.append(row) }
-  table.append(body)
-  const actions = el('div', 'mf-actions'); const trace = el('button', 'mf-btn', 'Register demo trace'); trace.onclick = async () => { await registerTrace(topology); await refresh(container.closest('.mf-panel') as HTMLElement) }; actions.append(trace)
-  container.append(summary, table, actions)
-}
-async function refresh(panel: HTMLElement): Promise<void> {
-  const matrix = panel.querySelector<HTMLElement>('[data-mf-matrix]')!; const status = panel.querySelector<HTMLElement>('[data-mf-status]')!; status.textContent = 'Loading topology…'
-  try { const topologies = (await snapshotSessions()).map(topologyOf).filter((item): item is Topology => Boolean(item)); if (!topologies.length) { matrix.innerHTML = '<div class="mf-empty">No multi-frontend topology exists yet.</div>'; status.textContent = 'Ready'; return } renderMatrix(matrix, topologies[topologies.length - 1]); status.textContent = `Loaded ${topologies.length} topology record(s)` } catch (error) { matrix.innerHTML = ''; matrix.append(el('div', 'mf-error', (error as Error).message)); status.textContent = 'Error' }
-}
-function install(): void {
-  if (document.getElementById('mf-launcher')) return
-  const launcher = el('button', 'mf-launcher', 'Multi-frontend'); launcher.id = 'mf-launcher'
-  const panel = el('section', 'mf-panel mf-hidden'); const close = el('button', '', '×'); const header = el('header'); header.append(el('strong', '', 'Multi-frontend shared backend'), close)
-  const body = el('div', 'mf-body'); body.append(el('p', '', 'Coordinate desktop browsers and OS emulators against one backend session.'))
-  const title = inputField('App session title', 'Multi-client app'); const base = inputField('Backend base URL', `${window.location.protocol}//${window.location.hostname}:8080`)
-  const actions = el('div', 'mf-actions'); const create = el('button', 'mf-btn mf-primary', 'Create demo topology'); const refreshButton = el('button', 'mf-btn', 'Refresh matrix')
-  const status = el('div', 'mf-status', 'Ready'); status.setAttribute('data-mf-status', ''); const matrix = el('div'); matrix.setAttribute('data-mf-matrix', '')
-  create.onclick = async () => { status.textContent = 'Creating topology…'; try { await createTopology(title.querySelector('input')!.value, base.querySelector('input')!.value); await refresh(panel) } catch (error) { status.textContent = (error as Error).message } }
-  refreshButton.onclick = () => { void refresh(panel) }
-  actions.append(create, refreshButton); body.append(title, base, actions, status, matrix); panel.append(header, body)
-  close.onclick = () => panel.classList.add('mf-hidden'); launcher.onclick = () => { panel.classList.toggle('mf-hidden'); if (!panel.classList.contains('mf-hidden')) void refresh(panel) }
-  document.body.append(launcher, panel)
-}
+async function registerTrace(topology: Topology): Promise<void> { const frontend = topology.frontends[0]; if (!frontend) return; const traceId = `trace-${Date.now()}`; try { await json('/multi-frontend/traces', { method: 'POST', body: JSON.stringify({ root_session_id: topology.root_session_id, backend_instance_id: topology.backend.id, frontend_instance_id: frontend.id, trace_id: traceId, method: 'GET', url: '/', status_code: 200, backend_route: 'demo.root', user_flow_id: 'demo-flow' }) }); return } catch { /* fallback below */ } const updated: Topology = JSON.parse(JSON.stringify(topology)); updated.traces = [...(updated.traces || []), { id: `trace-${Date.now()}`, root_session_id: topology.root_session_id, backend_instance_id: topology.backend.id, frontend_instance_id: frontend.id, trace_id: traceId, method: 'GET', url: '/', status_code: 200, backend_route: 'demo.root', user_flow_id: 'demo-flow', created_at: new Date().toISOString() }]; updated.frontends = updated.frontends.map((item) => item.id === frontend.id ? { ...item, latest_trace_id: traceId } : item); updated.updated_at = new Date().toISOString(); await patchSession(topology.root_session_id, { state: { multi_frontend_topology: updated }, reason: 'Register multi-frontend trace from UI.' }) }
+function renderMatrix(container: HTMLElement, topology: Topology): void { container.innerHTML = ''; const summary = el('div', 'mf-summary'); summary.append(el('strong', '', topology.backend.label || 'Backend'), el('span', '', topology.backend.base_url || ''), el('span', '', topology.isolation_mode), el('span', '', `${topology.traces?.length || 0} trace(s)`)); const table = el('table', 'mf-table'); table.innerHTML = '<thead><tr><th>Frontend</th><th>OS</th><th>Runtime</th><th>URL</th><th>Health</th><th>Latest trace</th></tr></thead>'; const body = el('tbody'); for (const frontend of topology.frontends) { const row = el('tr'); for (const value of [frontend.label, frontend.device_profile?.os_family, frontend.device_profile?.runtime_kind, frontend.current_url, frontend.health, frontend.latest_trace_id || 'none']) row.append(el('td', '', String(value || ''))); body.append(row) } table.append(body); const actions = el('div', 'mf-actions'); const trace = el('button', 'mf-btn', 'Register demo trace'); trace.onclick = async () => { await registerTrace(topology); await refresh(container.closest('.mf-panel') as HTMLElement) }; actions.append(trace); container.append(summary, table, actions) }
+async function refresh(panel: HTMLElement): Promise<void> { const matrix = panel.querySelector<HTMLElement>('[data-mf-matrix]')!; const status = panel.querySelector<HTMLElement>('[data-mf-status]')!; status.textContent = 'Loading topology…'; try { const topologies = (await snapshotSessions()).map(topologyOf).filter((item): item is Topology => Boolean(item)); if (!topologies.length) { matrix.innerHTML = '<div class="mf-empty">No multi-frontend topology exists yet.</div>'; status.textContent = 'Ready'; return } renderMatrix(matrix, topologies[topologies.length - 1]); status.textContent = `Loaded ${topologies.length} topology record(s)` } catch (error) { matrix.innerHTML = ''; matrix.append(el('div', 'mf-error', (error as Error).message)); status.textContent = 'Error' } }
+function install(): void { if (document.getElementById('mf-launcher')) return; const launcher = el('button', 'mf-launcher', 'Multi-frontend'); launcher.id = 'mf-launcher'; const panel = el('section', 'mf-panel mf-hidden'); const close = el('button', '', '×'); const header = el('header'); header.append(el('strong', '', 'Multi-frontend shared backend'), close); const body = el('div', 'mf-body'); body.append(el('p', '', 'Coordinate desktop browsers and OS emulators against one backend session.')); const title = inputField('App session title', 'Multi-client app'); const base = inputField('Backend base URL', `${window.location.protocol}//${window.location.hostname}:8080`); const actions = el('div', 'mf-actions'); const create = el('button', 'mf-btn mf-primary', 'Create demo topology'); const refreshButton = el('button', 'mf-btn', 'Refresh matrix'); const status = el('div', 'mf-status', 'Ready'); status.setAttribute('data-mf-status', ''); const matrix = el('div'); matrix.setAttribute('data-mf-matrix', ''); create.onclick = async () => { status.textContent = 'Creating topology…'; try { await createTopology(title.querySelector('input')!.value, base.querySelector('input')!.value); await refresh(panel) } catch (error) { status.textContent = (error as Error).message } }; refreshButton.onclick = () => { void refresh(panel) }; actions.append(create, refreshButton); body.append(title, base, actions, status, matrix); panel.append(header, body); close.onclick = () => panel.classList.add('mf-hidden'); launcher.onclick = () => { panel.classList.toggle('mf-hidden'); if (!panel.classList.contains('mf-hidden')) void refresh(panel) }; document.body.append(launcher, panel) }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install); else install()
