@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import App from './App'
+import PlatformHome from './PlatformHome'
 import './server-app-panel'
 import './repo-provider-panel'
 import './service-update-enhancer'
@@ -15,6 +15,6 @@ import './multi-frontend-panel'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <PlatformHome />
   </StrictMode>
 )
