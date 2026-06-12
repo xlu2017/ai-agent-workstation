@@ -7,6 +7,8 @@ import './service-update-enhancer.css'
 import './no-placeholder-actions.css'
 import './ux-polish.css'
 import './server-app-launcher.css'
+import './multi-frontend-panel.css'
+import './multi-frontend-panel'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
