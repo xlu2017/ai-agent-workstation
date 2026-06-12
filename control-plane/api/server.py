@@ -23,6 +23,7 @@ sys.path.insert(0, str(CONTROL_PLANE_ROOT / "core"))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.ambient import router as ambient_router
 from api.routes.health import router as health_router
 from api.routes.remote_desktop import router as remote_desktop_router
 from api.routes.sessions import router as sessions_router
@@ -52,6 +53,10 @@ app.add_middleware(
 # --- Router composition ---
 app.include_router(health_router)
 app.include_router(remote_desktop_router)
+# Ambient routes intentionally mount before the deprecated /api/sessions catch-all
+# so browser/editor/terminal evidence can continue to target session-scoped
+# ambient endpoints while legacy chat/session CRUD remains closed.
+app.include_router(ambient_router)
 app.include_router(sessions_router)
 app.include_router(session_events_router)
 app.include_router(repo_provider_router)
