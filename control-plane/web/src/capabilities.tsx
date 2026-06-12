@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 
 export type CapabilityVisibility = 'render' | 'disabled' | 'omit'
 
@@ -101,7 +101,7 @@ export function CapabilityButton({
   disabled,
   title,
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
   capability?: UiCapability
 }) {
   if (!capability || capability.visibility === 'omit') return null
