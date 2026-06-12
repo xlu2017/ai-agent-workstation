@@ -73,6 +73,18 @@
   background: var(--bg);
 }
 
+.as-app-confidence-running {
+  border-color: var(--green, #22c55e);
+}
+
+.as-app-confidence-installed {
+  border-color: var(--blue, #3b82f6);
+}
+
+.as-app-confidence-catalog-only {
+  border-style: dashed;
+}
+
 .as-app-card-main {
   min-width: 0;
 }
@@ -104,6 +116,35 @@
   border-radius: 999px;
   background: var(--surface2);
   color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.as-app-resolver-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 5px 0;
+}
+
+.as-app-resolver-row code {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.as-app-confidence {
+  display: inline-flex;
+  width: fit-content;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface2);
+  color: var(--text);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
