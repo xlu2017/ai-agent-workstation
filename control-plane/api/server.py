@@ -23,6 +23,7 @@ sys.path.insert(0, str(CONTROL_PLANE_ROOT / "core"))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.multi_frontend import router as multi_frontend_router
 from api.routes.health import router as health_router
 from api.routes.remote_desktop import router as remote_desktop_router
 from api.routes.sessions import router as sessions_router
@@ -52,3 +53,4 @@ app.include_router(models_router)
 app.include_router(knowledge_router)
 app.include_router(filesystem_router)
 app.include_router(session_graph_router)
+app.include_router(multi_frontend_router)
