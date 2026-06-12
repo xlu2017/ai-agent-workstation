@@ -2,11 +2,12 @@
 Server-side GitHub update logic for repo-backed services.
 
 This module powers the dashboard's "Update latest" action. It is intentionally
-server-side: the browser never receives the personal access token used for
-private GitHub fetches.
+server-side: the browser never receives the credential used for private GitHub
+fetches. Credentials are selected by the repo provider layer, while repository
+identity is supplied by the repo source registry.
 
 Security and correctness rules:
-- The PAT is read from GITHUB_TOKEN, GITHUB_PAT, or PAT and is never returned.
+- GitHub credentials are never returned to the browser.
 - GitHub tokens are injected only into transient fetch/clone URLs.
 - Command output is sanitized before it is surfaced to the UI.
 - A per-repo-path lock prevents concurrent updates to shared checkouts.
@@ -24,99 +25,75 @@ import re
 import subprocess
 import threading
 import time
+from collections.abc import MutableMapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
+
+from api.repo_provider import get_repo_provider_token
+from api.repo_source_registry import get_all_service_update_configs, get_service_update_config
 
 logger = logging.getLogger(__name__)
-
-
-def _install_session_architecture_router_bootstrap() -> None:
-    """Mount the session architecture router from the existing server import path."""
-    try:
-        from fastapi import FastAPI
-    except Exception as exc:  # pragma: no cover - defensive import guard
-        logger.warning("Unable to import FastAPI for session architecture router bootstrap: %s", exc)
-        return
-
-    original_include_router = getattr(FastAPI, "include_router", None)
-    if original_include_router is None:
-        return
-    if getattr(original_include_router, "_session_architecture_bootstrap", False):
-        return
-
-    def include_router_with_session_architecture(self, router, *args, **kwargs):
-        result = original_include_router(self, router, *args, **kwargs)
-        if getattr(self, "_session_architecture_router_mounted", False):
-            return result
-        if getattr(router, "prefix", "") != "/api/session-graph":
-            return result
-        try:
-            from api.session_architecture import router as session_architecture_router
-
-            original_include_router(self, session_architecture_router)
-            setattr(self, "_session_architecture_router_mounted", True)
-        except Exception as exc:  # pragma: no cover - defensive import guard
-            logger.warning("Unable to mount session architecture router: %s", exc)
-        return result
-
-    setattr(include_router_with_session_architecture, "_session_architecture_bootstrap", True)
-    FastAPI.include_router = include_router_with_session_architecture
-
-
-_install_session_architecture_router_bootstrap()
 
 CONTROL_PLANE_ROOT = Path(__file__).resolve().parent.parent
 _CONTROL_PLANE_REPO_PATH = str(CONTROL_PLANE_ROOT.parent.resolve())
 UPDATE_STATUS_PATH = Path(os.environ.get("SERVICE_UPDATE_STATUS_PATH", "/opt/workstation/logs/service-updates.json"))
 
 
-def _env(name: str, default: str | None = None) -> str | None:
-    value = os.environ.get(name)
-    return value if value not in (None, "") else default
+class ServiceConfigsView(MutableMapping[str, dict]):
+    """Dynamic service update config view backed by repo_source_registry.
+
+    Tests may still monkeypatch this mapping; runtime reads come from the
+    persisted registry so repo names are data rather than service-updater code.
+    """
+
+    def __init__(self) -> None:
+        self._overrides: dict[str, dict] = {}
+
+    def _all(self) -> dict[str, dict]:
+        return {**get_all_service_update_configs(), **self._overrides}
+
+    def __getitem__(self, key: str) -> dict:
+        if key in self._overrides:
+            return self._overrides[key]
+        config = get_service_update_config(key)
+        if config is None:
+            raise KeyError(key)
+        return config
+
+    def __setitem__(self, key: str, value: dict) -> None:
+        self._overrides[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        if key in self._overrides:
+            del self._overrides[key]
+            return
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._all())
+
+    def __len__(self) -> int:
+        return len(self._all())
+
+    def get(self, key: str, default: object = None) -> dict | object:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __contains__(self, key: object) -> bool:
+        return isinstance(key, str) and self.get(key) is not None
 
 
-# ---------------------------------------------------------------------------
-# Service configuration (static allowlist)
-# ---------------------------------------------------------------------------
-
-SERVICE_CONFIGS: dict[str, dict] = {
-    "agent-core": {
-        "repo_url": _env("AGENT_CORE_REPO_URL", "https://github.com/xlu2017/agent-core.git"),
-        "branch": _env("AGENT_CORE_UPDATE_BRANCH"),
-        "path": _env("AGENT_CORE_REPO_PATH", "/opt/workstation/repos/agent-core"),
-        "install_commands": ["pnpm install --frozen-lockfile"],
-        "build_commands": ["pnpm build"],
-        "restart_command": "fuser -k 3210/tcp; sleep 1; cd /opt/workstation/repos/agent-core && nohup node dist/index.js > /opt/workstation/logs/agent-core.log 2>&1 &",
-    },
-    "dashboard": {
-        "repo_url": _env("JUBILANT_GOGGLES_REPO_URL", "https://github.com/xlu2017/jubilant-goggles.git"),
-        "branch": _env("JUBILANT_GOGGLES_UPDATE_BRANCH"),
-        "path": _env("JUBILANT_GOGGLES_REPO_PATH", "/opt/workstation/repos/jubilant-goggles"),
-        "install_commands": [
-            "pnpm install --frozen-lockfile",
-            "(cd control-plane/web && pnpm install --frozen-lockfile)",
-            "rsync -a --delete --exclude node_modules control-plane/web/ /opt/workstation/control-plane/web/",
-            "(cd /opt/workstation/control-plane/web && pnpm install --frozen-lockfile)",
-        ],
-        "build_commands": ["(cd /opt/workstation/control-plane/web && pnpm build)"],
-        "restart_command": "fuser -k 5173/tcp; sleep 1; cd /opt/workstation/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
-    },
-    "control-plane": {
-        "repo_url": _env("JUBILANT_GOGGLES_REPO_URL", "https://github.com/xlu2017/jubilant-goggles.git"),
-        "branch": _env("JUBILANT_GOGGLES_UPDATE_BRANCH"),
-        "path": _env("JUBILANT_GOGGLES_REPO_PATH", "/opt/workstation/repos/jubilant-goggles"),
-        "install_commands": ["pnpm install --frozen-lockfile"],
-        "build_commands": [],
-        "restart_command": "fuser -k 9877/tcp; sleep 1; cd /opt/workstation/repos/jubilant-goggles/control-plane && nohup /home/agent/.local/bin/uvicorn api.server:app --host 0.0.0.0 --port 9877 --reload > /opt/workstation/logs/control-plane.log 2>&1 &",
-    },
-}
+# Backward-compatible name used by service routes/tests. Values are now dynamic.
+SERVICE_CONFIGS: MutableMapping[str, dict] = ServiceConfigsView()
 
 
 def _get_token() -> str | None:
-    """Read GitHub PAT from environment. Never log or return this value."""
-    return os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_PAT") or os.environ.get("PAT")
+    """Read the selected repo provider token. Never log or return this value."""
+    return get_repo_provider_token()
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +280,7 @@ def _do_update(service_name: str, restart: bool) -> UpdateResult:
 
     token = _get_token()
     if not token:
-        return UpdateResult(False, service_name, error={"code": "NO_TOKEN", "message": "GitHub token is not configured. Set GITHUB_TOKEN or GITHUB_PAT."})
+        return UpdateResult(False, service_name, error={"code": "NO_TOKEN", "message": "No selected repo provider token is available. Connect GitHub or select the personal access token provider."})
 
     repo_url = config["repo_url"]
     repo_path = config["path"]
@@ -459,6 +436,9 @@ def get_service_update_metadata() -> dict[str, dict]:
         result[name] = {
             "repo_backed": True,
             "repo_url": config.get("repo_url"),
+            "repo_provider": config.get("repo_provider"),
+            "owner": config.get("owner"),
+            "repo": config.get("repo"),
             "branch": config.get("branch") or "default",
             "path": config.get("path"),
             "update_supported": token_available,
