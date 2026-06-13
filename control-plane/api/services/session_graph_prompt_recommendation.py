@@ -41,20 +41,49 @@ def _session_context(session: Any, prompt: str) -> dict[str, Any]:
     }
 
 
-def _parse_recommendation(payload: dict[str, Any]) -> PromptRouteRecommendation | None:
-    recommendation = payload.get("recommendation") or (payload.get("recommendations") or [None])[0]
-    if not isinstance(recommendation, dict):
-        return None
-    if recommendation.get("action_name") != "session.route_prompt":
-        return None
-    params = recommendation.get("params")
+def _parse_route_params(params: Any, reason: str, source: str, payload: dict[str, Any]) -> PromptRouteRecommendation | None:
     if not isinstance(params, dict):
         return None
     route = str(params.get("route") or "")
     if route not in PROMPT_ROUTES:
         return None
-    reason = str(params.get("reason") or recommendation.get("rationale") or "agent-core recommended prompt route")
-    return PromptRouteRecommendation(route=route, reason=reason, source=str(payload.get("source") or "agent_core"), payload=payload)
+    route_reason = str(params.get("reason") or reason or "agent-core recommended prompt route")
+    return PromptRouteRecommendation(route=route, reason=route_reason, source=source, payload=payload)
+
+
+def _parse_next_task_decision(payload: dict[str, Any]) -> PromptRouteRecommendation | None:
+    decision = payload.get("next_task_decision")
+    if not isinstance(decision, dict):
+        # Also accept a direct v0002 response for local tests or proxy shims.
+        decision = payload
+    if decision.get("task_name") != "session.route_prompt":
+        return None
+    if decision.get("decision") not in {"execute", "find_out_more"}:
+        return None
+    return _parse_route_params(
+        decision.get("params"),
+        str(decision.get("reason") or ""),
+        str(payload.get("source") or "agent_core_next_task"),
+        payload,
+    )
+
+
+def _parse_legacy_recommendation(payload: dict[str, Any]) -> PromptRouteRecommendation | None:
+    recommendation = payload.get("recommendation") or (payload.get("recommendations") or [None])[0]
+    if not isinstance(recommendation, dict):
+        return None
+    if recommendation.get("action_name") != "session.route_prompt":
+        return None
+    return _parse_route_params(
+        recommendation.get("params"),
+        str(recommendation.get("rationale") or ""),
+        str(payload.get("source") or "agent_core"),
+        payload,
+    )
+
+
+def _parse_recommendation(payload: dict[str, Any]) -> PromptRouteRecommendation | None:
+    return _parse_next_task_decision(payload) or _parse_legacy_recommendation(payload)
 
 
 def recommend_graph_prompt_route(session: Any, prompt: str) -> PromptRouteRecommendation:
