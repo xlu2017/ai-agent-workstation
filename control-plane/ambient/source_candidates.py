@@ -7,7 +7,7 @@ from typing import Any
 from ambient.types import AmbientEvent
 
 SOURCE_FILE_KEYS = ("sourceFile", "source_file", "source", "path")
-TEXT_KEYS = ("text", "ariaLabel", "testId", "id", "componentName", "selector")
+TEXT_KEYS = ("text", "ariaLabel", "testId", "id", "componentName", "selector", "name")
 SEARCH_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".css", ".html", ".md"}
 IGNORED_DIRS = {".git", "node_modules", ".venv", "dist", "build", "vendor", "coverage"}
 
@@ -80,6 +80,9 @@ def build_source_candidates(
         if event_type == "browser.element_selected":
             candidates.extend(_browser_selection_candidates(event, worktree))
 
+        if event_type == "browser.tab_observed":
+            candidates.extend(_browser_page_state_candidates(event, worktree))
+
         if event_type == "terminal.command_completed":
             mentioned = payload.get("mentioned_files")
             if isinstance(mentioned, list):
@@ -127,7 +130,30 @@ def _browser_selection_candidates(event: AmbientEvent, worktree: Path | None) ->
     for element in elements:
         if not isinstance(element, dict):
             continue
-        explicit = _explicit_source_candidate(event, element)
+        normalized = _merge_source_hint(element)
+        explicit = _explicit_source_candidate(normalized, event=event)
+        if explicit:
+            result.append(explicit)
+            continue
+        if worktree:
+            result.extend(_worktree_text_candidates(event, normalized, worktree))
+    return result
+
+
+def _browser_page_state_candidates(event: AmbientEvent, worktree: Path | None) -> list[SourceCandidate]:
+    payload = event.payload or {}
+    page_state = payload.get("page_state")
+    if not isinstance(page_state, dict):
+        return []
+
+    result: list[SourceCandidate] = []
+    for element in _iter_page_state_elements(page_state):
+        explicit = _explicit_source_candidate(
+            element,
+            event=event,
+            reason="browser page-state source hint",
+            source="browser_cdp",
+        )
         if explicit:
             result.append(explicit)
             continue
@@ -136,7 +162,48 @@ def _browser_selection_candidates(event: AmbientEvent, worktree: Path | None) ->
     return result
 
 
-def _explicit_source_candidate(event: AmbientEvent, element: dict[str, Any]) -> SourceCandidate | None:
+def _iter_page_state_elements(page_state: dict[str, Any]):
+    seen: set[tuple[str, str, str, str]] = set()
+    for key in ("interactive", "buttons"):
+        values = page_state.get(key)
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            element = _merge_source_hint(value)
+            identity = (
+                str(element.get("selector") or ""),
+                str(element.get("testId") or ""),
+                str(element.get("text") or ""),
+                str(element.get("sourceFile") or ""),
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            yield element
+
+
+def _merge_source_hint(element: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(element)
+    hint = merged.get("sourceHint") or merged.get("source_hint")
+    if isinstance(hint, dict):
+        for key in ("sourceFile", "source_file", "source", "path", "sourceLine", "line", "componentName", "sourceConfidence"):
+            value = hint.get(key)
+            if value not in (None, "") and not merged.get(key):
+                merged[key] = value
+    if not merged.get("selector") and merged.get("testId"):
+        merged["selector"] = f"[data-testid={merged['testId']}]"
+    return merged
+
+
+def _explicit_source_candidate(
+    element: dict[str, Any],
+    *,
+    event: AmbientEvent,
+    reason: str = "browser selection source hint",
+    source: str = "browser",
+) -> SourceCandidate | None:
     for key in SOURCE_FILE_KEYS:
         clean = _clean_path(element.get(key))
         if clean:
@@ -145,14 +212,14 @@ def _explicit_source_candidate(event: AmbientEvent, element: dict[str, Any]) -> 
                 confidence = max(confidence, 0.9)
             return SourceCandidate(
                 path=clean,
-                line=_int_or_none(element.get("sourceLine")),
+                line=_int_or_none(element.get("sourceLine") or element.get("line")),
                 symbol=_str_or_none(element.get("componentName")),
                 selector=_str_or_none(element.get("selector")),
                 text=_str_or_none(element.get("text")),
                 confidence=confidence,
-                reason="browser selection source hint",
+                reason=reason,
                 event_id=event.event_id,
-                source="browser",
+                source=source,
             )
     return None
 
