@@ -164,6 +164,64 @@ def test_session_controller_blocks_invalid_recommended_action_before_workflow():
     assert workflow.started is False
 
 
+def test_session_controller_completes_without_workflow_on_stop_decision():
+    import asyncio
+
+    from sessions.controller import CreateSessionRequest, SessionController
+
+    class FakeAgentCoreClient:
+        async def recommend_next(self, **kwargs):
+            return {
+                "ok": True,
+                "next_task_decision": {
+                    "decision": "stop",
+                    "task_name": "stop",
+                    "params": {},
+                    "certainty": 0.9,
+                    "stakes": "read_only",
+                    "risk": "low",
+                    "reason": "Already complete.",
+                    "missing_information": [],
+                    "expected_result": "No next action is emitted.",
+                    "success_criteria": ["No workflow starts."],
+                    "forbidden_actions": [],
+                },
+            }
+
+        async def validate_action(self, action_name, params):
+            raise AssertionError("stop must not validate an action")
+
+    class FakeWorkflowAdapter:
+        def __init__(self):
+            self.started = False
+
+        async def start_plan(self, session_id, plan, context):
+            self.started = True
+            return {"backend": "fake"}
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workflow = FakeWorkflowAdapter()
+        controller = SessionController(
+            sessions_dir=tmpdir,
+            agent_core_client=FakeAgentCoreClient(),
+            workflow_adapter=workflow,
+        )
+        result = controller.create_session(
+            CreateSessionRequest(prompt="initial", repo_id="repo-1", allowed_actions=["read_file"])
+        )
+        session_id = result["session"]["session_id"]
+        session = controller.session_store.get(session_id)
+        plan_result = asyncio.run(controller._request_next_action_and_start_workflow(session, "continue"))
+        updated_session = controller.session_store.get(session_id)
+        events = controller.event_store.get_events(session_id)
+
+    assert plan_result["status"] == "stopped"
+    assert "Already complete" in plan_result["message"]
+    assert updated_session.status.value == "completed"
+    assert workflow.started is False
+    assert any(event["event_type"] == "plan_completed" and event["data"].get("source") == "recommend_next_stop" for event in events)
+
+
 def _browser_selection_event(session_id: str):
     from ambient.types import AmbientEvent, AmbientSource
 
