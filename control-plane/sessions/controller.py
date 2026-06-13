@@ -147,15 +147,7 @@ class SessionController:
     async def handle_prompt(
         self, session_id: str, request: PromptRequest
     ) -> dict[str, Any]:
-        """Handle a prompt submitted while work may be running.
-
-        Flow:
-        1. Record user_prompt_received event
-        2. Load session state
-        3. Route prompt
-        4. Record routing_decision_made event
-        5. Execute routing decision (may call recommend-next + start workflow)
-        """
+        """Handle a prompt submitted while work may be running."""
         session = self.session_store.get(session_id)
         if session is None:
             return {"error": f"Session {session_id} not found."}
@@ -220,7 +212,7 @@ class SessionController:
             )
             return {"status": "paused", "message": "Session paused."}
 
-        elif command == "resume":
+        if command == "resume":
             session.status = SessionStatus.EDITING
             self.session_store.save(session)
             if self.workflow_adapter:
@@ -230,7 +222,7 @@ class SessionController:
             )
             return {"status": "resumed", "message": "Session resumed."}
 
-        elif command == "cancel":
+        if command == "cancel":
             session.status = SessionStatus.CANCELLED
             self.session_store.save(session)
             if self.workflow_adapter:
@@ -240,7 +232,7 @@ class SessionController:
             )
             return {"status": "cancelled", "message": "Session cancelled."}
 
-        elif command == "commit_checkpoint":
+        if command == "commit_checkpoint":
             return {
                 "status": "commit_requested",
                 "message": "Commit checkpoint requested; pending platform validation.",
@@ -254,7 +246,7 @@ class SessionController:
         prompt: str,
         mode_preference: str = "finite",
     ) -> dict[str, Any]:
-        """Request one next suggested action, wrap it, and start the workflow."""
+        """Request one next suggested action, wrap it, validate it, and start the workflow."""
         session_id = session.session_id
 
         if self.agent_core_client is None:
@@ -341,6 +333,10 @@ class SessionController:
             self.session_store.update_status(session_id, SessionStatus.FAILED)
             return {"error": f"Next suggested action validation failed: {e}", "recommendation": recommendation}
 
+        action_contract_validation = await self._validate_next_action_contract(session_id, plan["steps"][0])
+        if action_contract_validation is not None:
+            return action_contract_validation
+
         self.event_store.append(
             create_event(
                 EventType.PLAN_GENERATED,
@@ -390,6 +386,39 @@ class SessionController:
             "ambient_context": ambient_context,
             "message": "Next suggested action wrapped and workflow started.",
         }
+
+    async def _validate_next_action_contract(self, session_id: str, step: dict[str, Any]) -> dict[str, Any] | None:
+        action_name = str(step.get("action_name") or "")
+        params = step.get("params") if isinstance(step.get("params"), dict) else {}
+        try:
+            validation = await self.agent_core_client.validate_action(action_name, params)  # type: ignore[union-attr]
+        except Exception as e:
+            self.event_store.append(
+                create_event(
+                    EventType.PLAN_VALIDATION_FAILED,
+                    session_id,
+                    error=str(e),
+                    source="recommend_next_validate_action",
+                )
+            )
+            self.session_store.update_status(session_id, SessionStatus.FAILED)
+            return {"error": f"Next suggested action contract validation failed: {e}"}
+
+        if validation.get("ok") is False or validation.get("valid") is False:
+            errors = validation.get("errors", [])
+            error_msg = validation.get("error") or ("; ".join(map(str, errors)) if errors else "Next suggested action contract validation failed")
+            self.event_store.append(
+                create_event(
+                    EventType.PLAN_VALIDATION_FAILED,
+                    session_id,
+                    error=error_msg,
+                    errors=errors,
+                    source="recommend_next_validate_action_response",
+                )
+            )
+            self.session_store.update_status(session_id, SessionStatus.FAILED)
+            return {"error": error_msg, "action_validation": validation}
+        return None
 
     def _validate_one_step_plan_for_session(self, session: Session, plan: dict[str, Any]) -> None:
         steps = plan.get("steps")
