@@ -17,7 +17,7 @@ def test_recommend_next_route_forwards_ambient_context(monkeypatch):
     class FakeAgentCoreClient:
         last_call = {}
 
-        async def recommend_next(self, *, task_type, current_action, completed_actions, session_id, repo_id, ambient_context=None, suggested_plan=None):
+        async def recommend_next(self, *, task_type, current_action, completed_actions, session_id, repo_id, ambient_context=None):
             FakeAgentCoreClient.last_call = {
                 "task_type": task_type,
                 "current_action": current_action,
@@ -25,7 +25,6 @@ def test_recommend_next_route_forwards_ambient_context(monkeypatch):
                 "session_id": session_id,
                 "repo_id": repo_id,
                 "ambient_context": ambient_context,
-                "suggested_plan": suggested_plan,
             }
             return {"ok": True, "next_action": {"action_name": "read_file"}}
 
@@ -56,7 +55,6 @@ def test_recommend_next_route_forwards_ambient_context(monkeypatch):
     assert body["recommendation"]["ok"] is True
     assert body["ambient_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
     assert FakeAgentCoreClient.last_call["ambient_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
-    assert FakeAgentCoreClient.last_call["suggested_plan"] is None
 
 
 def test_session_controller_uses_recommend_next_as_execution_source():
@@ -69,7 +67,7 @@ def test_session_controller_uses_recommend_next_as_execution_source():
         def __init__(self):
             self.recommend_next_call = None
 
-        async def recommend_next(self, *, task_type, current_action, completed_actions, session_id, repo_id, ambient_context=None, suggested_plan=None):
+        async def recommend_next(self, *, task_type, current_action, completed_actions, session_id, repo_id, ambient_context=None):
             self.recommend_next_call = {
                 "task_type": task_type,
                 "current_action": current_action,
@@ -77,7 +75,6 @@ def test_session_controller_uses_recommend_next_as_execution_source():
                 "session_id": session_id,
                 "repo_id": repo_id,
                 "ambient_context": ambient_context,
-                "suggested_plan": suggested_plan,
             }
             return {
                 "ok": True,
@@ -112,12 +109,11 @@ def test_session_controller_uses_recommend_next_as_execution_source():
         session_id = result["session"]["session_id"]
         persist_ambient_event(_browser_selection_event(session_id), sessions_dir=tmpdir)
         session = controller.session_store.get(session_id)
-        plan_result = asyncio.run(controller._request_and_start_plan(session, "fix selected button"))
+        plan_result = asyncio.run(controller._request_next_action_and_start_workflow(session, "fix selected button"))
         events = controller.event_store.get_events(session_id)
 
     assert plan_result["next_suggested_action"]["action_name"] == "read_file"
     assert agent_core.recommend_next_call["ambient_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
-    assert agent_core.recommend_next_call["suggested_plan"] is None
     assert workflow.plan["source"] == "next_suggested_plan"
     assert len(workflow.plan["steps"]) == 1
     assert workflow.context["ambient_prompt_context"]
