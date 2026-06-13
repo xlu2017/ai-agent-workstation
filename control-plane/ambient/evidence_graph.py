@@ -47,6 +47,10 @@ class EvidenceGraph:
         if isinstance(selection, dict):
             self._link_browser_selection(event_node, selection, event.confidence)
 
+        page_state = payload.get("page_state")
+        if isinstance(page_state, dict):
+            self._link_browser_page_state(event_node, page_state, event.confidence)
+
         mentioned = payload.get("mentioned_files")
         if isinstance(mentioned, list):
             for path in mentioned:
@@ -74,43 +78,86 @@ class EvidenceGraph:
         for index, element in enumerate(elements):
             if not isinstance(element, dict):
                 continue
-            selector = element.get("selector")
-            if isinstance(selector, str) and selector:
-                selector_node = self._add_node(
-                    f"dom:{selector}",
-                    "dom_node",
-                    selector,
-                    {"selector": selector, "bounds": element.get("bounds"), "index": index},
-                )
-                self._add_edge(event_node.node_id, selector_node.node_id, "observed_dom", confidence)
-            else:
-                selector_node = event_node
+            self._link_browser_element(event_node, _merge_source_hint(element), confidence, index=index)
 
-            component_name = element.get("componentName")
-            source_file = element.get("sourceFile") or element.get("source")
-            if isinstance(component_name, str) and component_name:
-                component_node = self._add_node(
-                    f"component:{component_name}",
-                    "component",
-                    component_name,
-                    {
-                        "name": component_name,
-                        "framework": element.get("framework"),
-                        "sourceFile": source_file,
-                        "sourceLine": element.get("sourceLine"),
-                    },
+    def _link_browser_page_state(self, event_node: EvidenceNode, page_state: dict[str, Any], confidence: float) -> None:
+        seen: set[tuple[str, str, str, str]] = set()
+        for key in ("interactive", "buttons"):
+            values = page_state.get(key)
+            if not isinstance(values, list):
+                continue
+            for index, value in enumerate(values):
+                if not isinstance(value, dict):
+                    continue
+                element = _merge_source_hint(value)
+                identity = (
+                    str(element.get("selector") or ""),
+                    str(element.get("testId") or ""),
+                    str(element.get("text") or ""),
+                    str(element.get("sourceFile") or element.get("source") or ""),
                 )
-                self._add_edge(selector_node.node_id, component_node.node_id, "observed_component", confidence)
-                if source_file:
-                    file_node = self._add_node(
-                        f"file:{source_file}", "source_file", source_file, {"path": source_file}
-                    )
-                    self._add_edge(component_node.node_id, file_node.node_id, "defined_in", confidence)
-            elif source_file:
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                self._link_browser_element(event_node, element, confidence, index=index, source_kind="page_state")
+
+    def _link_browser_element(
+        self,
+        event_node: EvidenceNode,
+        element: dict[str, Any],
+        confidence: float,
+        *,
+        index: int,
+        source_kind: str = "selection",
+    ) -> None:
+        selector = element.get("selector")
+        if not selector and element.get("testId"):
+            selector = f"[data-testid={element['testId']}]"
+        if isinstance(selector, str) and selector:
+            selector_node = self._add_node(
+                f"dom:{selector}",
+                "dom_node",
+                selector,
+                {
+                    "selector": selector,
+                    "bounds": element.get("bounds"),
+                    "index": index,
+                    "source_kind": source_kind,
+                    "text": element.get("text"),
+                    "testId": element.get("testId"),
+                },
+            )
+            self._add_edge(event_node.node_id, selector_node.node_id, "observed_dom", confidence)
+        else:
+            selector_node = event_node
+
+        component_name = element.get("componentName") or element.get("name")
+        source_file = element.get("sourceFile") or element.get("source") or element.get("path")
+        source_line = element.get("sourceLine") or element.get("line")
+        if isinstance(component_name, str) and component_name:
+            component_node = self._add_node(
+                f"component:{component_name}",
+                "component",
+                component_name,
+                {
+                    "name": component_name,
+                    "framework": element.get("framework"),
+                    "sourceFile": source_file,
+                    "sourceLine": source_line,
+                    "source_kind": source_kind,
+                },
+            )
+            self._add_edge(selector_node.node_id, component_node.node_id, "observed_component", confidence)
+            if source_file:
                 file_node = self._add_node(
-                    f"file:{source_file}", "source_file", source_file, {"path": source_file}
+                    f"file:{source_file}", "source_file", source_file, {"path": source_file, "line": source_line}
                 )
-                self._add_edge(selector_node.node_id, file_node.node_id, "mentions_file", confidence)
+                self._add_edge(component_node.node_id, file_node.node_id, "defined_in", confidence)
+        elif source_file:
+            file_node = self._add_node(
+                f"file:{source_file}", "source_file", source_file, {"path": source_file, "line": source_line}
+            )
+            self._add_edge(selector_node.node_id, file_node.node_id, "mentions_file", confidence)
 
     def _link_payload_entity(
         self,
@@ -143,6 +190,23 @@ class EvidenceGraph:
             confidence=confidence,
         )
         self.snapshot.edges.append(edge)
+
+
+def _merge_source_hint(element: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(element)
+    hint = merged.get("sourceHint") or merged.get("source_hint")
+    if isinstance(hint, dict):
+        for key in ("sourceFile", "source_file", "source", "path", "sourceLine", "line", "componentName"):
+            value = hint.get(key)
+            if value not in (None, "") and not merged.get(key):
+                merged[key] = value
+    if merged.get("source_file") and not merged.get("sourceFile"):
+        merged["sourceFile"] = merged["source_file"]
+    if merged.get("line") and not merged.get("sourceLine"):
+        merged["sourceLine"] = merged["line"]
+    if not merged.get("selector") and merged.get("testId"):
+        merged["selector"] = f"[data-testid={merged['testId']}]"
+    return merged
 
 
 def build_evidence_graph(events: list[AmbientEvent]) -> EvidenceGraphSnapshot:
