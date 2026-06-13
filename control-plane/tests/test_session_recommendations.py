@@ -11,7 +11,6 @@ sys.path.insert(0, str(CONTROL_PLANE_ROOT))
 
 def test_recommend_next_route_forwards_ambient_context(monkeypatch):
     from ambient.event_log import persist_ambient_event
-    from ambient.types import AmbientEvent, AmbientSource
     from api.routes import session_recommendations
     import agent_core_client.client as agent_client_module
 
@@ -100,6 +99,32 @@ def test_ambient_prompt_context_api_returns_prompt_block_and_agent_core_context(
     assert body["agent_core_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
 
 
+def test_ambient_evidence_graph_api_returns_page_state_source_hint_graph(monkeypatch):
+    from ambient.event_log import persist_ambient_event
+    from api import ambient as ambient_api
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setattr(ambient_api, "SESSIONS_DIR", Path(tmpdir))
+        persist_ambient_event(_browser_page_state_event("s1"), sessions_dir=tmpdir)
+
+        app = FastAPI()
+        app.include_router(ambient_api.router)
+        client = TestClient(app)
+
+        response = client.get("/api/sessions/s1/ambient/evidence-graph")
+
+    assert response.status_code == 200
+    body = response.json()
+    node_ids = {node["node_id"] for node in body["nodes"]}
+    relations = {edge["relation"] for edge in body["edges"]}
+    assert "dom:[data-testid=save-button]" in node_ids
+    assert "component:SaveButton" in node_ids
+    assert "file:src/components/SaveButton.tsx" in node_ids
+    assert "observed_dom" in relations
+    assert "observed_component" in relations
+    assert "defined_in" in relations
+
+
 def test_session_controller_plan_request_includes_ambient_context():
     import asyncio
 
@@ -178,6 +203,35 @@ def _browser_selection_event(session_id: str):
                         "sourceConfidence": 0.93,
                     }
                 ]
+            }
+        },
+    )
+
+
+def _browser_page_state_event(session_id: str):
+    from ambient.types import AmbientEvent, AmbientSource
+
+    return AmbientEvent(
+        event_type="browser.tab_observed",
+        session_id=session_id,
+        source=AmbientSource.BROWSER,
+        actor="system",
+        confidence=0.92,
+        payload={
+            "page_state": {
+                "interactive": [
+                    {
+                        "tagName": "button",
+                        "text": "Save",
+                        "testId": "save-button",
+                        "sourceHint": {
+                            "componentName": "SaveButton",
+                            "sourceFile": "src/components/SaveButton.tsx",
+                            "sourceLine": 12,
+                            "sourceConfidence": 0.94,
+                        },
+                    }
+                ],
             }
         },
     )
