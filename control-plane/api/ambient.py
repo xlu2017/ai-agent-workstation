@@ -12,7 +12,7 @@ from ambient.context_packet import build_context_packet
 from ambient.collectors.editor_bridge import build_editor_selection_event
 from ambient.collectors.terminal_collector import TerminalObservationBuilder
 from ambient.event_log import load_ambient_events, persist_ambient_event
-from ambient.evidence_graph import write_evidence_graph
+from ambient.evidence_graph import build_evidence_graph, write_evidence_graph
 from ambient.reducers import reduce_ambient_events
 from ambient.service import AmbientObservationService
 from ambient.source_candidates import build_source_candidates
@@ -192,6 +192,25 @@ def get_ambient_source_candidates(session_id: str, limit: int = 500, collect: bo
         "session_id": session_id,
         "source_candidates": build_source_candidates(events),
     }
+
+
+@router.get("/evidence-graph")
+def get_ambient_evidence_graph(
+    session_id: str,
+    limit: int = 500,
+    collect: bool = Query(False),
+    write_snapshot: bool = Query(False),
+):
+    """Return the ambient evidence graph for UI/debugging and validation flows."""
+
+    if collect:
+        AmbientObservationService(get_ambient_config()).collect_once(session_id=session_id)
+    events = load_ambient_events(session_id, sessions_dir=SESSIONS_DIR, limit=limit)
+    if write_snapshot:
+        graph = write_evidence_graph(events, sessions_dir=SESSIONS_DIR)
+    else:
+        graph = build_evidence_graph(events)
+    return graph.model_dump()
 
 
 @router.get("/prompt-context")
