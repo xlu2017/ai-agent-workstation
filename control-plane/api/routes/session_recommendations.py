@@ -23,13 +23,12 @@ class RecommendNextRequest(BaseModel):
     current_action: str = ""
     completed_actions: list[str] = Field(default_factory=list)
     repo_id: str = ""
-    suggested_plan: dict[str, Any] | None = None
     include_prompt_block: bool = True
 
 
 @router.post("/next-action")
 async def recommend_next_action(session_id: str, body: RecommendNextRequest):
-    """Return an advisory next-action recommendation with ambient context.
+    """Return one advisory next-action recommendation with ambient context.
 
     This route does not execute the recommendation. It packages the current
     session ambient context and sends it to agent-core's recommend-next endpoint,
@@ -56,7 +55,7 @@ async def recommend_next_action(session_id: str, body: RecommendNextRequest):
                 session_id=session_id,
                 repo_id=body.repo_id,
                 ambient_context=ambient_context,
-                suggested_plan=body.suggested_plan,
+                suggested_plan=None,
             )
         finally:
             await client.close()
