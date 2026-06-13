@@ -40,6 +40,7 @@ from api.routes.filesystem import router as filesystem_router
 from api.routes.multi_frontend import router as multi_frontend_router
 from api.routes.ui_capabilities import router as ui_capabilities_router
 from api.routes.ambient_vendors import router as ambient_vendors_router
+from api.routes.session_recommendations import router as session_recommendations_router
 from api.routes.session_graph.router import router as session_graph_router
 
 app = FastAPI(title="Workstation Control Plane", version="0.1.0")
@@ -58,6 +59,7 @@ app.include_router(remote_desktop_router)
 # so browser/editor/terminal evidence can continue to target session-scoped
 # ambient endpoints while legacy chat/session CRUD remains closed.
 app.include_router(ambient_router)
+app.include_router(session_recommendations_router)
 app.include_router(sessions_router)
 app.include_router(session_events_router)
 app.include_router(repo_provider_router)
