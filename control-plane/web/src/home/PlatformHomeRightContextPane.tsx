@@ -15,7 +15,7 @@ export default function PlatformHomeRightContextPane({
 }) {
   const [activeTab, setActiveTab] = useState<RightPaneTab>('worklog')
   const repoAttached = Boolean(activeSession?.metadata?.repo_session_id || activeSession?.metadata?.repo_attached_at_start)
-  const eventState = usePlatformHomeActiveGraphSessionEvents(activeSession?.id)
+  const eventState = usePlatformHomeActiveGraphSessionEvents(activeSession?.id, activeSession?.updated_at)
 
   return (
     <aside className="platform-right-pane" aria-label="Session context">
