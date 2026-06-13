@@ -1,0 +1,35 @@
+name: CLI Install Health Check
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    name: Test CLI Installation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run install script
+        run: |
+          set -euo pipefail
+          curl -fsSL https://composio.dev/install | bash
+          echo "$HOME/.composio" >> "$GITHUB_PATH"
+
+      - name: Verify installation
+        run: |
+          set -euo pipefail
+          ls -la "$HOME/.composio" || true
+          which composio
+          composio --version
+
+      - name: Send Slack Notification (Failure)
+        if: failure()
+        uses: slackapi/slack-github-action@45a88b9581bfab2566dc881e2cd66d334e621e2c # v3.0.3
+        with:
+          webhook: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "⚠️ CLI Install Health Check Failed!\n*Repository:* ${{ github.repository }}\n*Workflow:* ${{ github.workflow }}\n*Run:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n*Commit:* ${{ github.sha }}"
+            }
