@@ -48,6 +48,46 @@ def test_context_packet_prefers_editor_selection_focus():
     assert packet.goal == "fix this"
 
 
+def test_context_packet_includes_browser_source_candidates():
+    from ambient.context_packet import build_context_packet
+    from ambient.types import AmbientEvent, AmbientSource
+
+    event = AmbientEvent(
+        event_type="browser.element_selected",
+        session_id="s1",
+        source=AmbientSource.BROWSER,
+        actor="user",
+        confidence=0.92,
+        payload={
+            "page": {"url": "http://localhost:5173/login", "title": "Login"},
+            "selection": {
+                "mode": "drag_region",
+                "bounds": {"x": 10, "y": 20, "width": 120, "height": 30},
+                "confidence": {"confidence": {"score": 0.92, "level": "high"}},
+                "elements": [
+                    {
+                        "selector": "[data-testid=login-submit]",
+                        "text": "Sign in",
+                        "framework": "react",
+                        "componentName": "LoginForm",
+                        "sourceFile": "src/features/auth/LoginForm.tsx",
+                        "sourceLine": 42,
+                        "sourceConfidence": 0.95,
+                    }
+                ],
+            },
+        },
+    )
+
+    packet = build_context_packet("s1", [event], goal="fix this")
+
+    assert packet.source_candidates
+    assert packet.source_candidates[0]["path"] == "src/features/auth/LoginForm.tsx"
+    assert packet.source_candidates[0]["line"] == 42
+    assert packet.source_candidates[0]["symbol"] == "LoginForm"
+    assert "src/features/auth/LoginForm.tsx" in packet.relevant_files
+
+
 def test_ambient_event_persistence_mirrors_live_feed():
     from ambient.collectors.terminal_collector import TerminalObservationBuilder
     from ambient.event_log import load_ambient_events, persist_ambient_event
@@ -92,4 +132,43 @@ def test_evidence_graph_links_component_to_source_file():
 
     assert "component:LoginForm" in node_ids
     assert "file:src/features/auth/LoginForm.tsx" in node_ids
+    assert "defined_in" in relations
+
+
+def test_evidence_graph_links_extension_selection_to_source_file():
+    from ambient.evidence_graph import build_evidence_graph
+    from ambient.types import AmbientEvent, AmbientSource
+
+    event = AmbientEvent(
+        event_type="browser.element_selected",
+        session_id="s1",
+        source=AmbientSource.BROWSER,
+        actor="user",
+        confidence=0.88,
+        payload={
+            "page": {"url": "http://localhost:5173/login", "title": "Login"},
+            "selection": {
+                "mode": "drag_region",
+                "elements": [
+                    {
+                        "selector": "[data-testid=login-submit]",
+                        "componentName": "LoginForm",
+                        "framework": "react",
+                        "sourceFile": "src/features/auth/LoginForm.tsx",
+                        "sourceLine": 42,
+                    }
+                ],
+            },
+        },
+    )
+
+    graph = build_evidence_graph([event])
+    node_ids = {node.node_id for node in graph.nodes}
+    relations = {edge.relation for edge in graph.edges}
+
+    assert "dom:[data-testid=login-submit]" in node_ids
+    assert "component:LoginForm" in node_ids
+    assert "file:src/features/auth/LoginForm.tsx" in node_ids
+    assert "observed_dom" in relations
+    assert "observed_component" in relations
     assert "defined_in" in relations
