@@ -115,6 +115,7 @@ GET  /api/app-automation/vendors
 GET  /api/app-automation/capabilities
 GET  /api/app-automation/actions
 GET  /api/app-automation/actions/{action_id}/plan
+GET  /api/app-automation/events/{session_id}
 POST /api/app-automation/execute
 ```
 
@@ -122,12 +123,14 @@ The execute endpoint now performs:
 
 1. action lookup
 2. vendor route plan construction
-3. risk classification
-4. approval gate
-5. dry-run plan
-6. vendor source presence check
-7. platform-owned runtime adapter dispatch
-8. normalized runtime result
+3. action parameter contract validation
+4. risk classification
+5. approval gate
+6. dry-run plan
+7. vendor source presence check
+8. platform-owned runtime adapter dispatch
+9. normalized runtime result
+10. redacted session audit event persistence
 
 ## Runtime adapter files
 
@@ -137,10 +140,33 @@ control-plane/api/app_automation/vendor_plan.py
 control-plane/api/app_automation/adapter_base.py
 control-plane/api/app_automation/vendor_adapters.py
 control-plane/api/app_automation/runtime.py
+control-plane/api/app_automation/event_log.py
 control-plane/api/app_automation/executor.py
 ```
 
-`vendor_plan.py` defines the capability matrix and per-action fallback chain. `adapter_base.py` defines the normalized health/result contract. `runtime.py` implements the initial live/mocked runtime dispatch. `executor.py` dispatches approved non-dry-run requests into the selected adapter once source is present.
+`vendor_plan.py` defines the capability matrix and per-action fallback chain. `adapter_base.py` defines the normalized health/result contract. `runtime.py` implements the initial live/mocked runtime dispatch. `event_log.py` writes redacted session events. `executor.py` validates, gates, audits, and dispatches approved non-dry-run requests into the selected adapter once source is present.
+
+## App automation audit events
+
+When `session_id` is present on an execute request, the executor writes app automation events into the normal session event log:
+
+```text
+app_automation_planned
+app_automation_validation_failed
+app_automation_blocked
+app_automation_executed
+app_automation_failed
+```
+
+The event payload records the app, action, selected vendor, route candidates, risk, approval mode, dry-run state, status, and normalized result/error fields. Sensitive parameter keys are redacted before persistence, including token, secret, password, API key, credential, bearer, authorization, access token, refresh token, and client secret fields.
+
+Use:
+
+```text
+GET /api/app-automation/events/{session_id}
+```
+
+for the app-automation-only audit slice. Raw session timelines still live in the general session event log.
 
 ## End-to-end runtime paths
 
@@ -184,7 +210,7 @@ App actions include risk labels:
 - `modification`
 - `external_side_effect`
 
-External side effects require approval before live execution. Dry runs are always allowed.
+External side effects require approval before live execution. Dry runs are always allowed. Parameter schema validity means only that the action contract is well formed; runtime safety, app credentials, user/session permission, and approval are still enforced by the control plane.
 
 ## License review
 
