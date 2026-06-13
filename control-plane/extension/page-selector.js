@@ -69,7 +69,11 @@
   function showPromptPanel() {
     const panel = document.createElement('div');
     panel.className = 'jg-prompt-dialog';
-    const meta = targets.length ? 'DOM context attached' : 'Screenshot fallback will be attached';
+    const described = targets.map(describeTarget);
+    const confidence = confidenceSummary({ mode: 'drag_region', bounds: region, elements: described });
+    const meta = targets.length
+      ? `DOM context attached · ${confidence.confidence.level} confidence`
+      : 'Screenshot fallback will be attached · low confidence';
     panel.innerHTML = '<strong>Ask agent to edit selected UI</strong><textarea placeholder="Describe the change. Enter sends, Shift+Enter newline."></textarea><small>' + meta + '</small><div><button data-jg="cancel">Cancel</button><button data-jg="send">Send</button></div>';
     document.documentElement.appendChild(panel);
     place(panel, region);
@@ -87,12 +91,15 @@
     const text = String(value || '').trim();
     if (!text) return;
     panel.classList.add('jg-busy');
+    const elements = targets.map(describeTarget);
+    const selection = { mode: 'drag_region', bounds: region, elements };
+    selection.confidence = confidenceSummary(selection);
     const fallback = targets.length ? null : await requestFallbackImage();
     const payload = {
       sessionId: inferSessionId(),
       prompt: text,
       page: { url: location.href, title: document.title },
-      selection: { mode: 'drag_region', bounds: region, elements: targets.map(describeTarget) },
+      selection,
       screenshotFallback: fallback,
     };
     chrome.runtime.sendMessage({ type: 'JG_SUBMIT_REGION_EDIT', payload }, (response) => {
@@ -131,7 +138,61 @@
 
   function describeTarget(el) {
     const b = el.getBoundingClientRect();
-    return { tagName: el.tagName.toLowerCase(), selector: selectorFor(el), text: String(el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 500), role: el.getAttribute('role') || '', testId: el.getAttribute('data-testid') || el.getAttribute('data-test') || '', id: el.id || '', className: typeof el.className === 'string' ? el.className : '', bounds: { x: b.left, y: b.top, width: b.width, height: b.height }, framework: frameworkName(el) };
+    const hint = sourceHintForElement(el);
+    const framework = hint.framework && hint.framework !== 'unknown' ? hint.framework : frameworkName(el);
+    const sourceHint = formatSourceHint(hint);
+    return {
+      tagName: el.tagName.toLowerCase(),
+      selector: selectorFor(el),
+      text: String(el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 500),
+      role: el.getAttribute('role') || '',
+      ariaLabel: el.getAttribute('aria-label') || '',
+      testId: el.getAttribute('data-testid') || el.getAttribute('data-test') || '',
+      id: el.id || '',
+      className: typeof el.className === 'string' ? el.className : '',
+      bounds: { x: b.left, y: b.top, width: b.width, height: b.height },
+      framework,
+      componentName: hint.componentName || '',
+      sourceHint,
+      sourceFile: hint.sourceFile || '',
+      sourceLine: hint.sourceLine || null,
+      sourceConfidence: hint.confidence || 0,
+    };
+  }
+
+  function sourceHintForElement(el) {
+    try {
+      if (globalThis.jgSourceHints && typeof globalThis.jgSourceHints.forElement === 'function') {
+        return globalThis.jgSourceHints.forElement(el);
+      }
+    } catch (_) {
+      return emptySourceHint();
+    }
+    return emptySourceHint();
+  }
+
+  function emptySourceHint() {
+    return { framework: 'unknown', componentName: '', sourceFile: '', sourceLine: null, confidence: 0 };
+  }
+
+  function formatSourceHint(hint) {
+    if (!hint || !hint.sourceFile) return '';
+    return hint.sourceLine ? `${hint.sourceFile}:${hint.sourceLine}` : hint.sourceFile;
+  }
+
+  function confidenceSummary(selection) {
+    try {
+      if (globalThis.jgConfidence && typeof globalThis.jgConfidence.summary === 'function') {
+        return globalThis.jgConfidence.summary(selection);
+      }
+    } catch (_) {
+      return { confidence: { score: 0.25, level: 'low', reasons: ['confidence helper failed'] }, targetCount: 0 };
+    }
+    const elements = Array.isArray(selection && selection.elements) ? selection.elements : [];
+    return {
+      confidence: { score: elements.length ? 0.45 : 0.25, level: elements.length ? 'medium' : 'low', reasons: ['fallback confidence scoring'] },
+      targetCount: elements.length,
+    };
   }
 
   function frameworkName(el) {
