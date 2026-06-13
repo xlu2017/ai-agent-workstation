@@ -95,7 +95,6 @@ class AgentCoreClient:
         session_id: str = "",
         repo_id: str = "",
         ambient_context: dict[str, Any] | None = None,
-        suggested_plan: dict[str, Any] | None = None,
         visible_actions: list[str] | None = None,
     ) -> dict[str, Any]:
         """Get an advisory single next-action recommendation.
@@ -108,10 +107,6 @@ class AgentCoreClient:
             context["visible_actions"] = visible_actions
         if ambient_context:
             context["ambient_context"] = ambient_context
-        if suggested_plan:
-            # This is accepted only for prompt-context compatibility. Execution
-            # flows do not pass a plan here; recommend-next remains single-action.
-            context["suggested_plan"] = suggested_plan
         payload = {
             "task_type": task_type,
             "current_action": current_action,
