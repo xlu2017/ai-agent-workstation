@@ -12,6 +12,7 @@ AGENT_CORE_URL = os.environ.get("AGENT_CORE_URL", "http://localhost:3210").rstri
 AGENT_CORE_TIMEOUT = float(os.environ.get("AGENT_CORE_TIMEOUT", "10"))
 
 PROMPT_ROUTES = {"continue_active", "question_only", "create_child_goal", "create_sibling_goal"}
+ROUTE_PROMPT_VISIBLE_ACTIONS = ["session.route_prompt"]
 
 
 @dataclass(frozen=True)
@@ -24,8 +25,9 @@ class PromptRouteRecommendation:
 
 def _session_context(session: Any, prompt: str) -> dict[str, Any]:
     return {
-        "task_type": "graph_session_chat",
+        "decision_phase": "graph_session_prompt_routing",
         "prompt_kind": "graph_session_followup",
+        "visible_actions": ROUTE_PROMPT_VISIBLE_ACTIONS,
         "session_id": session.id,
         "target_session_id": session.id,
         "prompt": prompt,
@@ -56,17 +58,18 @@ def _parse_recommendation(payload: dict[str, Any]) -> PromptRouteRecommendation 
 
 
 def recommend_graph_prompt_route(session: Any, prompt: str) -> PromptRouteRecommendation:
-    """Return the advisory prompt route from agent-core recommend-next.
+    """Return the advisory prompt route from a constrained recommend-next pass.
 
-    If agent-core cannot provide a valid recommendation, the safe platform default
-    is question_only: record the user turn, avoid graph mutation, and let the UI
-    show that routing was unavailable.
+    The platform chooses visible_actions because this endpoint is known to be a
+    graph-session prompt-routing phase. The user prompt never determines the
+    visible action set.
     """
     context = _session_context(session, prompt)
     request_body = {
-        "task_type": "graph_session_chat",
+        "task_type": "unknown",
         "current_action": "session.route_prompt",
         "completed_actions": [],
+        "visible_actions": ROUTE_PROMPT_VISIBLE_ACTIONS,
         "context": context,
         "session_graph_projection": {
             "active_session": context,
