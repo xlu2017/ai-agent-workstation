@@ -10,10 +10,20 @@ from typing import Any
 
 VENDOR_ID = "n8n"
 SUPPORTED_ACTIONS = {
-    "slack.send_message",
-    "google_sheets.append_row",
-    "jira.create_issue",
+    "calendar_event.create",
+    "contact.create",
+    "email.send",
+    "issue.create",
+    "message.send",
+    "page.create",
+    "spreadsheet_row.append",
     "discord.send_message",
+    "google_calendar.create_event",
+    "google_sheets.append_row",
+    "hubspot.create_contact",
+    "jira.create_issue",
+    "notion.create_page",
+    "slack.send_message",
 }
 
 
@@ -44,10 +54,10 @@ def _response(envelope: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": True,
         "status": "adapter_contract_completed",
-        "message": f"Vendored {VENDOR_ID} adapter accepted {action_id}. Configure N8N_WEBHOOK_URL for live workflow execution.",
+        "message": f"Vendored {VENDOR_ID} adapter accepted provider-neutral action {action_id}. Configure N8N_WEBHOOK_URL for live workflow execution.",
         "planned_steps": [
-            "Accepted normalized Jubilant Goggles action envelope.",
-            "Mapped action into the n8n deterministic workflow layer.",
+            "Accepted provider-neutral Jubilant Goggles action envelope.",
+            "Mapped provider/app specificity from params into the n8n deterministic workflow layer.",
             "Stopped at the local vendored adapter boundary without external side effects.",
         ],
         "result": {
