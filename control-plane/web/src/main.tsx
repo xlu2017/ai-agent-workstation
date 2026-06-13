@@ -13,6 +13,7 @@ import './ux-polish.css'
 import './server-app-launcher.css'
 import './multi-frontend-panel.css'
 import './multi-frontend-panel'
+import './session-default-scale.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
