@@ -32,7 +32,8 @@ class EvidenceGraph:
         self._add_edge(session_node.node_id, event_node.node_id, "contains_event", event.confidence)
 
         payload = event.payload
-        self._link_payload_entity(event_node, "url", "browser_url", payload.get("url"), "observed_url")
+        page = payload.get("page") if isinstance(payload.get("page"), dict) else {}
+        self._link_payload_entity(event_node, "url", "browser_url", payload.get("url") or page.get("url"), "observed_url")
         self._link_payload_entity(event_node, "selector", "dom_node", payload.get("selector"), "observed_dom")
         self._link_payload_entity(event_node, "command", "terminal_command", payload.get("command"), "observed_command")
         self._link_payload_entity(event_node, "path", "source_file", payload.get("path"), "mentions_file")
@@ -40,24 +41,76 @@ class EvidenceGraph:
 
         component = payload.get("component")
         if isinstance(component, dict):
-            component_name = component.get("name")
-            component_source = component.get("source")
-            if component_name:
-                component_node = self._add_node(
-                    f"component:{component_name}", "component", component_name, component
-                )
-                self._add_edge(event_node.node_id, component_node.node_id, "observed_component", event.confidence)
-                if component_source:
-                    file_node = self._add_node(
-                        f"file:{component_source}", "source_file", component_source, {"path": component_source}
-                    )
-                    self._add_edge(component_node.node_id, file_node.node_id, "defined_in", event.confidence)
+            self._link_component(event_node, component, event.confidence)
+
+        selection = payload.get("selection")
+        if isinstance(selection, dict):
+            self._link_browser_selection(event_node, selection, event.confidence)
 
         mentioned = payload.get("mentioned_files")
         if isinstance(mentioned, list):
             for path in mentioned:
                 if isinstance(path, str):
                     self._link_payload_entity(event_node, "mentioned_files", "source_file", path, "mentions_file")
+
+    def _link_component(self, event_node: EvidenceNode, component: dict[str, Any], confidence: float) -> None:
+        component_name = component.get("name") or component.get("componentName")
+        component_source = component.get("source") or component.get("sourceFile")
+        if component_name:
+            component_node = self._add_node(
+                f"component:{component_name}", "component", component_name, component
+            )
+            self._add_edge(event_node.node_id, component_node.node_id, "observed_component", confidence)
+            if component_source:
+                file_node = self._add_node(
+                    f"file:{component_source}", "source_file", component_source, {"path": component_source}
+                )
+                self._add_edge(component_node.node_id, file_node.node_id, "defined_in", confidence)
+
+    def _link_browser_selection(self, event_node: EvidenceNode, selection: dict[str, Any], confidence: float) -> None:
+        elements = selection.get("elements")
+        if not isinstance(elements, list):
+            return
+        for index, element in enumerate(elements):
+            if not isinstance(element, dict):
+                continue
+            selector = element.get("selector")
+            if isinstance(selector, str) and selector:
+                selector_node = self._add_node(
+                    f"dom:{selector}",
+                    "dom_node",
+                    selector,
+                    {"selector": selector, "bounds": element.get("bounds"), "index": index},
+                )
+                self._add_edge(event_node.node_id, selector_node.node_id, "observed_dom", confidence)
+            else:
+                selector_node = event_node
+
+            component_name = element.get("componentName")
+            source_file = element.get("sourceFile") or element.get("source")
+            if isinstance(component_name, str) and component_name:
+                component_node = self._add_node(
+                    f"component:{component_name}",
+                    "component",
+                    component_name,
+                    {
+                        "name": component_name,
+                        "framework": element.get("framework"),
+                        "sourceFile": source_file,
+                        "sourceLine": element.get("sourceLine"),
+                    },
+                )
+                self._add_edge(selector_node.node_id, component_node.node_id, "observed_component", confidence)
+                if source_file:
+                    file_node = self._add_node(
+                        f"file:{source_file}", "source_file", source_file, {"path": source_file}
+                    )
+                    self._add_edge(component_node.node_id, file_node.node_id, "defined_in", confidence)
+            elif source_file:
+                file_node = self._add_node(
+                    f"file:{source_file}", "source_file", source_file, {"path": source_file}
+                )
+                self._add_edge(selector_node.node_id, file_node.node_id, "mentions_file", confidence)
 
     def _link_payload_entity(
         self,
