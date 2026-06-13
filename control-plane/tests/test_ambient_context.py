@@ -156,6 +156,44 @@ def test_browser_cdp_playwright_page_extracts_tab_network_console_and_ax_events(
     assert events[2].payload["message"] == "boom"
 
 
+def test_ambient_prompt_context_formats_source_candidates():
+    from ambient.context_packet import build_context_packet
+    from ambient.types import AmbientEvent, AmbientSource
+    from execution.ambient_prompt_context import ambient_packet_to_agent_core_context, ambient_packet_to_prompt_block
+
+    event = AmbientEvent(
+        event_type="browser.element_selected",
+        session_id="s1",
+        source=AmbientSource.BROWSER,
+        actor="user",
+        confidence=0.91,
+        payload={
+            "selection": {
+                "elements": [
+                    {
+                        "selector": "[data-testid=save]",
+                        "componentName": "SaveButton",
+                        "sourceFile": "src/components/SaveButton.tsx",
+                        "sourceLine": 12,
+                        "sourceConfidence": 0.93,
+                    }
+                ]
+            }
+        },
+    )
+    packet = build_context_packet("s1", [event], goal="fix button")
+
+    block = ambient_packet_to_prompt_block(packet)
+    context = ambient_packet_to_agent_core_context(packet)
+
+    assert "Ambient context evidence" in block
+    assert "src/components/SaveButton.tsx:12" in block
+    assert "Validate path containment" in block
+    assert context["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
+    assert context["advisory_only"] is True
+    assert context["requires_platform_validation"] is True
+
+
 def test_ambient_event_persistence_mirrors_live_feed():
     from ambient.collectors.terminal_collector import TerminalObservationBuilder
     from ambient.event_log import load_ambient_events, persist_ambient_event
