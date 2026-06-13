@@ -166,7 +166,7 @@ def vendor_config_status(vendor_id: str) -> dict[str, Any]:
     return {
         "vendor_id": vendor_id,
         "configurable": bool(meta.get("env_name")),
-        "configured": source in {"environment", "stored"},
+        "configured": source in {"environment", "stored", "provider"},
         "config_source": source,
         "env_name": meta.get("env_name"),
         "kind": meta.get("kind", "url"),
