@@ -47,26 +47,7 @@ def test_recommend_next_route_forwards_ambient_context(monkeypatch):
 
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setattr(session_recommendations, "SESSIONS_DIR", Path(tmpdir))
-        event = AmbientEvent(
-            event_type="browser.element_selected",
-            session_id="s1",
-            source=AmbientSource.BROWSER,
-            actor="user",
-            confidence=0.91,
-            payload={
-                "selection": {
-                    "elements": [
-                        {
-                            "selector": "[data-testid=save]",
-                            "componentName": "SaveButton",
-                            "sourceFile": "src/components/SaveButton.tsx",
-                            "sourceLine": 12,
-                            "sourceConfidence": 0.93,
-                        }
-                    ]
-                }
-            },
-        )
+        event = _browser_selection_event("s1")
         persist_ambient_event(event, sessions_dir=tmpdir)
 
         app = FastAPI()
@@ -95,11 +76,34 @@ def test_recommend_next_route_forwards_ambient_context(monkeypatch):
     assert FakeAgentCoreClient.last_call["suggested_plan"]["steps"][0]["action_name"] == "read_file"
 
 
+def test_ambient_prompt_context_api_returns_prompt_block_and_agent_core_context(monkeypatch):
+    from ambient.event_log import persist_ambient_event
+    from api import ambient as ambient_api
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setattr(ambient_api, "SESSIONS_DIR", Path(tmpdir))
+        persist_ambient_event(_browser_selection_event("s1"), sessions_dir=tmpdir)
+
+        app = FastAPI()
+        app.include_router(ambient_api.router)
+        client = TestClient(app)
+
+        response = client.get("/api/sessions/s1/ambient/prompt-context?goal=fix%20save")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["advisory_only"] is True
+    assert body["requires_platform_validation"] is True
+    assert "Ambient context evidence" in body["prompt_block"]
+    assert "src/components/SaveButton.tsx:12" in body["prompt_block"]
+    assert body["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
+    assert body["agent_core_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
+
+
 def test_session_controller_plan_request_includes_ambient_context():
     import asyncio
 
     from ambient.event_log import persist_ambient_event
-    from ambient.types import AmbientEvent, AmbientSource
     from sessions.controller import CreateSessionRequest, SessionController
 
     class FakeAgentCoreClient:
@@ -140,27 +144,7 @@ def test_session_controller_plan_request_includes_ambient_context():
             )
         )
         session_id = result["session"]["session_id"]
-        event = AmbientEvent(
-            event_type="browser.element_selected",
-            session_id=session_id,
-            source=AmbientSource.BROWSER,
-            actor="user",
-            confidence=0.91,
-            payload={
-                "selection": {
-                    "elements": [
-                        {
-                            "selector": "[data-testid=save]",
-                            "componentName": "SaveButton",
-                            "sourceFile": "src/components/SaveButton.tsx",
-                            "sourceLine": 12,
-                            "sourceConfidence": 0.93,
-                        }
-                    ]
-                }
-            },
-        )
-        persist_ambient_event(event, sessions_dir=tmpdir)
+        persist_ambient_event(_browser_selection_event(session_id), sessions_dir=tmpdir)
         session = controller.session_store.get(session_id)
 
         plan_result = asyncio.run(controller._request_and_start_plan(session, "fix selected button"))
@@ -172,3 +156,28 @@ def test_session_controller_plan_request_includes_ambient_context():
     assert workflow.context["ambient_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
     assert workflow.context["ambient_prompt_context"]
     assert any(event["event_type"] == "plan_requested" and event["data"].get("ambient_context_attached") for event in events)
+
+
+def _browser_selection_event(session_id: str):
+    from ambient.types import AmbientEvent, AmbientSource
+
+    return AmbientEvent(
+        event_type="browser.element_selected",
+        session_id=session_id,
+        source=AmbientSource.BROWSER,
+        actor="user",
+        confidence=0.91,
+        payload={
+            "selection": {
+                "elements": [
+                    {
+                        "selector": "[data-testid=save]",
+                        "componentName": "SaveButton",
+                        "sourceFile": "src/components/SaveButton.tsx",
+                        "sourceLine": 12,
+                        "sourceConfidence": 0.93,
+                    }
+                ]
+            }
+        },
+    )
