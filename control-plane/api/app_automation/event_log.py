@@ -8,6 +8,7 @@ observable without leaking credentials or large vendor payloads.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from live_feed.events import EventStore, EventType, create_event
@@ -32,6 +33,10 @@ SENSITIVE_KEY_FRAGMENTS = {
     "secret",
     "token",
 }
+
+
+def _event_store() -> EventStore:
+    return EventStore(os.environ.get("APP_AUTOMATION_EVENTS_DIR") or os.environ.get("SESSIONS_DIR") or "/opt/workstation/sessions")
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -71,11 +76,11 @@ def emit_app_automation_event(
     if event_type.value not in APP_AUTOMATION_EVENT_TYPES:
         raise ValueError(f"Unsupported app automation event type: {event_type.value}")
     event = create_event(event_type, session_id, **redact_sensitive(data))
-    return EventStore().append(event).to_dict()
+    return _event_store().append(event).to_dict()
 
 
 def list_app_automation_events(session_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
     """Read redacted app automation events for one session."""
 
-    events = EventStore().get_events(session_id, limit=limit, apply_observability_settings=False)
+    events = _event_store().get_events(session_id, limit=limit, apply_observability_settings=False)
     return [event for event in events if event.get("event_type") in APP_AUTOMATION_EVENT_TYPES]
