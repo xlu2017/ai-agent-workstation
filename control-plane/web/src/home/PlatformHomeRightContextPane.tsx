@@ -53,6 +53,11 @@ function WorklogContext({
   onRefresh: () => void
   onActiveSessionUpdated?: (session: GraphSession) => void
 }) {
+  const handleSessionUpdated = (session: GraphSession) => {
+    onActiveSessionUpdated?.(session)
+    void onRefresh()
+  }
+
   return (
     <>
       <section className="platform-context-card">
@@ -64,7 +69,7 @@ function WorklogContext({
         <h3><GitBranch size={14} /> Repository scope</h3>
         <p>{repoAttached ? 'Repo context is mounted for this session.' : 'No repo context is mounted. Select one before file edits or tests.'}</p>
       </section>
-      {activeSession && !repoAttached && <PlatformHomeAttachRepositoryToActiveSessionCard activeSession={activeSession} onSessionUpdated={onActiveSessionUpdated} />}
+      {activeSession && !repoAttached && <PlatformHomeAttachRepositoryToActiveSessionCard activeSession={activeSession} onSessionUpdated={handleSessionUpdated} />}
       <section className="platform-context-card">
         <h3><Activity size={14} /> Worklog <button className="platform-context-icon-button" onClick={onRefresh} title="Refresh events"><RefreshCw size={12} /></button></h3>
         {error && <p className="platform-danger-text">{error}</p>}
