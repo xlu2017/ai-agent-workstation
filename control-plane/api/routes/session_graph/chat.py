@@ -88,6 +88,41 @@ def _make_work_session(session: SessionRecord, content: str, turn: dict[str, obj
     )
 
 
+def _make_question_session(
+    session: SessionRecord,
+    content: str,
+    user_turn: dict[str, object],
+    assistant_turn: dict[str, object],
+    now: str,
+    context: RequestContext,
+    route_source: str,
+) -> SessionRecord:
+    return SessionRecord(
+        kind=SessionKind.QUESTION,
+        title=_short_title(content),
+        summary=str(assistant_turn.get("content") or content),
+        status=SessionStatus.COMPLETED,
+        parent_id=session.id,
+        root_id=session.root_id or session.id,
+        facets={
+            "question": {
+                "prompt": content,
+                "answer": assistant_turn.get("content") or "",
+                "source_session_id": session.id,
+                "route_source": route_source,
+            }
+        },
+        state={
+            "chat_turns": [user_turn, assistant_turn],
+            "execution_state": "answered_inline",
+            "auto_started": False,
+        },
+        metadata={**_base_metadata(session, context), "created_from": "session_graph_chat", "non_executable": True},
+        created_at=now,
+        updated_at=now,
+    )
+
+
 def _make_goal_session(session: SessionRecord, content: str, turn: dict[str, object], now: str, context: RequestContext, route: str) -> SessionRecord:
     child = route == "create_child_goal"
     goal = SessionRecord(
@@ -162,6 +197,7 @@ def append_graph_session_chat_turn(
     created_edge: SessionEdge | None = None
     extra_event: SessionEvent | None = None
     activation_response: dict[str, object] | None = None
+    assistant_turn: dict[str, object] | None = None
     chat_status = classification.route
     execution_state = classification.route
 
@@ -223,6 +259,42 @@ def append_graph_session_chat_turn(
             created_at=now,
         )
 
+    elif classification.route == "question_only":
+        answer = classification.assistant_response or "I can answer that, but I do not have a generated answer for this message yet."
+        assistant_turn = {"role": "assistant", "content": answer, "created_at": now}
+        turns.append(assistant_turn)
+        session.state = {**session.state, "chat_turns": turns, "last_assistant_message": answer}
+        graph.sessions[index] = session
+        created_session = _make_question_session(session, content, turn, assistant_turn, now, context, classification.source)
+        created_session.created_from_event_id = user_event.id
+        graph.sessions.append(created_session)
+        created_edge = SessionEdge(
+            type=EdgeType.COMPONENT_OF,
+            source_session_id=created_session.id,
+            target_session_id=session.id,
+            metadata={"reason": classification.reason, "source": classification.source, "non_executable": True},
+            created_at=now,
+            created_from_event_id=user_event.id,
+        )
+        graph.edges.append(created_edge)
+        extra_event = SessionEvent(
+            type=SessionEventType.OBSERVATION_RECORDED,
+            session_id=created_session.id,
+            root_session_id=created_session.root_id,
+            actor=SessionEventActor.ASSISTANT,
+            data={
+                "route": classification.route,
+                "reason": classification.reason,
+                "source": classification.source,
+                "assistant_response": answer,
+                "response_session_kind": "question",
+                "auto_started": False,
+            },
+            created_at=now,
+        )
+        chat_status = "answered"
+        execution_state = "answered_inline"
+
     else:
         extra_event = SessionEvent(
             type=SessionEventType.OBSERVATION_RECORDED,
@@ -246,10 +318,15 @@ def append_graph_session_chat_turn(
         "execution_state": execution_state,
         "auto_started": False,
     }
+    if assistant_turn is not None:
+        response["assistant_turn"] = assistant_turn
+        response["assistant_response"] = assistant_turn["content"]
     if activation_response is not None:
         response["execution_activation"] = activation_response
     if created_session is not None:
         key = "work_session" if created_session.kind == SessionKind.WORK else "goal_session"
+        if created_session.kind == SessionKind.QUESTION:
+            key = "question_session"
         response[key] = created_session.model_dump(mode="json")
     if created_edge is not None:
         response["created_edge"] = created_edge.model_dump(mode="json")
