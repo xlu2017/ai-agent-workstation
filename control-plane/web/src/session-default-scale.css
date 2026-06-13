@@ -1,0 +1,18 @@
+/* Default density override for the live agent session route.
+   Scope this to .as-page so the platform home, settings, and service panels keep their normal sizing. */
+@media (min-width: 900px) {
+  .as-page {
+    --as-session-default-scale: 0.67;
+    width: calc(100% / var(--as-session-default-scale));
+    height: calc(100% / var(--as-session-default-scale));
+    transform: scale(var(--as-session-default-scale));
+    transform-origin: top left;
+  }
+
+  @supports (zoom: 1) {
+    .as-page {
+      transform: none;
+      zoom: var(--as-session-default-scale);
+    }
+  }
+}
