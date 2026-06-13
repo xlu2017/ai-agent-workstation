@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from api.app_automation.adapter_base import AdapterExecution
+from api.app_automation.config import get_runtime_value
 from api.app_automation.models import AppAction, AppAutomationExecuteRequest
 from api.repo_provider import get_repo_provider_token
 
@@ -179,7 +180,7 @@ def _github_create_issue(source_path: Path, request: AppAutomationExecuteRequest
 
 
 def _execute_http_or_configured(vendor_id: str, source_path: Path, action: AppAction, request: AppAutomationExecuteRequest, env_name: str) -> AdapterExecution:
-    url = os.environ.get(env_name)
+    url = os.environ.get(env_name) or get_runtime_value(vendor_id)
     if not url:
         return _execute_local_vendor_adapter(
             vendor_id,
@@ -198,13 +199,13 @@ def _execute_http_or_configured(vendor_id: str, source_path: Path, action: AppAc
         ok=True,
         status="completed",
         message=f"{vendor_id} action completed through configured endpoint.",
-        planned_steps=[f"Loaded vendored source from {source_path}.", f"Posted normalized action envelope to {env_name}."],
+        planned_steps=[f"Loaded vendored source from {source_path}.", f"Posted normalized action envelope to configured {vendor_id} endpoint."],
         result={"vendor_response": data},
     )
 
 
 def _execute_command_or_configured(vendor_id: str, source_path: Path, action: AppAction, request: AppAutomationExecuteRequest, env_name: str) -> AdapterExecution:
-    command = os.environ.get(env_name)
+    command = os.environ.get(env_name) or get_runtime_value(vendor_id)
     if not command:
         return _execute_local_vendor_adapter(
             vendor_id,
@@ -214,7 +215,7 @@ def _execute_command_or_configured(vendor_id: str, source_path: Path, action: Ap
             missing_message=f"{vendor_id} source is vendored, but {env_name} is not configured for live external execution.",
             missing_env=env_name,
         )
-    return _execute_command(vendor_id, source_path, action, request, command, planned_note=f"Ran controlled command from {env_name}.")
+    return _execute_command(vendor_id, source_path, action, request, command, planned_note=f"Ran configured {vendor_id} command.")
 
 
 def _execute_local_vendor_adapter(
