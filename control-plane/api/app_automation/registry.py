@@ -10,6 +10,7 @@ from api.app_automation.models import AppAction, VendorTool
 
 CONTROL_PLANE_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = CONTROL_PLANE_ROOT / "vendor" / "app-automation" / "manifest.json"
+LOCAL_ADAPTER_FILENAME = "jubilant_goggles_adapter.py"
 
 
 def load_manifest() -> dict[str, Any]:
@@ -22,19 +23,30 @@ def list_vendor_tools() -> list[VendorTool]:
     return [VendorTool(**tool) for tool in manifest.get("selected_tools", [])]
 
 
+def vendor_source_path(tool: VendorTool) -> Path:
+    return CONTROL_PLANE_ROOT.parent / tool.target_dir
+
+
 def vendor_installed(tool: VendorTool) -> bool:
-    target = CONTROL_PLANE_ROOT.parent / tool.target_dir
+    target = vendor_source_path(tool)
     return (target / ".git").exists() or (target / "package.json").exists() or (target / "pyproject.toml").exists()
+
+
+def vendor_local_adapter_path(tool: VendorTool) -> Path:
+    return vendor_source_path(tool) / LOCAL_ADAPTER_FILENAME
 
 
 def vendor_status() -> list[dict[str, Any]]:
     result = []
     for tool in list_vendor_tools():
-        target = CONTROL_PLANE_ROOT.parent / tool.target_dir
+        target = vendor_source_path(tool)
+        local_adapter = vendor_local_adapter_path(tool)
         result.append({
             **tool.model_dump(),
             "installed": vendor_installed(tool),
             "target_exists": target.exists(),
+            "local_adapter_present": local_adapter.exists(),
+            "local_adapter_path": str(local_adapter),
         })
     return result
 
