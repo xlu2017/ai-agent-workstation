@@ -139,32 +139,61 @@ async function submitRegionEdit(payload) {
   const sourceCandidates = await fetchSourceCandidates(controlPlaneUrl, sessionId);
   const instruction = buildInstruction(payload, ambientEventId, sourceCandidates);
   const chatJson = await submitChatInstruction(controlPlaneUrl, sessionId, instruction);
+  if (chatJson?.ok === false) {
+    return {
+      ok: false,
+      error: chatJson.error || 'Chat submit failed',
+      sessionId,
+      ambientEventId,
+      sourceCandidates,
+      chat: chatJson,
+    };
+  }
   await recordHistory({ payload, sessionId, ambientEventId, chat: chatJson, sourceCandidates });
   return { ok: true, sessionId, ambientEventId, sourceCandidates, chat: chatJson };
 }
 
 async function submitChatInstruction(controlPlaneUrl, sessionId, instruction) {
-  const graphRes = await fetch(`${controlPlaneUrl}/api/session-graph/sessions/${encodeURIComponent(sessionId)}/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: instruction, role: 'user', mode: 'finite' }),
-  });
-  const graphJson = await graphRes.json().catch(() => ({}));
-  if (graphRes.ok) return { ...graphJson, transport: 'session_graph_chat' };
+  let graphStatus = 0;
+  let graphError = '';
+  try {
+    const graphRes = await fetch(`${controlPlaneUrl}/api/session-graph/sessions/${encodeURIComponent(sessionId)}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: instruction, role: 'user', mode: 'finite' }),
+    });
+    graphStatus = graphRes.status;
+    const graphJson = await graphRes.json().catch(() => ({}));
+    if (graphRes.ok) return { ...graphJson, transport: 'session_graph_chat' };
+    graphError = graphJson?.error || graphJson?.detail || graphRes.statusText || `session graph chat failed with ${graphRes.status}`;
+  } catch (error) {
+    graphError = String(error?.message || error || 'session graph chat unreachable');
+  }
 
-  const legacyRes = await fetch(`${controlPlaneUrl}/api/sessions/${encodeURIComponent(sessionId)}/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ instruction, execution_mode: 'finite' }),
-  });
-  const legacyJson = await legacyRes.json().catch(() => ({}));
-  if (legacyRes.ok) return { ...legacyJson, transport: 'legacy_session_chat' };
+  let legacyStatus = 0;
+  let legacyError = '';
+  try {
+    const legacyRes = await fetch(`${controlPlaneUrl}/api/sessions/${encodeURIComponent(sessionId)}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instruction, execution_mode: 'finite' }),
+    });
+    legacyStatus = legacyRes.status;
+    const legacyJson = await legacyRes.json().catch(() => ({}));
+    if (legacyRes.ok) return { ...legacyJson, transport: 'legacy_session_chat' };
+    legacyError = legacyJson?.error || legacyJson?.detail || legacyRes.statusText || `legacy session chat failed with ${legacyRes.status}`;
+  } catch (error) {
+    legacyError = String(error?.message || error || 'legacy session chat unreachable');
+  }
 
   return {
     ok: false,
-    error: graphJson?.error || legacyJson?.error || graphRes.statusText || legacyRes.statusText,
-    graph_status: graphRes.status,
-    legacy_status: legacyRes.status,
+    error: graphError || legacyError || 'Chat submit failed',
+    graph_status: graphStatus,
+    legacy_status: legacyStatus,
+    graph_error: graphError,
+    legacy_error: legacyError,
+    transport: 'none',
   };
 }
 
