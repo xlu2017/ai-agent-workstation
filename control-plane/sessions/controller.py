@@ -8,8 +8,8 @@ Handles:
 
 This module owns the decision layer. It delegates to:
   - prompt_router for routing decisions
-  - agent_core_client for plan generation/validation/outcome recording
-  - WorkflowAdapter for durable plan execution (Hatchet/inprocess)
+  - agent_core_client for next-action recommendations/outcome recording
+  - WorkflowAdapter for durable execution of the locally wrapped next action
   - live_feed/events for event logging
   - sessions/models for session persistence
 """
@@ -27,12 +27,13 @@ from typing import Any, Optional
 from pydantic import BaseModel
 
 from adapters.workflow.base import WorkflowAdapter
-from agent_core_client.client import AgentCoreClient, PlanRequest
+from agent_core_client.client import AgentCoreClient
 from execution.ambient_prompt_context import (
     ambient_packet_to_agent_core_context,
     ambient_packet_to_prompt_block,
     load_ambient_context_packet,
 )
+from execution.next_suggested_plan import NextSuggestedPlanError, next_suggestion_to_plan
 from live_feed.events import EventStore, EventType, create_event
 from prompt_router.router import RoutingDecision, RoutingInput, RoutingOutput, route_prompt, route_prompt_async
 from sessions.models import Session, SessionStatus, SessionStore, SessionType
@@ -75,9 +76,9 @@ class ControlRequest(BaseModel):
 class SessionController:
     """Orchestrates session lifecycle and prompt routing.
 
-    Now integrates with:
-      - AgentCoreClient for plan generation/validation
-      - WorkflowAdapter for durable plan execution
+    Uses recommend-next as the advisory source of truth. The controller wraps the
+    single recommended action in a one-step executor plan because the workflow
+    executor consumes plan-shaped input.
     """
 
     def __init__(
@@ -157,7 +158,7 @@ class SessionController:
         2. Load session state
         3. Route prompt
         4. Record routing_decision_made event
-        5. Execute routing decision (may call agent-core + start workflow)
+        5. Execute routing decision (may call recommend-next + start workflow)
         """
         session = self.session_store.get(session_id)
         if session is None:
@@ -266,23 +267,21 @@ class SessionController:
         prompt: str,
         mode_preference: str = "finite",
     ) -> dict[str, Any]:
-        """Request a plan from agent-core, validate it, and start the workflow.
+        """Request one next suggested action, wrap it, and start the workflow.
 
         Flow:
-          1. Emit PLAN_REQUESTED
-          2. Call AgentCoreClient.plan()
-          3. If not ok: emit PLAN_VALIDATION_FAILED, return error
-          4. Call AgentCoreClient.validate_plan()
-          5. If invalid: emit PLAN_VALIDATION_FAILED, return error
-          6. Emit PLAN_GENERATED
-          7. Call WorkflowAdapter.start_plan()
-          8. Emit PLAN_STARTED
-          9. Return plan + workflow result
+          1. Emit PLAN_REQUESTED as a compatibility event for UI/live-feed code.
+          2. Call AgentCoreClient.recommend_next(), not AgentCoreClient.plan().
+          3. Convert the single recommendation into a one-step executor plan shell.
+          4. Locally validate that the single action is visible for this session.
+          5. Emit PLAN_GENERATED with source=next_suggested_plan.
+          6. Call WorkflowAdapter.start_plan().
+          7. Emit PLAN_STARTED.
         """
         session_id = session.session_id
 
         if self.agent_core_client is None:
-            return {"error": "agent-core client not configured"}
+            return {"error": "agent-core recommend-next client not configured"}
 
         if self.workflow_adapter is None:
             return {"error": "workflow adapter not configured"}
@@ -295,13 +294,13 @@ class SessionController:
         ambient_context = ambient_packet_to_agent_core_context(ambient_packet)
         ambient_prompt_block = ambient_packet_to_prompt_block(ambient_packet)
 
-        # 1. Emit PLAN_REQUESTED
         self.session_store.update_status(session_id, SessionStatus.PLANNING)
         self.event_store.append(
             create_event(
                 EventType.PLAN_REQUESTED, session_id,
                 prompt=prompt,
                 mode_preference=mode_preference,
+                recommendation_source="recommend_next",
                 ambient_context_attached=bool(ambient_context),
                 source_candidate_count=len(ambient_context.get("source_candidates", [])),
                 evidence_event_ids=ambient_context.get("evidence_event_ids", []),
@@ -309,90 +308,78 @@ class SessionController:
             )
         )
 
-        # 2. Call agent-core for plan
+        completed_actions = self._get_completed_actions(session_id)
+        current_action = self._get_current_action(session_id) or prompt
         try:
-            plan_request = PlanRequest(
+            recommendation = await self.agent_core_client.recommend_next(
+                task_type="implementation",
+                current_action=current_action,
+                completed_actions=completed_actions,
                 session_id=session_id,
                 repo_id=session.repo_id,
-                prompt=prompt,
-                allowed_actions=session.allowed_actions,
-                mode_preference=mode_preference,
                 ambient_context=ambient_context,
+                suggested_plan=None,
             )
-            plan_response = await self.agent_core_client.plan(plan_request)
         except Exception as e:
             self.event_store.append(
                 create_event(
                     EventType.PLAN_VALIDATION_FAILED, session_id,
                     error=str(e),
-                    source="agent_core_plan",
+                    source="recommend_next",
                 )
             )
             self.session_store.update_status(session_id, SessionStatus.FAILED)
-            return {"error": f"agent-core plan request failed: {e}"}
+            return {"error": f"recommend-next request failed: {e}"}
 
-        # 3. Check plan response
-        if not plan_response.get("ok", False):
-            error_msg = plan_response.get("error", "Plan generation failed")
+        if recommendation.get("ok") is False:
+            error_msg = recommendation.get("error", "recommend-next failed")
             self.event_store.append(
                 create_event(
                     EventType.PLAN_VALIDATION_FAILED, session_id,
                     error=error_msg,
-                    source="agent_core_plan_response",
+                    source="recommend_next_response",
                 )
             )
             self.session_store.update_status(session_id, SessionStatus.FAILED)
-            return {"error": error_msg, "plan_response": plan_response}
+            return {"error": error_msg, "recommendation": recommendation}
 
-        plan = plan_response.get("plan", {})
-
-        # 4. Validate plan with agent-core
         try:
-            validation = await self.agent_core_client.validate_plan(
-                session.allowed_actions, plan
+            plan = next_suggestion_to_plan(
+                prompt=prompt,
+                recommendation=recommendation,
+                mode_preference=mode_preference,
             )
-        except Exception as e:
+            self._validate_one_step_plan_for_session(session, plan)
+        except NextSuggestedPlanError as e:
             self.event_store.append(
                 create_event(
                     EventType.PLAN_VALIDATION_FAILED, session_id,
                     error=str(e),
-                    source="agent_core_validate",
+                    source="next_suggested_plan_adapter",
                 )
             )
             self.session_store.update_status(session_id, SessionStatus.FAILED)
-            return {"error": f"agent-core validation failed: {e}"}
+            return {"error": f"Next suggested action validation failed: {e}", "recommendation": recommendation}
 
-        # 5. Check validation
-        if not validation.get("valid", False):
-            errors = validation.get("errors", [])
-            self.event_store.append(
-                create_event(
-                    EventType.PLAN_VALIDATION_FAILED, session_id,
-                    errors=errors,
-                    source="agent_core_validate_response",
-                )
-            )
-            self.session_store.update_status(session_id, SessionStatus.FAILED)
-            return {"error": "Plan validation failed", "validation_errors": errors}
-
-        # 6. Emit PLAN_GENERATED. Do not persist raw LLM prompts/messages here.
         self.event_store.append(
             create_event(
                 EventType.PLAN_GENERATED, session_id,
                 plan=plan,
-                warnings=plan_response.get("warnings", []),
+                warnings=recommendation.get("warnings", []),
+                source="next_suggested_plan",
+                recommendation=recommendation,
                 ambient_context_attached=bool(ambient_context),
                 source_candidate_count=len(ambient_context.get("source_candidates", [])),
             )
         )
 
-        # 7. Start workflow
         context = {
             "repo_id": session.repo_id,
             "worktree_id": session.worktree_id,
             "allowed_actions": session.allowed_actions,
             "ambient_context": ambient_context,
             "ambient_prompt_context": ambient_prompt_block,
+            "recommendation_source": "recommend_next",
         }
         try:
             workflow_result = await self.workflow_adapter.start_plan(
@@ -402,23 +389,38 @@ class SessionController:
             self.session_store.update_status(session_id, SessionStatus.FAILED)
             return {"error": f"Workflow start failed: {e}"}
 
-        # 8. Emit PLAN_STARTED
         self.event_store.append(
             create_event(
                 EventType.PLAN_STARTED, session_id,
                 backend=workflow_result.get("backend", ""),
                 workflow_run_id=workflow_result.get("workflow_run_id", ""),
                 ambient_context_attached=bool(ambient_context),
+                source="next_suggested_plan",
             )
         )
         self.session_store.update_status(session_id, SessionStatus.EDITING)
 
         return {
             "plan": plan,
+            "next_suggested_action": plan["steps"][0],
+            "recommendation": recommendation,
             "workflow": workflow_result,
             "ambient_context": ambient_context,
-            "message": "Plan generated and workflow started.",
+            "message": "Next suggested action wrapped and workflow started.",
         }
+
+    def _validate_one_step_plan_for_session(self, session: Session, plan: dict[str, Any]) -> None:
+        steps = plan.get("steps")
+        if not isinstance(steps, list) or len(steps) != 1:
+            raise NextSuggestedPlanError("recommend-next must produce exactly one action")
+        step = steps[0]
+        if not isinstance(step, dict):
+            raise NextSuggestedPlanError("recommend-next action step must be an object")
+        action_name = str(step.get("action_name") or "").strip()
+        if not action_name:
+            raise NextSuggestedPlanError("recommend-next action is missing action_name")
+        if session.allowed_actions and action_name not in session.allowed_actions:
+            raise NextSuggestedPlanError(f"Action {action_name} is not in session allowed_actions")
 
     async def _execute_routing_decision(
         self,
@@ -453,7 +455,7 @@ class SessionController:
                     prompt=prompt,
                 )
             )
-            # Request and start plan for child session
+            # Request and start the next suggested action for child session
             child_id = child_result["session"]["session_id"]
             child_session = self.session_store.get(child_id)
             plan_result = {}
@@ -473,7 +475,7 @@ class SessionController:
                     session_type="root_session",
                 )
             )
-            # Request and start plan for new session
+            # Request and start the next suggested action for new session
             new_id = new_result["session"]["session_id"]
             new_session = self.session_store.get(new_id)
             plan_result = {}
@@ -492,13 +494,12 @@ class SessionController:
                 "message": "Queued until the current operation finishes.",
             }
 
-        # APPEND_TO_CURRENT or MODIFY_CURRENT_PLAN
-        # These now trigger plan generation and workflow start
+        # APPEND_TO_CURRENT or MODIFY_CURRENT_PLAN now ask recommend-next for one action.
         plan_result = {}
         if self.agent_core_client and self.workflow_adapter:
             mode = "finite"
             if decision == RoutingDecision.MODIFY_CURRENT_PLAN:
-                mode = "finite"  # Modification creates a new finite plan
+                mode = "finite"
             plan_result = await self._request_and_start_plan(session, prompt, mode)
 
         return {
@@ -530,11 +531,22 @@ class SessionController:
             return evt.get("data", {}).get("action_name", "")
         return ""
 
+    def _get_completed_actions(self, session_id: str) -> list[str]:
+        events = self.event_store.get_events(session_id, limit=100)
+        completed: list[str] = []
+        for event in events:
+            if event.get("event_type") != EventType.ACTION_COMPLETED.value:
+                continue
+            action_name = event.get("data", {}).get("action_name", "")
+            if action_name:
+                completed.append(action_name)
+        return completed
+
 
 def _user_message(decision: RoutingDecision) -> str:
     messages = {
         RoutingDecision.APPEND_TO_CURRENT: "Added this instruction to the current plan.",
-        RoutingDecision.MODIFY_CURRENT_PLAN: "Modifying the current plan with new instructions.",
+        RoutingDecision.MODIFY_CURRENT_PLAN: "Requesting the next suggested action for the revised instruction.",
         RoutingDecision.INTERRUPT_CURRENT: "Interrupting the current plan.",
         RoutingDecision.SPAWN_CHILD_SESSION: "Started a child session.",
         RoutingDecision.SPAWN_NEW_SESSION: "Started a new session.",
