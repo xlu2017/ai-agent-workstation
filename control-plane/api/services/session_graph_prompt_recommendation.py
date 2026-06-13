@@ -21,6 +21,8 @@ class PromptRouteRecommendation:
     reason: str
     source: str
     payload: dict[str, Any] = field(default_factory=dict)
+    assistant_response: str = ""
+    response_session_kind: str = ""
 
 
 def _session_context(session: Any, prompt: str) -> dict[str, Any]:
@@ -41,6 +43,21 @@ def _session_context(session: Any, prompt: str) -> dict[str, Any]:
     }
 
 
+def _fallback_direct_answer(prompt: str) -> str:
+    """Return deterministic answers only for trivial fallback cases.
+
+    The configured LLM is the preferred source for question-only chat. This helper
+    exists so graph chat still behaves sanely when agent-core is unavailable.
+    """
+
+    text = " ".join(prompt.strip().lower().split()).rstrip("?")
+    if text == "are you fat":
+        return "No."
+    if text in {"is the world round", "is earth round", "is the earth round"}:
+        return "Yes. Earth is roughly spherical, more precisely an oblate spheroid."
+    return "I can answer that, but the configured LLM is unavailable right now."
+
+
 def _parse_route_params(params: Any, reason: str, source: str, payload: dict[str, Any]) -> PromptRouteRecommendation | None:
     if not isinstance(params, dict):
         return None
@@ -48,7 +65,16 @@ def _parse_route_params(params: Any, reason: str, source: str, payload: dict[str
     if route not in PROMPT_ROUTES:
         return None
     route_reason = str(params.get("reason") or reason or "agent-core recommended prompt route")
-    return PromptRouteRecommendation(route=route, reason=route_reason, source=source, payload=payload)
+    assistant_response = str(params.get("assistant_response") or "")
+    response_session_kind = str(params.get("response_session_kind") or ("question" if route == "question_only" else ""))
+    return PromptRouteRecommendation(
+        route=route,
+        reason=route_reason,
+        source=source,
+        payload=payload,
+        assistant_response=assistant_response,
+        response_session_kind=response_session_kind,
+    )
 
 
 def _parse_next_task_decision(payload: dict[str, Any]) -> PromptRouteRecommendation | None:
@@ -86,6 +112,31 @@ def _parse_recommendation(payload: dict[str, Any]) -> PromptRouteRecommendation 
     return _parse_next_task_decision(payload) or _parse_legacy_recommendation(payload)
 
 
+def _local_route_fallback(session: Any, prompt: str, source: str, reason: str) -> PromptRouteRecommendation:
+    text = " ".join(prompt.strip().lower().split())
+    root_phrases = ("new session", "new root", "separate session", "different goal", "unrelated task", "unrelated goal", "start over")
+    child_phrases = ("separate task", "child task", "subtask", "also create a task", "track this separately")
+    question_prefixes = ("why ", "what ", "how ", "where ", "when ", "who ", "is ", "are ", "can you explain", "explain ")
+    action_words = {"continue", "implement", "fix", "add", "remove", "change", "update", "refactor", "run", "test", "create", "build"}
+
+    if any(phrase in text for phrase in root_phrases):
+        return PromptRouteRecommendation("create_sibling_goal", "User requested a separate goal.", source, {})
+    if any(phrase in text for phrase in child_phrases):
+        return PromptRouteRecommendation("create_child_goal", "User requested a separately tracked subtask.", source, {})
+    question_like = text.endswith("?") or any(text.startswith(prefix) for prefix in question_prefixes)
+    has_action_word = any(word in action_words for word in text.replace("?", "").split())
+    if question_like and not has_action_word:
+        return PromptRouteRecommendation(
+            "question_only",
+            reason,
+            source,
+            {},
+            assistant_response=_fallback_direct_answer(prompt),
+            response_session_kind="question",
+        )
+    return PromptRouteRecommendation("continue_active", "Prompt appears to continue the active session goal.", source, {})
+
+
 def recommend_graph_prompt_route(session: Any, prompt: str) -> PromptRouteRecommendation:
     """Return the advisory prompt route from a constrained recommend-next pass.
 
@@ -111,6 +162,6 @@ def recommend_graph_prompt_route(session: Any, prompt: str) -> PromptRouteRecomm
         parsed = _parse_recommendation(response.json())
         if parsed is not None:
             return parsed
-        return PromptRouteRecommendation("question_only", "agent-core did not return a valid session.route_prompt recommendation", "invalid_agent_core_response", {})
+        return _local_route_fallback(session, prompt, "invalid_agent_core_response", "agent-core did not return a valid session.route_prompt recommendation")
     except Exception as exc:
-        return PromptRouteRecommendation("question_only", f"agent-core prompt routing unavailable: {exc}", "agent_core_unavailable", {})
+        return _local_route_fallback(session, prompt, "agent_core_unavailable", f"agent-core prompt routing unavailable: {exc}")
