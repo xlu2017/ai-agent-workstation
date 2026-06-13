@@ -90,46 +90,8 @@ def test_context_packet_includes_browser_source_candidates():
 
 def test_context_packet_includes_browser_page_state_source_hint_candidates():
     from ambient.context_packet import build_context_packet
-    from ambient.types import AmbientEvent, AmbientSource
 
-    event = AmbientEvent(
-        event_type="browser.tab_observed",
-        session_id="s1",
-        source=AmbientSource.BROWSER,
-        actor="system",
-        confidence=0.92,
-        payload={
-            "page_state": {
-                "interactive": [
-                    {
-                        "tagName": "button",
-                        "text": "Save",
-                        "testId": "save-button",
-                        "sourceHint": {
-                            "componentName": "SaveButton",
-                            "sourceFile": "src/components/SaveButton.tsx",
-                            "sourceLine": 12,
-                            "sourceConfidence": 0.94,
-                        },
-                    }
-                ],
-                "buttons": [
-                    {
-                        "tagName": "button",
-                        "text": "Save",
-                        "testId": "save-button",
-                        "sourceHint": {
-                            "componentName": "SaveButton",
-                            "sourceFile": "src/components/SaveButton.tsx",
-                            "sourceLine": 12,
-                        },
-                    }
-                ],
-            }
-        },
-    )
-
-    packet = build_context_packet("s1", [event], goal="fix save")
+    packet = build_context_packet("s1", [_browser_page_state_event("s1")], goal="fix save")
 
     assert packet.source_candidates
     candidate = packet.source_candidates[0]
@@ -331,3 +293,59 @@ def test_evidence_graph_links_extension_selection_to_source_file():
     assert "observed_dom" in relations
     assert "observed_component" in relations
     assert "defined_in" in relations
+
+
+def test_evidence_graph_links_page_state_source_hint_to_source_file():
+    from ambient.evidence_graph import build_evidence_graph
+
+    graph = build_evidence_graph([_browser_page_state_event("s1")])
+    node_ids = {node.node_id for node in graph.nodes}
+    relations = {edge.relation for edge in graph.edges}
+
+    assert "dom:[data-testid=save-button]" in node_ids
+    assert "component:SaveButton" in node_ids
+    assert "file:src/components/SaveButton.tsx" in node_ids
+    assert "observed_dom" in relations
+    assert "observed_component" in relations
+    assert "defined_in" in relations
+
+
+def _browser_page_state_event(session_id: str):
+    from ambient.types import AmbientEvent, AmbientSource
+
+    return AmbientEvent(
+        event_type="browser.tab_observed",
+        session_id=session_id,
+        source=AmbientSource.BROWSER,
+        actor="system",
+        confidence=0.92,
+        payload={
+            "page_state": {
+                "interactive": [
+                    {
+                        "tagName": "button",
+                        "text": "Save",
+                        "testId": "save-button",
+                        "sourceHint": {
+                            "componentName": "SaveButton",
+                            "sourceFile": "src/components/SaveButton.tsx",
+                            "sourceLine": 12,
+                            "sourceConfidence": 0.94,
+                        },
+                    }
+                ],
+                "buttons": [
+                    {
+                        "tagName": "button",
+                        "text": "Save",
+                        "testId": "save-button",
+                        "sourceHint": {
+                            "componentName": "SaveButton",
+                            "sourceFile": "src/components/SaveButton.tsx",
+                            "sourceLine": 12,
+                        },
+                    }
+                ],
+            }
+        },
+    )
