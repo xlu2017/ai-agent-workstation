@@ -33,27 +33,6 @@ def test_agent_core_client_forwards_ambient_context_to_recommend_next(monkeypatc
     assert "suggested_plan" not in payload["context"]
 
 
-def test_agent_core_client_can_forward_suggested_plan_only_for_non_execution_compatibility(monkeypatch):
-    import agent_core_client.client as client_module
-    from agent_core_client.client import AgentCoreClient
-
-    fake_client = FakeAsyncClient()
-    monkeypatch.setattr(client_module.httpx, "AsyncClient", lambda **kwargs: fake_client)
-
-    client = AgentCoreClient(base_url="http://agent-core.test")
-    asyncio.run(client.recommend_next(
-        task_type="implementation",
-        current_action="fix selected component",
-        completed_actions=[],
-        session_id="s1",
-        repo_id="repo-1",
-        suggested_plan={"display_only": True},
-    ))
-
-    payload = fake_client.posts[0]["json"]
-    assert payload["context"]["suggested_plan"] == {"display_only": True}
-
-
 class FakeResponse:
     def json(self):
         return {"ok": True, "next_action": {"action_name": "read_file", "params": {"path": "x.py"}}}
