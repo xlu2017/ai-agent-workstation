@@ -92,6 +92,7 @@ class PlanExecutor:
         goal = plan.get("goal", "")
         worktree_id = context.get("worktree_id", "")
         worktree_path = f"{self.worktree_base}/{worktree_id}" if worktree_id else ""
+        executor_context = self._executor_context(context)
 
         results: list[dict[str, Any]] = []
         steps_executed = 0
@@ -181,12 +182,12 @@ class PlanExecutor:
             if is_composite_action(action_name):
                 exec_result = await self.composite_router.execute_composite_action(
                     session_id, worktree_path, action_name, params,
-                    context,
+                    executor_context,
                 )
             else:
                 exec_result = await self.execution_router.execute_action(
                     session_id, worktree_path, action_name, params,
-                    context,
+                    executor_context,
                 )
             duration_ms = int(time.time() * 1000) - start_ms
 
@@ -311,6 +312,14 @@ class PlanExecutor:
             "needs_refresh": needs_refresh,
             "results": results,
         }
+
+    def _executor_context(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Normalize workflow context before it reaches execution adapters."""
+
+        executor_context = dict(context)
+        if not executor_context.get("plan_context") and executor_context.get("ambient_prompt_context"):
+            executor_context["plan_context"] = executor_context["ambient_prompt_context"]
+        return executor_context
 
     async def _record_outcome(
         self,
