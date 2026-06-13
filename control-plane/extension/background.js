@@ -121,20 +121,8 @@ async function submitRegionEdit(payload) {
     },
   };
 
-  let ambientEventId = '';
-  try {
-    const ambientRes = await fetch(`${controlPlaneUrl}/api/sessions/${encodeURIComponent(sessionId)}/ambient/events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(ambientEvent),
-    });
-    if (ambientRes.ok) {
-      const ambientJson = await ambientRes.json();
-      ambientEventId = ambientJson?.event?.event_id || '';
-    }
-  } catch (_) {
-    // The chat submit remains useful even if the ambient router is not mounted yet.
-  }
+  const ambientResult = await persistAmbientEvent(controlPlaneUrl, ambientEvent);
+  const ambientEventId = ambientResult.eventId;
 
   const sourceCandidates = await fetchSourceCandidates(controlPlaneUrl, sessionId);
   const instruction = buildInstruction(payload, ambientEventId, sourceCandidates);
@@ -149,8 +137,40 @@ async function submitRegionEdit(payload) {
       chat: chatJson,
     };
   }
-  await recordHistory({ payload, sessionId, ambientEventId, chat: chatJson, sourceCandidates });
-  return { ok: true, sessionId, ambientEventId, sourceCandidates, chat: chatJson };
+
+  const childSessionId = chatJson?.work_session?.id || chatJson?.goal_session?.id || '';
+  let childAmbientEventId = '';
+  if (childSessionId && childSessionId !== sessionId) {
+    const childAmbient = {
+      ...ambientEvent,
+      session_id: childSessionId,
+      payload: {
+        ...ambientEvent.payload,
+        parent_session_id: sessionId,
+        parent_ambient_event_id: ambientEventId,
+        source: 'chrome_extension.region_prompt.mirrored_to_child_session',
+      },
+    };
+    childAmbientEventId = (await persistAmbientEvent(controlPlaneUrl, childAmbient)).eventId;
+  }
+
+  await recordHistory({ payload, sessionId, ambientEventId, childSessionId, childAmbientEventId, chat: chatJson, sourceCandidates });
+  return { ok: true, sessionId, ambientEventId, childSessionId, childAmbientEventId, sourceCandidates, chat: chatJson };
+}
+
+async function persistAmbientEvent(controlPlaneUrl, ambientEvent) {
+  try {
+    const ambientRes = await fetch(`${controlPlaneUrl}/api/sessions/${encodeURIComponent(ambientEvent.session_id)}/ambient/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(ambientEvent),
+    });
+    if (!ambientRes.ok) return { ok: false, eventId: '' };
+    const ambientJson = await ambientRes.json();
+    return { ok: true, eventId: ambientJson?.event?.event_id || '' };
+  } catch (_) {
+    return { ok: false, eventId: '' };
+  }
 }
 
 async function submitChatInstruction(controlPlaneUrl, sessionId, instruction) {
@@ -211,17 +231,19 @@ async function fetchSourceCandidates(controlPlaneUrl, sessionId) {
   }
 }
 
-async function recordHistory({ payload, sessionId, ambientEventId, chat, sourceCandidates = [] }) {
+async function recordHistory({ payload, sessionId, ambientEventId, childSessionId = '', childAmbientEventId = '', chat, sourceCandidates = [] }) {
   const current = await chrome.storage.local.get({ [HISTORY_KEY]: [] });
   const history = Array.isArray(current[HISTORY_KEY]) ? current[HISTORY_KEY] : [];
   const item = {
     id: `region_${Date.now()}`,
     createdAt: new Date().toISOString(),
     sessionId,
+    childSessionId,
     page: payload.page || {},
     selection: summarizeSelection(payload.selection || {}),
     prompt: payload.prompt || '',
     ambientEventId,
+    childAmbientEventId,
     sourceCandidates: sourceCandidates.slice(0, 8),
     taskId: chat?.task_id || chat?.work_session?.id || chat?.goal_session?.id || '',
     status: chat?.state || chat?.chat_status || 'submitted',
