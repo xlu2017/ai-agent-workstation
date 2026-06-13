@@ -40,6 +40,16 @@ export type GraphSession = {
   updated_at?: string
 }
 
+export type GraphSessionEvent = {
+  id: string
+  type: string
+  session_id: string
+  root_session_id?: string | null
+  actor?: string
+  data?: Record<string, unknown>
+  created_at?: string
+}
+
 export type RepoSelection = {
   source: RepoSource
   githubRepo?: GitHubRepo
