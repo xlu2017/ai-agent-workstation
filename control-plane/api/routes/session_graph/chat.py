@@ -46,8 +46,13 @@ def _base_metadata(session: SessionRecord, context: RequestContext) -> dict[str,
     }
 
 
+def _work_execution_state(repo_needed: bool) -> str:
+    return "blocked_needs_repo" if repo_needed else "ready_for_execution"
+
+
 def _make_work_session(session: SessionRecord, content: str, turn: dict[str, object], now: str, context: RequestContext, mode: str | None) -> SessionRecord:
     repo_needed = not bool(session.metadata.get("repo_session_id"))
+    execution_state = _work_execution_state(repo_needed)
     return SessionRecord(
         kind=SessionKind.WORK,
         title=_short_title(content),
@@ -55,8 +60,23 @@ def _make_work_session(session: SessionRecord, content: str, turn: dict[str, obj
         status=SessionStatus.BLOCKED if repo_needed else SessionStatus.ACTIVE,
         parent_id=session.id,
         root_id=session.root_id or session.id,
-        facets={"work": {"prompt": content, "source_session_id": session.id, "mode": mode or "finite", "requires_repo": repo_needed}},
-        state={"chat_turns": [turn], "status_reason": "needs_repo" if repo_needed else "ready"},
+        facets={
+            "work": {
+                "prompt": content,
+                "source_session_id": session.id,
+                "mode": mode or "finite",
+                "requires_repo": repo_needed,
+                "execution_state": execution_state,
+                "auto_started": False,
+                "requires_execution_start": not repo_needed,
+            }
+        },
+        state={
+            "chat_turns": [turn],
+            "status_reason": "needs_repo" if repo_needed else "ready_for_execution",
+            "execution_state": execution_state,
+            "auto_started": False,
+        },
         metadata={**_base_metadata(session, context), "created_from": "session_graph_chat"},
         created_at=now,
         updated_at=now,
@@ -137,6 +157,7 @@ def append_graph_session_chat_turn(
     created_edge: SessionEdge | None = None
     extra_event: SessionEvent | None = None
     chat_status = classification.route
+    execution_state = classification.route
 
     if classification.route == "continue_active":
         created_session = _make_work_session(session, content, turn, now, context, body.mode)
@@ -151,12 +172,20 @@ def append_graph_session_chat_turn(
             created_from_event_id=user_event.id,
         )
         graph.edges.append(created_edge)
+        execution_state = str(created_session.state.get("execution_state", "ready_for_execution"))
         extra_event = SessionEvent(
             type=SessionEventType.WORK_STARTED,
             session_id=created_session.id,
             root_session_id=created_session.root_id,
             actor=SessionEventActor.SYSTEM,
-            data={"parent_session_id": session.id, "prompt": content, "requires_repo": not bool(session.metadata.get("repo_session_id")), "source": classification.source},
+            data={
+                "parent_session_id": session.id,
+                "prompt": content,
+                "requires_repo": not bool(session.metadata.get("repo_session_id")),
+                "execution_state": execution_state,
+                "auto_started": False,
+                "source": classification.source,
+            },
             created_at=now,
         )
         chat_status = "needs_repo" if created_session.status == SessionStatus.BLOCKED else "ready"
@@ -203,6 +232,8 @@ def append_graph_session_chat_turn(
         "routing_decision": {"route": classification.route, "reason": classification.reason, "source": classification.source},
         "events": [event.model_dump(mode="json") for event in [user_event, extra_event] if event is not None],
         "chat_status": chat_status,
+        "execution_state": execution_state,
+        "auto_started": False,
     }
     if created_session is not None:
         key = "work_session" if created_session.kind == SessionKind.WORK else "goal_session"
