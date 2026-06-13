@@ -15,6 +15,7 @@ from ambient.event_log import load_ambient_events, persist_ambient_event
 from ambient.evidence_graph import write_evidence_graph
 from ambient.reducers import reduce_ambient_events
 from ambient.service import AmbientObservationService
+from ambient.source_candidates import build_source_candidates
 from ambient.types import AmbientEvent
 from ambient.vendor_registry import ambient_vendor_status
 
@@ -173,6 +174,23 @@ def get_ambient_state(session_id: str, limit: int = 500, collect: bool = Query(F
     events = load_ambient_events(session_id, sessions_dir=SESSIONS_DIR, limit=limit)
     state = reduce_ambient_events(events)
     return state.model_dump()
+
+
+@router.get("/source-candidates")
+def get_ambient_source_candidates(session_id: str, limit: int = 500, collect: bool = Query(False)):
+    """Return ranked source-file candidates derived from ambient evidence.
+
+    These candidates are advisory context only. The execution layer must still
+    validate path containment and permissions before reading or mutating files.
+    """
+
+    if collect:
+        AmbientObservationService(get_ambient_config()).collect_once(session_id=session_id)
+    events = load_ambient_events(session_id, sessions_dir=SESSIONS_DIR, limit=limit)
+    return {
+        "session_id": session_id,
+        "source_candidates": build_source_candidates(events),
+    }
 
 
 @router.get("/context")
