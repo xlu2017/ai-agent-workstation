@@ -55,9 +55,35 @@ def _work_execution_state(repo_needed: bool) -> str:
     return "blocked_needs_repo" if repo_needed else "ready_for_execution"
 
 
-def _make_work_session(session: SessionRecord, content: str, turn: dict[str, object], now: str, context: RequestContext, mode: str | None) -> SessionRecord:
+def _make_work_session(
+    session: SessionRecord,
+    content: str,
+    turn: dict[str, object],
+    now: str,
+    context: RequestContext,
+    mode: str | None,
+    narration: str = "",
+) -> SessionRecord:
     repo_needed = not bool(session.metadata.get("repo_session_id"))
     execution_state = _work_execution_state(repo_needed)
+    work_facet = {
+        "prompt": content,
+        "source_session_id": session.id,
+        "mode": mode or "finite",
+        "requires_repo": repo_needed,
+        "execution_state": execution_state,
+        "auto_started": False,
+        "requires_execution_start": not repo_needed,
+    }
+    state = {
+        "chat_turns": [turn],
+        "status_reason": "needs_repo" if repo_needed else "ready_for_execution",
+        "execution_state": execution_state,
+        "auto_started": False,
+    }
+    if narration:
+        work_facet["narration"] = narration
+        state["narration"] = narration
     return SessionRecord(
         kind=SessionKind.WORK,
         title=_short_title(content),
@@ -65,23 +91,8 @@ def _make_work_session(session: SessionRecord, content: str, turn: dict[str, obj
         status=SessionStatus.BLOCKED if repo_needed else SessionStatus.ACTIVE,
         parent_id=session.id,
         root_id=session.root_id or session.id,
-        facets={
-            "work": {
-                "prompt": content,
-                "source_session_id": session.id,
-                "mode": mode or "finite",
-                "requires_repo": repo_needed,
-                "execution_state": execution_state,
-                "auto_started": False,
-                "requires_execution_start": not repo_needed,
-            }
-        },
-        state={
-            "chat_turns": [turn],
-            "status_reason": "needs_repo" if repo_needed else "ready_for_execution",
-            "execution_state": execution_state,
-            "auto_started": False,
-        },
+        facets={"work": work_facet},
+        state=state,
         metadata={**_base_metadata(session, context), "created_from": "session_graph_chat"},
         created_at=now,
         updated_at=now,
@@ -168,6 +179,7 @@ def append_graph_session_chat_turn(
 
     now = utc_now()
     classification = recommend_graph_prompt_route(session, content)
+    narration = classification.narration
     turn = {"role": "user", "content": content, "created_at": now}
     turns = _chat_turns(session)
     turns.append(turn)
@@ -180,6 +192,8 @@ def append_graph_session_chat_turn(
         "graph_chat_classification_reason": classification.reason,
         "graph_chat_recommendation_source": classification.source,
     }
+    if narration:
+        session.metadata["graph_chat_narration"] = narration
     session.updated_at = now
     graph.sessions[index] = session
 
@@ -188,7 +202,7 @@ def append_graph_session_chat_turn(
         session_id=session.id,
         root_session_id=session.root_id or session.id,
         actor=SessionEventActor.USER,
-        data={"content": content, "mode": body.mode, "route": classification.route, "source": "session_graph.chat"},
+        data={"content": content, "mode": body.mode, "route": classification.route, "source": "session_graph.chat", "narration": narration},
         created_at=now,
     )
     graph.events.append(user_event)
@@ -202,18 +216,20 @@ def append_graph_session_chat_turn(
     execution_state = classification.route
 
     if classification.route == "continue_active":
-        created_session = _make_work_session(session, content, turn, now, context, body.mode)
+        created_session = _make_work_session(session, content, turn, now, context, body.mode, narration)
         activation_request = build_graph_work_activation_request(work_session=created_session, parent_session=session)
         activation_result = scaffold_activation_result(activation_request)
         created_session = record_activation_result_on_work_session(created_session, activation_result)
         activation_response = activation_result.to_response_dict()
+        if narration:
+            activation_response["narration"] = narration
         created_session.created_from_event_id = user_event.id
         graph.sessions.append(created_session)
         created_edge = SessionEdge(
             type=EdgeType.COMPONENT_OF,
             source_session_id=created_session.id,
             target_session_id=session.id,
-            metadata={"reason": "Graph chat created a work session.", "source": classification.source},
+            metadata={"reason": "Graph chat created a work session.", "source": classification.source, "narration": narration},
             created_at=now,
             created_from_event_id=user_event.id,
         )
@@ -232,6 +248,7 @@ def append_graph_session_chat_turn(
                 "auto_started": False,
                 "activation": activation_response or {},
                 "source": classification.source,
+                "narration": narration,
             },
             created_at=now,
         )
@@ -245,7 +262,7 @@ def append_graph_session_chat_turn(
             type=EdgeType.COMPONENT_OF if classification.route == "create_child_goal" else EdgeType.SIBLING_OF,
             source_session_id=created_session.id,
             target_session_id=session.id,
-            metadata={"reason": classification.reason, "source": classification.source},
+            metadata={"reason": classification.reason, "source": classification.source, "narration": narration},
             created_at=now,
             created_from_event_id=user_event.id,
         )
@@ -255,7 +272,7 @@ def append_graph_session_chat_turn(
             session_id=created_session.id,
             root_session_id=created_session.root_id or created_session.id,
             actor=SessionEventActor.SYSTEM,
-            data={"source_session_id": session.id, "route": classification.route, "prompt": content, "source": classification.source},
+            data={"source_session_id": session.id, "route": classification.route, "prompt": content, "source": classification.source, "narration": narration},
             created_at=now,
         )
 
@@ -272,7 +289,7 @@ def append_graph_session_chat_turn(
             type=EdgeType.COMPONENT_OF,
             source_session_id=created_session.id,
             target_session_id=session.id,
-            metadata={"reason": classification.reason, "source": classification.source, "non_executable": True},
+            metadata={"reason": classification.reason, "source": classification.source, "non_executable": True, "narration": narration},
             created_at=now,
             created_from_event_id=user_event.id,
         )
@@ -289,6 +306,7 @@ def append_graph_session_chat_turn(
                 "assistant_response": answer,
                 "response_session_kind": "question",
                 "auto_started": False,
+                "narration": narration,
             },
             created_at=now,
         )
@@ -301,7 +319,7 @@ def append_graph_session_chat_turn(
             session_id=session.id,
             root_session_id=session.root_id or session.id,
             actor=SessionEventActor.SYSTEM,
-            data={"route": classification.route, "reason": classification.reason, "source": classification.source},
+            data={"route": classification.route, "reason": classification.reason, "source": classification.source, "narration": narration},
             created_at=now,
         )
 
@@ -312,11 +330,12 @@ def append_graph_session_chat_turn(
     response: dict[str, object] = {
         "session": session.model_dump(mode="json"),
         "turn": turn,
-        "routing_decision": {"route": classification.route, "reason": classification.reason, "source": classification.source},
+        "routing_decision": {"route": classification.route, "reason": classification.reason, "source": classification.source, "narration": narration},
         "events": [event.model_dump(mode="json") for event in [user_event, extra_event] if event is not None],
         "chat_status": chat_status,
         "execution_state": execution_state,
         "auto_started": False,
+        "narration": narration,
     }
     if assistant_turn is not None:
         response["assistant_turn"] = assistant_turn
