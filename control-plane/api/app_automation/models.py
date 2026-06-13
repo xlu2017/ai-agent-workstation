@@ -82,5 +82,6 @@ class AppAutomationExecuteResult(BaseModel):
     planned_steps: list[str] = Field(default_factory=list)
     required_approval: bool = False
     route_plan: AppAutomationRoutePlan | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
     event: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
