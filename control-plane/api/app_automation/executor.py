@@ -1,18 +1,17 @@
 """Execution scaffold for app automation actions.
 
-The scaffold is intentionally conservative: it performs catalog lookup, risk and
-approval checks, and emits a normalized plan. Actual calls into vendored
-runtimes are adapter-specific and should be wired per vendor after vendored
-source is checked in and reviewed.
+The executor performs catalog lookup, approval checks, and normalized planning.
+When a vendored source tree is present it now returns a vendor-specific scaffold
+plan instead of treating the provider as missing.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
 
+from api.app_automation.adapter_base import VendorAdapter
 from api.app_automation.models import AppAutomationExecuteRequest, AppAutomationExecuteResult
-from api.app_automation.registry import get_action
+from api.app_automation.registry import CONTROL_PLANE_ROOT, get_action, list_vendor_tools
 
 
 def _now() -> str:
@@ -30,8 +29,24 @@ def _planned_steps(action, request: AppAutomationExecuteRequest) -> list[str]:
     elif request.dry_run:
         steps.append("Stop before execution because dry_run=true.")
     else:
-        steps.append("Invoke vendored adapter runtime. This remains disabled until the runtime source is vendored and adapter-specific execution is wired.")
+        steps.append("Invoke the committed vendored-source adapter scaffold.")
     return steps
+
+
+def _source_path_for_vendor(vendor_id: str):
+    for tool in list_vendor_tools():
+        if tool.id == vendor_id:
+            return CONTROL_PLANE_ROOT.parent / tool.target_dir
+    return None
+
+
+def _adapter_for(action) -> VendorAdapter | None:
+    source_path = _source_path_for_vendor(action.preferred_vendor)
+    if source_path is None:
+        return None
+    adapter = VendorAdapter(source_path)
+    adapter.vendor_id = action.preferred_vendor
+    return adapter
 
 
 def execute_app_action(request: AppAutomationExecuteRequest) -> AppAutomationExecuteResult:
@@ -105,16 +120,33 @@ def execute_app_action(request: AppAutomationExecuteRequest) -> AppAutomationExe
             error={"code": "VENDOR_NOT_INSTALLED", "message": action.unavailable_reason},
         )
 
+    adapter = _adapter_for(action)
+    if adapter is None:
+        return AppAutomationExecuteResult(
+            ok=False,
+            status="adapter_missing",
+            vendor=action.preferred_vendor,
+            execution_kind=action.execution_kind,
+            app_id=request.app_id,
+            action_id=request.action_id,
+            dry_run=False,
+            message="No platform adapter scaffold is registered for this vendor.",
+            planned_steps=_planned_steps(action, request),
+            event=event,
+            error={"code": "ADAPTER_MISSING", "message": "No adapter scaffold is registered."},
+        )
+
+    adapter_result = adapter.execute(action, request)
     return AppAutomationExecuteResult(
-        ok=False,
-        status="adapter_not_wired",
+        ok=adapter_result.ok,
+        status=adapter_result.status,
         vendor=action.preferred_vendor,
         execution_kind=action.execution_kind,
         app_id=request.app_id,
         action_id=request.action_id,
         dry_run=False,
-        message="Vendor source is present, but concrete execution wiring for this adapter is not implemented yet.",
-        planned_steps=_planned_steps(action, request),
-        event=event,
-        error={"code": "ADAPTER_NOT_WIRED", "message": "Concrete vendored adapter execution is not implemented yet."},
+        message=adapter_result.message,
+        planned_steps=[*_planned_steps(action, request), *adapter_result.planned_steps],
+        event={**event, "adapter_status": adapter_result.status},
+        error=adapter_result.error,
     )
