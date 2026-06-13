@@ -47,14 +47,14 @@ class VendorAdapter:
         return [candidate for candidate in candidates if (self.source_path / candidate).exists()]
 
     def execute(self, action: AppAction, request: AppAutomationExecuteRequest) -> AdapterExecution:
-        return AdapterExecution(
-            ok=False,
-            status="adapter_scaffolded",
-            message=f"{self.vendor_id} source is present; live adapter execution for {action.id} is scaffolded but not enabled.",
-            planned_steps=[
-                f"Load vendored source from {self.source_path}.",
-                f"Map platform action {action.id} to {self.vendor_id} runtime.",
-                "Keep platform policy and approvals outside the vendored runtime.",
-            ],
-            error={"code": "ADAPTER_SCAFFOLDED", "message": "Live vendor execution is scaffolded but not enabled."},
-        )
+        if not self.source_path.exists() or not any(self.source_path.iterdir()):
+            return AdapterExecution(
+                ok=False,
+                status="vendor_not_installed",
+                message=f"{self.vendor_id} source is not present at {self.source_path}.",
+                planned_steps=[f"Expected vendored source at {self.source_path}."],
+                error={"code": "VENDOR_NOT_INSTALLED", "message": f"{self.vendor_id} source is not present."},
+            )
+        from api.app_automation.runtime import execute_vendor_action
+
+        return execute_vendor_action(self.vendor_id, self.source_path, action, request)
