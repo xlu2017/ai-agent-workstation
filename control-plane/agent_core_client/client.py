@@ -2,18 +2,18 @@
 agent-core HTTP client for jubilant-goggles.
 
 agent-core is an advisory service for memory, context, action knowledge,
-schema validation, planning, and next-action recommendations.
+schema validation, and next-action recommendations.
 
 This client may call agent-core for:
-  POST /actions/plan           — generate an advisory plan
-  POST /actions/validate-plan  — deterministic advisory plan validation
-  POST /actions/recommend-next — advisory next-action recommendation
+  POST /actions/recommend-next — advisory single next-action recommendation
   POST /actions/validate       — action contract validation
   GET  /actions                — fetch action catalog
   POST /memory/search          — search memories
   POST /context/search         — search context
+  POST /actions/outcome        — record execution outcomes
 
 This client must not ask agent-core to:
+  generate execution plans
   execute actions
   schedule sessions
   pause or cancel sessions
@@ -35,20 +35,6 @@ import httpx
 
 AGENT_CORE_URL = os.environ.get("AGENT_CORE_URL", "http://localhost:3210")
 AGENT_CORE_TIMEOUT = float(os.environ.get("AGENT_CORE_TIMEOUT", "30"))
-
-
-@dataclass
-class PlanRequest:
-    session_id: str
-    repo_id: str
-    prompt: str
-    allowed_actions: list[str]
-    mode_preference: str = "finite"
-    max_iterations: int | None = None
-    recent_memories: list[dict[str, Any]] = field(default_factory=list)
-    context_summaries: list[str] = field(default_factory=list)
-    recent_action_outcomes: list[dict[str, Any]] = field(default_factory=list)
-    ambient_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -88,42 +74,6 @@ class AgentCoreClient:
         resp.raise_for_status()
         return self._mark_advisory(resp.json())
 
-    async def plan(self, request: PlanRequest) -> dict[str, Any]:
-        """Generate an advisory plan. The plan is not authorization."""
-        payload: dict[str, Any] = {
-            "session_id": request.session_id,
-            "repo_id": request.repo_id,
-            "prompt": request.prompt,
-            "allowed_actions": request.allowed_actions,
-            "mode_preference": request.mode_preference,
-        }
-        if request.max_iterations is not None:
-            payload["max_iterations"] = request.max_iterations
-        if request.recent_memories:
-            payload["recent_memories"] = request.recent_memories
-        if request.context_summaries:
-            payload["context_summaries"] = request.context_summaries
-        if request.recent_action_outcomes:
-            payload["recent_action_outcomes"] = request.recent_action_outcomes
-        if request.ambient_context:
-            payload["ambient_context"] = request.ambient_context
-        resp = await self._client.post("/actions/plan", json=payload)
-        resp.raise_for_status()
-        return self._mark_advisory(resp.json())
-
-    async def validate_plan(
-        self,
-        allowed_actions: list[str],
-        plan: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Validate plan shape and visible action membership only."""
-        resp = await self._client.post(
-            "/actions/validate-plan",
-            json={"allowed_actions": allowed_actions, "plan": plan},
-        )
-        resp.raise_for_status()
-        return self._mark_advisory(resp.json())
-
     async def validate_action(
         self,
         action_name: str,
@@ -147,11 +97,13 @@ class AgentCoreClient:
         ambient_context: dict[str, Any] | None = None,
         suggested_plan: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Get an advisory next-action recommendation."""
+        """Get an advisory single next-action recommendation."""
         context: dict[str, Any] = {"session_id": session_id, "repo_id": repo_id}
         if ambient_context:
             context["ambient_context"] = ambient_context
         if suggested_plan:
+            # This is accepted only for prompt-context compatibility. Execution
+            # flows do not pass a plan here; recommend-next remains single-action.
             context["suggested_plan"] = suggested_plan
         resp = await self._client.post(
             "/actions/recommend-next",
