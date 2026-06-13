@@ -33,7 +33,7 @@ from execution.ambient_prompt_context import (
     ambient_packet_to_prompt_block,
     load_ambient_context_packet,
 )
-from execution.next_suggested_plan import NextSuggestedPlanError, next_suggestion_to_plan
+from execution.next_suggested_plan import NextSuggestedPlanError, NextSuggestedStop, next_suggestion_to_plan
 from live_feed.events import EventStore, EventType, create_event
 from prompt_router.router import RoutingDecision, RoutingInput, RoutingOutput, route_prompt, route_prompt_async
 from sessions.models import Session, SessionStatus, SessionStore, SessionType
@@ -321,6 +321,23 @@ class SessionController:
                 mode_preference=mode_preference,
             )
             self._validate_one_step_plan_for_session(session, plan)
+        except NextSuggestedStop as e:
+            self.event_store.append(
+                create_event(
+                    EventType.PLAN_COMPLETED,
+                    session_id,
+                    source="recommend_next_stop",
+                    status="stopped",
+                    reason=e.reason,
+                    recommendation=recommendation,
+                )
+            )
+            self.session_store.update_status(session_id, SessionStatus.COMPLETED)
+            return {
+                "status": "stopped",
+                "message": e.reason,
+                "recommendation": recommendation,
+            }
         except NextSuggestedPlanError as e:
             self.event_store.append(
                 create_event(
