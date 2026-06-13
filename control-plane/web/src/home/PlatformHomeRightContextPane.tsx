@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Activity, FileText, GitBranch, Info, Monitor, RefreshCw } from 'lucide-react'
+import { Activity, FileText, GitBranch, Info, Monitor, RefreshCw, Settings2 } from 'lucide-react'
 import type { GraphSession, GraphSessionEvent } from './types'
 import { usePlatformHomeActiveGraphSessionEvents } from './usePlatformHomeActiveGraphSessionEvents'
 import PlatformHomeAttachRepositoryToActiveSessionCard from './PlatformHomeAttachRepositoryToActiveSessionCard'
+import AppAutomationSettings from '../components/app-automation/AppAutomationSettings'
 
-type RightPaneTab = 'worklog' | 'changes' | 'desktop'
+type RightPaneTab = 'worklog' | 'changes' | 'desktop' | 'integrations'
 
 export default function PlatformHomeRightContextPane({
   activeSession,
@@ -25,12 +26,14 @@ export default function PlatformHomeRightContextPane({
           <button className={activeTab === 'worklog' ? 'active' : ''} onClick={() => setActiveTab('worklog')}>Worklog</button>
           <button className={activeTab === 'changes' ? 'active' : ''} onClick={() => setActiveTab('changes')}>Changes</button>
           <button className={activeTab === 'desktop' ? 'active' : ''} onClick={() => setActiveTab('desktop')}>Desktop</button>
+          <button className={activeTab === 'integrations' ? 'active' : ''} onClick={() => setActiveTab('integrations')}>Integrations</button>
         </div>
       </div>
       <div className="platform-pane-body">
         {activeTab === 'worklog' && <WorklogContext activeSession={activeSession} repoAttached={repoAttached} events={eventState.events} loading={eventState.loadingEvents} error={eventState.eventError} onRefresh={eventState.loadEvents} onActiveSessionUpdated={onActiveSessionUpdated} />}
         {activeTab === 'changes' && <ChangesContext events={eventState.events} />}
         {activeTab === 'desktop' && <DesktopContext />}
+        {activeTab === 'integrations' && <IntegrationsContext />}
       </div>
     </aside>
   )
@@ -108,4 +111,8 @@ function ChangesContext({ events }: { events: GraphSessionEvent[] }) {
 
 function DesktopContext() {
   return <section className="platform-context-card"><h3><Monitor size={14} /> Desktop</h3><p>Remote desktop preview belongs here once graph-native execution is connected.</p></section>
+}
+
+function IntegrationsContext() {
+  return <><section className="platform-context-card"><h3><Settings2 size={14} /> Integration configuration</h3><p>Configure app-automation runtimes used by the current graph-native workspace. These controls do not rely on deprecated App.tsx settings.</p></section><AppAutomationSettings /></>
 }
