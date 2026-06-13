@@ -22,11 +22,17 @@ export default function PlatformHomeThreePaneShell({
         sessions={sessionList.visibleSessions}
         activeSessionId={activeSessionId}
         loading={sessionList.loadingSessions}
-        showArchived={sessionList.showArchivedSessions}
-        onToggleArchived={() => sessionList.setShowArchivedSessions(!sessionList.showArchivedSessions)}
+        error={sessionList.sessionListError}
+        filter={sessionList.filter}
+        setFilter={sessionList.setFilter}
+        searchText={sessionList.searchText}
+        setSearchText={sessionList.setSearchText}
         onRefresh={sessionList.loadSessions}
         onNewSession={() => onNavigate('/')}
         onSelectSession={sessionId => onNavigate(`/session/${sessionId}`)}
+        onArchiveSession={sessionList.archiveSession}
+        onRestoreSession={sessionList.restoreSession}
+        onSoftDeleteSession={sessionList.softDeleteSession}
       />
       <main className="platform-center-pane">{children}</main>
       <PlatformHomeRightContextPane activeSession={activeSession} />
