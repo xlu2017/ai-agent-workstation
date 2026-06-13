@@ -61,6 +61,7 @@ function inferSessionId(payload, settings) {
 function buildInstruction(payload, ambientEventId) {
   const selected = payload.selection || {};
   const elements = Array.isArray(selected.elements) ? selected.elements : [];
+  const selectionConfidence = selected.confidence?.confidence || null;
   const lines = [];
   lines.push('Browser-selected frontend edit request.');
   lines.push('');
@@ -68,15 +69,21 @@ function buildInstruction(payload, ambientEventId) {
   lines.push(`Page: ${payload.page?.title || ''} ${payload.page?.url || ''}`.trim());
   lines.push(`Selection mode: ${selected.mode || 'drag_region'}`);
   if (selected.bounds) lines.push(`Region bounds: ${JSON.stringify(selected.bounds)}`);
+  if (selectionConfidence) {
+    const reasons = Array.isArray(selectionConfidence.reasons) ? selectionConfidence.reasons.join(', ') : '';
+    lines.push(`Evidence confidence: ${selectionConfidence.level || 'unknown'} (${selectionConfidence.score ?? 'n/a'})${reasons ? `; ${reasons}` : ''}`);
+  }
   if (ambientEventId) lines.push(`Ambient evidence id: ${ambientEventId}`);
   lines.push('');
   if (elements.length) {
     lines.push('Selected DOM/component targets:');
     for (const element of elements.slice(0, 20)) {
-      lines.push(`- selector=${element.selector || ''}; tag=${element.tagName || ''}; text=${truncate(element.text || '', 160)}; framework=${element.framework || 'unknown'}; source=${element.sourceHint || ''}`);
+      const source = element.sourceHint || element.sourceFile || '';
+      const component = element.componentName ? `; component=${element.componentName}` : '';
+      lines.push(`- selector=${element.selector || ''}; tag=${element.tagName || ''}; text=${truncate(element.text || '', 160)}; framework=${element.framework || 'unknown'}${component}; source=${source}`);
     }
   } else {
-    lines.push('No identifiable DOM/component targets were selected. Use the screenshot fallback evidence and region bounds to locate the intended UI area.');
+    lines.push('No identifiable DOM/component targets were selected. Use the screenshot fallback evidence and region bounds to locate the intended UI area. Treat this as low-confidence visual evidence.');
   }
   return lines.filter(Boolean).join('\n');
 }
@@ -87,12 +94,14 @@ async function submitRegionEdit(payload) {
   const sessionId = inferSessionId(payload, settings);
   if (!sessionId) return { ok: false, error: 'No session id configured or inferable from the page URL.' };
 
+  const confidenceScore = payload.selection?.confidence?.confidence?.score;
+  const hasElements = !!payload.selection?.elements?.length;
   const ambientEvent = {
-    event_type: payload.selection?.elements?.length ? 'browser.element_selected' : 'screenshot.fallback_captured',
+    event_type: hasElements ? 'browser.element_selected' : 'screenshot.fallback_captured',
     session_id: sessionId,
-    source: payload.selection?.elements?.length ? 'browser' : 'screenshot_fallback',
+    source: hasElements ? 'browser' : 'screenshot_fallback',
     actor: 'user',
-    confidence: payload.selection?.elements?.length ? 0.9 : 0.45,
+    confidence: typeof confidenceScore === 'number' ? confidenceScore : hasElements ? 0.9 : 0.45,
     payload: {
       page: payload.page,
       selection: payload.selection,
@@ -152,6 +161,7 @@ function summarizeSelection(selection) {
   return {
     mode: selection.mode || 'drag_region',
     bounds: selection.bounds || null,
+    confidence: selection.confidence || null,
     elements: elements.slice(0, 30).map((element) => ({
       tagName: element.tagName || '',
       selector: element.selector || '',
@@ -161,6 +171,10 @@ function summarizeSelection(selection) {
       id: element.id || '',
       framework: element.framework || 'unknown',
       componentName: element.componentName || '',
+      sourceHint: element.sourceHint || '',
+      sourceFile: element.sourceFile || '',
+      sourceLine: element.sourceLine || null,
+      sourceConfidence: element.sourceConfidence || 0,
       bounds: element.bounds || null,
     })),
     visualFallback: selection.visualFallback ? { available: !!selection.visualFallback.available, kind: selection.visualFallback.kind || '', bounds: selection.visualFallback.bounds || null } : null,
