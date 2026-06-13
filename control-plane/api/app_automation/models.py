@@ -38,6 +38,29 @@ class AppAction(BaseModel):
     unavailable_reason: str = "Vendored runtime is not installed yet."
 
 
+class AppAutomationRouteCandidate(BaseModel):
+    rank: int
+    vendor: str
+    layer: ExecutionKind | str
+    installed: bool = False
+    target_dir: str | None = None
+    reason: str
+    status: str
+
+
+class AppAutomationRoutePlan(BaseModel):
+    action_id: str
+    app_id: str
+    risk: RiskLevel
+    approval: ApprovalMode
+    preferred_vendor: str
+    selected_vendor: str | None = None
+    selected_layer: ExecutionKind | str | None = None
+    candidates: list[AppAutomationRouteCandidate] = Field(default_factory=list)
+    execution_ladder: list[ExecutionKind | str] = Field(default_factory=list)
+    coordination_notes: list[str] = Field(default_factory=list)
+
+
 class AppAutomationExecuteRequest(BaseModel):
     app_id: str
     action_id: str
@@ -58,5 +81,6 @@ class AppAutomationExecuteResult(BaseModel):
     message: str
     planned_steps: list[str] = Field(default_factory=list)
     required_approval: bool = False
+    route_plan: AppAutomationRoutePlan | None = None
     event: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
