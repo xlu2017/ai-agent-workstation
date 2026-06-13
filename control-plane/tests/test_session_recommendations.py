@@ -66,6 +66,7 @@ def test_session_controller_uses_recommend_next_as_execution_source():
     class FakeAgentCoreClient:
         def __init__(self):
             self.recommend_next_call = None
+            self.validate_action_call = None
 
         async def recommend_next(self, *, task_type, current_action, completed_actions, session_id, repo_id, ambient_context=None):
             self.recommend_next_call = {
@@ -84,6 +85,10 @@ def test_session_controller_uses_recommend_next_as_execution_source():
                     "rationale": "Inspect selected component first.",
                 },
             }
+
+        async def validate_action(self, action_name, params):
+            self.validate_action_call = {"action_name": action_name, "params": params}
+            return {"valid": True, "errors": []}
 
     class FakeWorkflowAdapter:
         def __init__(self):
@@ -114,11 +119,49 @@ def test_session_controller_uses_recommend_next_as_execution_source():
 
     assert plan_result["next_suggested_action"]["action_name"] == "read_file"
     assert agent_core.recommend_next_call["ambient_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
+    assert agent_core.validate_action_call == {"action_name": "read_file", "params": {"path": "src/components/SaveButton.tsx"}}
     assert workflow.plan["source"] == "next_suggested_plan"
     assert len(workflow.plan["steps"]) == 1
     assert workflow.context["ambient_prompt_context"]
     assert any(event["event_type"] == "plan_requested" and event["data"].get("recommendation_source") == "recommend_next" for event in events)
     assert any(event["event_type"] == "plan_generated" and event["data"].get("source") == "next_suggested_plan" for event in events)
+
+
+def test_session_controller_blocks_invalid_recommended_action_before_workflow():
+    import asyncio
+
+    from sessions.controller import CreateSessionRequest, SessionController
+
+    class FakeAgentCoreClient:
+        async def recommend_next(self, **kwargs):
+            return {"ok": True, "next_action": {"action_name": "read_file", "params": {}}}
+
+        async def validate_action(self, action_name, params):
+            return {"valid": False, "errors": ["path is required"]}
+
+    class FakeWorkflowAdapter:
+        def __init__(self):
+            self.started = False
+
+        async def start_plan(self, session_id, plan, context):
+            self.started = True
+            return {"backend": "fake"}
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workflow = FakeWorkflowAdapter()
+        controller = SessionController(
+            sessions_dir=tmpdir,
+            agent_core_client=FakeAgentCoreClient(),
+            workflow_adapter=workflow,
+        )
+        result = controller.create_session(
+            CreateSessionRequest(prompt="initial", repo_id="repo-1", allowed_actions=["read_file"])
+        )
+        session = controller.session_store.get(result["session"]["session_id"])
+        plan_result = asyncio.run(controller._request_next_action_and_start_workflow(session, "fix selected button"))
+
+    assert "path is required" in plan_result["error"]
+    assert workflow.started is False
 
 
 def _browser_selection_event(session_id: str):
