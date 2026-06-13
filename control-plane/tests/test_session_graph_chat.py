@@ -43,14 +43,19 @@ def test_graph_session_chat_appends_user_turn_and_creates_work_session(tmp_path:
     assert body["chat_status"] == "needs_repo"
     assert body["execution_state"] == "blocked_needs_repo"
     assert body["auto_started"] is False
+    assert body["execution_activation"]["status"] == "blocked_needs_repo"
+    assert body["execution_activation"]["auto_started"] is False
     assert work_session["kind"] == "work"
     assert work_session["status"] == "blocked"
     assert work_session["state"]["execution_state"] == "blocked_needs_repo"
+    assert work_session["state"]["execution_activation"]["status"] == "blocked_needs_repo"
     assert work_session["facets"]["work"]["requires_execution_start"] is False
+    assert work_session["facets"]["work"]["activation"]["auto_started"] is False
     assert work_session["parent_id"] == session["id"]
     assert body["created_edge"]["type"] == "component_of"
     assert [event["type"] for event in body["events"]] == ["user.interjected", "work.started"]
     assert body["events"][-1]["data"]["auto_started"] is False
+    assert body["events"][-1]["data"]["activation"]["auto_started"] is False
 
     events_response = client.get(f"/api/session-graph/events?session_id={work_session['id']}")
     assert events_response.status_code == 200
@@ -69,10 +74,14 @@ def test_graph_session_chat_marks_work_ready_when_repo_is_attached(tmp_path: Pat
     assert body["chat_status"] == "ready"
     assert body["execution_state"] == "ready_for_execution"
     assert body["auto_started"] is False
+    assert body["execution_activation"]["status"] == "ready_not_started"
+    assert body["execution_activation"]["auto_started"] is False
     assert body["work_session"]["status"] == "active"
     assert body["work_session"]["state"]["execution_state"] == "ready_for_execution"
+    assert body["work_session"]["state"]["execution_activation"]["status"] == "ready_not_started"
     assert body["work_session"]["facets"]["work"]["requires_execution_start"] is True
     assert body["work_session"]["facets"]["work"]["requires_repo"] is False
+    assert body["work_session"]["facets"]["work"]["activation"]["auto_started"] is False
 
 
 def test_graph_session_chat_question_only_does_not_create_work(tmp_path: Path):
@@ -85,6 +94,7 @@ def test_graph_session_chat_question_only_does_not_create_work(tmp_path: Path):
     body = response.json()
     assert body["routing_decision"]["route"] == "question_only"
     assert "work_session" not in body
+    assert "execution_activation" not in body
     assert body["chat_status"] == "question_only"
     assert body["execution_state"] == "question_only"
     assert [event["type"] for event in body["events"]] == ["user.interjected", "observation.recorded"]
