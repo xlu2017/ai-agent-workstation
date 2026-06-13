@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from api.app_automation.models import AppAction, VendorTool
+from api.app_automation.provider_neutral_seed_actions import PROVIDER_NEUTRAL_SEED_ACTIONS
 
 CONTROL_PLANE_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = CONTROL_PLANE_ROOT / "vendor" / "app-automation" / "manifest.json"
@@ -202,10 +203,14 @@ SEED_ACTIONS: list[AppAction] = [
 ]
 
 
+def _all_seed_actions() -> list[AppAction]:
+    return [*SEED_ACTIONS, *PROVIDER_NEUTRAL_SEED_ACTIONS]
+
+
 def list_actions() -> list[AppAction]:
     vendor_by_id = {tool.id: tool for tool in list_vendor_tools()}
     actions = []
-    for action in SEED_ACTIONS:
+    for action in _all_seed_actions():
         vendor = vendor_by_id.get(action.preferred_vendor)
         action_copy = action.model_copy(deep=True)
         if vendor and vendor_installed(vendor):
