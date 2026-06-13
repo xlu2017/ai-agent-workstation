@@ -99,6 +99,33 @@ Current evidence from checked-in source:
 | Browser Use | `source/pyproject.toml` with `name=browser-use` |
 | Skyvern | `source/pyproject.toml` with `name=skyvern` |
 
+## Local vendored adapter contract
+
+Each vendored source tree now contains:
+
+```text
+control-plane/vendor/app-automation/<tool>/source/jubilant_goggles_adapter.py
+```
+
+These adapter files are intentionally committed inside the vendored source trees. They are the first local patch surface for each vendor. They accept a normalized action envelope on stdin and return a normalized JSON result on stdout.
+
+The local adapter contract exists to make non-dry-run routing testable end-to-end without needing external SaaS accounts, workflow servers, browser agents, or visual automation credentials. The local contract does **not** perform external side effects. It returns:
+
+```text
+status = adapter_contract_completed
+external_side_effect_performed = false
+```
+
+Use this status as “control-plane-to-vendor-boundary works,” not as “the external app was mutated.”
+
+Disable local adapters with:
+
+```bash
+APP_AUTOMATION_LOCAL_VENDOR_ADAPTERS=false
+```
+
+Then the system returns `runtime_not_configured` unless the vendor-specific live endpoint or command is configured.
+
 ## Control-plane abstraction
 
 Platform-owned code lives under:
@@ -129,8 +156,9 @@ The execute endpoint now performs:
 6. dry-run plan
 7. vendor source presence check
 8. platform-owned runtime adapter dispatch
-9. normalized runtime result
-10. redacted session audit event persistence
+9. local vendored adapter dispatch when live vendor runtime is not configured
+10. normalized runtime result
+11. redacted session audit event persistence
 
 ## Runtime adapter files
 
@@ -144,7 +172,7 @@ control-plane/api/app_automation/event_log.py
 control-plane/api/app_automation/executor.py
 ```
 
-`vendor_plan.py` defines the capability matrix and per-action fallback chain. `adapter_base.py` defines the normalized health/result contract. `runtime.py` implements the initial live/mocked runtime dispatch. `event_log.py` writes redacted session events. `executor.py` validates, gates, audits, and dispatches approved non-dry-run requests into the selected adapter once source is present.
+`vendor_plan.py` defines the capability matrix and per-action fallback chain. `adapter_base.py` defines the normalized health/result contract. `runtime.py` implements mock, live, configured endpoint/command, and local vendored adapter dispatch. `event_log.py` writes redacted session events. `executor.py` validates, gates, audits, and dispatches approved non-dry-run requests into the selected adapter once source is present.
 
 ## App automation audit events
 
@@ -174,13 +202,13 @@ The following paths are now implemented:
 
 | Vendor | End-to-end path |
 | --- | --- |
-| MCP servers | `github.search_repo` uses the GitHub Search API through server-side repo provider auth when not mocked; `github.create_issue` is implemented behind the approval gate. |
-| Composio | Uses `COMPOSIO_PROXY_URL` as a controlled HTTP runtime endpoint for normalized action envelopes. |
-| Activepieces | Uses `ACTIVEPIECES_WEBHOOK_URL` as a controlled workflow endpoint for normalized action envelopes. |
-| n8n | Uses `N8N_WEBHOOK_URL` as a controlled workflow endpoint. |
-| Stagehand | Uses `STAGEHAND_COMMAND`, a controlled command that receives the action envelope as JSON on stdin. |
-| Browser Use | Uses `BROWSER_USE_COMMAND`, a controlled command that receives the action envelope as JSON on stdin. |
-| Skyvern | Uses `SKYVERN_COMMAND`, a controlled command that receives the action envelope as JSON on stdin. |
+| MCP servers | `github.search_repo` uses the GitHub Search API through server-side repo provider auth when not mocked; `github.create_issue` is implemented behind the approval gate. Unsupported MCP actions can still exercise the local vendored adapter contract. |
+| Composio | Uses `COMPOSIO_PROXY_URL` as a controlled HTTP runtime endpoint for normalized action envelopes; otherwise uses `source/jubilant_goggles_adapter.py` for local contract completion. |
+| Activepieces | Uses `ACTIVEPIECES_WEBHOOK_URL` as a controlled workflow endpoint; otherwise uses `source/jubilant_goggles_adapter.py` for local contract completion. |
+| n8n | Uses `N8N_WEBHOOK_URL` as a controlled workflow endpoint; otherwise uses `source/jubilant_goggles_adapter.py` for local contract completion. |
+| Stagehand | Uses `STAGEHAND_COMMAND`, a controlled command that receives the action envelope as JSON on stdin; otherwise uses `source/jubilant_goggles_adapter.py` for local browser-contract completion without launching a browser. |
+| Browser Use | Uses `BROWSER_USE_COMMAND`, a controlled command that receives the action envelope as JSON on stdin; otherwise uses `source/jubilant_goggles_adapter.py` for local browser-contract completion without launching a browser. |
+| Skyvern | Uses `SKYVERN_COMMAND`, a controlled command that receives the action envelope as JSON on stdin; otherwise uses `source/jubilant_goggles_adapter.py` for local visual-browser-contract completion without launching a browser. |
 
 For deterministic local validation without external services:
 
@@ -188,7 +216,7 @@ For deterministic local validation without external services:
 APP_AUTOMATION_MOCK=true
 ```
 
-Mock mode returns `completed` results for approved non-dry-run actions without external side effects.
+Mock mode returns `completed` results for approved non-dry-run actions without external side effects. Local vendored adapters are different: they run vendor-owned adapter files and return `adapter_contract_completed`.
 
 ## Seed app action routing
 
@@ -222,7 +250,14 @@ Run:
 
 ```bash
 cd control-plane
+pytest tests/test_app_automation.py -q
+```
+
+Useful modes:
+
+```bash
 APP_AUTOMATION_MOCK=true pytest tests/test_app_automation.py -q
+APP_AUTOMATION_LOCAL_VENDOR_ADAPTERS=false pytest tests/test_app_automation.py -q
 ```
 
 Unset `APP_AUTOMATION_MOCK` and configure the provider-specific endpoint/command variables to test real external runtimes.
