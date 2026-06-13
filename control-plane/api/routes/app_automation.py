@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from api.app_automation.event_log import list_app_automation_events
 from api.app_automation.executor import execute_app_action
 from api.app_automation.models import AppAutomationExecuteRequest
 from api.app_automation.registry import get_action, list_actions, load_manifest, vendor_status
@@ -47,6 +48,14 @@ def app_automation_action_plan(action_id: str) -> dict:
     if not action:
         return {"ok": False, "error": {"code": "UNKNOWN_ACTION", "message": f"Unknown app action: {action_id}"}}
     return {"ok": True, "plan": build_action_plan(action)}
+
+
+@router.get("/events/{session_id}")
+def app_automation_events(session_id: str, limit: int = 200) -> dict:
+    """Return app-automation audit events recorded for a session."""
+    safe_limit = max(1, min(limit, 1000))
+    events = list_app_automation_events(session_id, limit=safe_limit)
+    return {"session_id": session_id, "events": events, "count": len(events)}
 
 
 @router.post("/execute")
