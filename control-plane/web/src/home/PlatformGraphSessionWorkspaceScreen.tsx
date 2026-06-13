@@ -16,6 +16,7 @@ export default function PlatformGraphSessionWorkspaceScreen({
   onNavigate: (path: string) => void
 }) {
   const [session, setSession] = useState<GraphSession | null>(null)
+  const [latestWorkSession, setLatestWorkSession] = useState<GraphSession | null>(null)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -36,8 +37,9 @@ export default function PlatformGraphSessionWorkspaceScreen({
     setSaving(true)
     setError('')
     try {
-      const nextSession = await sendGraphSessionChatMessage({ sessionId: session.id, content: message })
-      setSession(nextSession)
+      const response = await sendGraphSessionChatMessage({ sessionId: session.id, content: message })
+      setSession(response.session)
+      setLatestWorkSession(response.work_session || null)
       setDraft('')
     } catch (err) {
       setError((err as Error).message)
@@ -78,6 +80,7 @@ export default function PlatformGraphSessionWorkspaceScreen({
             <span className="workspace-kind-pill">{session.kind}</span>
           </div>
           <PlatformGraphSessionRepoScopeNotice session={session} />
+          {latestWorkSession && <div className="workspace-work-created">Created work session: <strong>{latestWorkSession.title}</strong></div>}
           <PlatformGraphSessionMessageList turns={turns} />
           <PlatformGraphSessionChatComposer value={draft} disabled={saving} onChange={setDraft} onSubmit={submitDraft} />
           {error && <div className="home-error">{error}</div>}
