@@ -58,7 +58,7 @@ function inferSessionId(payload, settings) {
   return match ? decodeURIComponent(match[1]) : '';
 }
 
-function buildInstruction(payload, ambientEventId) {
+function buildInstruction(payload, ambientEventId, sourceCandidates = []) {
   const selected = payload.selection || {};
   const elements = Array.isArray(selected.elements) ? selected.elements : [];
   const selectionConfidence = selected.confidence?.confidence || null;
@@ -84,6 +84,17 @@ function buildInstruction(payload, ambientEventId) {
     }
   } else {
     lines.push('No identifiable DOM/component targets were selected. Use the screenshot fallback evidence and region bounds to locate the intended UI area. Treat this as low-confidence visual evidence.');
+  }
+  if (sourceCandidates.length) {
+    lines.push('');
+    lines.push('Ranked source candidates from ambient evidence:');
+    for (const candidate of sourceCandidates.slice(0, 8)) {
+      const line = candidate.line ? `:${candidate.line}` : '';
+      const symbol = candidate.symbol ? `; symbol=${candidate.symbol}` : '';
+      const reason = candidate.reason ? `; reason=${candidate.reason}` : '';
+      lines.push(`- ${candidate.path || ''}${line}; confidence=${candidate.confidence ?? 'n/a'}${symbol}${reason}`);
+    }
+    lines.push('Use these candidates as context only. Validate path containment and inspect files before editing.');
   }
   return lines.filter(Boolean).join('\n');
 }
@@ -125,7 +136,8 @@ async function submitRegionEdit(payload) {
     // The chat submit remains useful even if the ambient router is not mounted yet.
   }
 
-  const instruction = buildInstruction(payload, ambientEventId);
+  const sourceCandidates = await fetchSourceCandidates(controlPlaneUrl, sessionId);
+  const instruction = buildInstruction(payload, ambientEventId, sourceCandidates);
   const chatRes = await fetch(`${controlPlaneUrl}/api/sessions/${encodeURIComponent(sessionId)}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -135,11 +147,25 @@ async function submitRegionEdit(payload) {
   if (!chatRes.ok) {
     return { ok: false, error: chatJson?.error || chatRes.statusText, sessionId, ambientEventId };
   }
-  await recordHistory({ payload, sessionId, ambientEventId, chat: chatJson });
-  return { ok: true, sessionId, ambientEventId, chat: chatJson };
+  await recordHistory({ payload, sessionId, ambientEventId, chat: chatJson, sourceCandidates });
+  return { ok: true, sessionId, ambientEventId, sourceCandidates, chat: chatJson };
 }
 
-async function recordHistory({ payload, sessionId, ambientEventId, chat }) {
+async function fetchSourceCandidates(controlPlaneUrl, sessionId) {
+  try {
+    const res = await fetch(`${controlPlaneUrl}/api/sessions/${encodeURIComponent(sessionId)}/ambient/source-candidates?limit=200`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return Array.isArray(json?.source_candidates) ? json.source_candidates : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+async function recordHistory({ payload, sessionId, ambientEventId, chat, sourceCandidates = [] }) {
   const current = await chrome.storage.local.get({ [HISTORY_KEY]: [] });
   const history = Array.isArray(current[HISTORY_KEY]) ? current[HISTORY_KEY] : [];
   const item = {
@@ -150,6 +176,7 @@ async function recordHistory({ payload, sessionId, ambientEventId, chat }) {
     selection: summarizeSelection(payload.selection || {}),
     prompt: payload.prompt || '',
     ambientEventId,
+    sourceCandidates: sourceCandidates.slice(0, 8),
     taskId: chat?.task_id || '',
     status: chat?.state || 'submitted',
   };
