@@ -17,6 +17,11 @@ from api.models.session_graph import (
     utc_now,
 )
 from api.routes.session_graph.helpers import RequestContext, _assert_session_visible, _context, _save_or_400, _store
+from api.services.session_graph_execution_bridge import (
+    build_graph_work_activation_request,
+    record_activation_result_on_work_session,
+    scaffold_activation_result,
+)
 from api.services.session_graph_prompt_recommendation import recommend_graph_prompt_route
 
 router = APIRouter()
@@ -156,11 +161,16 @@ def append_graph_session_chat_turn(
     created_session: SessionRecord | None = None
     created_edge: SessionEdge | None = None
     extra_event: SessionEvent | None = None
+    activation_response: dict[str, object] | None = None
     chat_status = classification.route
     execution_state = classification.route
 
     if classification.route == "continue_active":
         created_session = _make_work_session(session, content, turn, now, context, body.mode)
+        activation_request = build_graph_work_activation_request(work_session=created_session, parent_session=session)
+        activation_result = scaffold_activation_result(activation_request)
+        created_session = record_activation_result_on_work_session(created_session, activation_result)
+        activation_response = activation_result.to_response_dict()
         created_session.created_from_event_id = user_event.id
         graph.sessions.append(created_session)
         created_edge = SessionEdge(
@@ -184,6 +194,7 @@ def append_graph_session_chat_turn(
                 "requires_repo": not bool(session.metadata.get("repo_session_id")),
                 "execution_state": execution_state,
                 "auto_started": False,
+                "activation": activation_response or {},
                 "source": classification.source,
             },
             created_at=now,
@@ -235,6 +246,8 @@ def append_graph_session_chat_turn(
         "execution_state": execution_state,
         "auto_started": False,
     }
+    if activation_response is not None:
+        response["execution_activation"] = activation_response
     if created_session is not None:
         key = "work_session" if created_session.kind == SessionKind.WORK else "goal_session"
         response[key] = created_session.model_dump(mode="json")
