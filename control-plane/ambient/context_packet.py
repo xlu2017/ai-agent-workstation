@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ambient.event_log import summarize_ambient_event
 from ambient.reducers import reduce_ambient_events
+from ambient.source_candidates import build_source_candidates
 from ambient.types import AmbientEvent, ContextPacket
 
 
@@ -21,6 +22,12 @@ def build_context_packet(
     state = reduce_ambient_events(relevant_events)
     recent = relevant_events[-max_recent:]
     latest_event = relevant_events[-1] if relevant_events else None
+    source_candidates = build_source_candidates(relevant_events)
+    relevant_files = list(state.relevant_files)
+    for candidate in source_candidates:
+        path = candidate.get("path")
+        if isinstance(path, str) and path and path not in relevant_files:
+            relevant_files.append(path)
 
     confidence = 1.0
     if recent:
@@ -35,7 +42,8 @@ def build_context_packet(
         ambient_focus=state.current_focus,
         latest=state.latest,
         recent_observations=[summarize_ambient_event(event) for event in recent],
-        relevant_files=state.relevant_files,
+        relevant_files=relevant_files,
+        source_candidates=source_candidates,
         evidence_event_ids=[event.event_id for event in recent],
         confidence=confidence,
         privacy=state.privacy,
