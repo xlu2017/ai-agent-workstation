@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -55,7 +54,6 @@ async def recommend_next_action(session_id: str, body: RecommendNextRequest):
                 session_id=session_id,
                 repo_id=body.repo_id,
                 ambient_context=ambient_context,
-                suggested_plan=None,
             )
         finally:
             await client.close()
