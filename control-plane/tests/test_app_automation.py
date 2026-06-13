@@ -203,3 +203,76 @@ def test_execute_unknown_action_returns_structured_error():
     data = response.json()
     assert data["ok"] is False
     assert data["error"]["code"] == "UNKNOWN_ACTION"
+
+
+def test_execute_invalid_params_rejects_before_runtime_and_records_event(monkeypatch, tmp_path):
+    monkeypatch.setenv("APP_AUTOMATION_MOCK", "true")
+    monkeypatch.setenv("APP_AUTOMATION_EVENTS_DIR", str(tmp_path))
+    session_id = "app-auto-invalid-params"
+
+    response = _client().post("/api/app-automation/execute", json={
+        "session_id": session_id,
+        "app_id": "github",
+        "action_id": "github.search_repo",
+        "params": {"repo": "xlu2017/jubilant-goggles"},
+        "dry_run": False,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is False
+    assert data["status"] == "invalid_params"
+    assert data["error"]["code"] == "ACTION_PARAMS_INVALID"
+
+    events = _client().get(f"/api/app-automation/events/{session_id}").json()["events"]
+    assert [event["event_type"] for event in events] == ["app_automation_planned", "app_automation_validation_failed"]
+    assert events[-1]["data"]["error"]["issues"][0]["path"] == ["query"]
+
+
+def test_execute_mock_runtime_records_executed_event_and_redacts_sensitive_params(monkeypatch, tmp_path):
+    monkeypatch.setenv("APP_AUTOMATION_MOCK", "true")
+    monkeypatch.setenv("APP_AUTOMATION_EVENTS_DIR", str(tmp_path))
+    session_id = "app-auto-executed"
+
+    response = _client().post("/api/app-automation/execute", json={
+        "session_id": session_id,
+        "app_id": "github",
+        "action_id": "github.search_repo",
+        "params": {"repo": "xlu2017/jubilant-goggles", "query": "executor", "api_key": "should-not-persist"},
+        "dry_run": False,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["status"] == "completed"
+
+    events_response = _client().get(f"/api/app-automation/events/{session_id}")
+    assert events_response.status_code == 200
+    events = events_response.json()["events"]
+    assert [event["event_type"] for event in events] == ["app_automation_planned", "app_automation_executed"]
+    assert events[0]["data"]["params_preview"]["api_key"] == "[REDACTED]"
+    assert events[-1]["data"]["status"] == "completed"
+    assert events[-1]["data"]["result"]["mock"] is True
+
+
+def test_approval_block_records_blocked_event(monkeypatch, tmp_path):
+    monkeypatch.setenv("APP_AUTOMATION_EVENTS_DIR", str(tmp_path))
+    session_id = "app-auto-approval-block"
+
+    response = _client().post("/api/app-automation/execute", json={
+        "session_id": session_id,
+        "app_id": "slack",
+        "action_id": "slack.send_message",
+        "params": {"channel": "engineering", "text": "hello"},
+        "dry_run": False,
+        "approval_granted": False,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "needs_approval"
+
+    events = _client().get(f"/api/app-automation/events/{session_id}").json()["events"]
+    assert [event["event_type"] for event in events] == ["app_automation_planned", "app_automation_blocked"]
+    assert events[-1]["data"]["required_approval"] is True
