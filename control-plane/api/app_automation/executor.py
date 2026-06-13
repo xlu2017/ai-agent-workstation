@@ -176,6 +176,7 @@ def execute_app_action(request: AppAutomationExecuteRequest) -> AppAutomationExe
         message=adapter_result.message,
         planned_steps=[*_planned_steps(action, request, route_plan), *adapter_result.planned_steps],
         route_plan=route_plan,
-        event={**event, "adapter_status": adapter_result.status},
+        result=adapter_result.result,
+        event={**event, "adapter_status": adapter_result.status, "runtime_result_preview": {key: str(value)[:120] for key, value in adapter_result.result.items()}},
         error=adapter_result.error,
     )
