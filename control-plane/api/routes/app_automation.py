@@ -1,9 +1,16 @@
-"""App automation catalog and execution routes."""
+"""App automation catalog, runtime configuration, and execution routes."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
+from api.app_automation.config import (
+    AppAutomationVendorConfigInput,
+    all_vendor_config_status,
+    clear_vendor_config,
+    save_vendor_config,
+    vendor_config_status,
+)
 from api.app_automation.event_log import list_app_automation_events
 from api.app_automation.executor import execute_app_action
 from api.app_automation.models import AppAutomationExecuteRequest
@@ -15,15 +22,57 @@ router = APIRouter(prefix="/api/app-automation", tags=["app-automation"])
 
 @router.get("/vendors")
 def app_automation_vendors() -> dict:
-    """Return selected vendored automation tools and install status."""
+    """Return selected vendored automation tools and install/configuration status."""
     manifest = load_manifest()
+    config_by_vendor = {item["vendor_id"]: item for item in all_vendor_config_status()["vendors"]}
+    vendors = []
+    for vendor in vendor_status():
+        vendors.append({
+            **vendor,
+            "runtime_config": config_by_vendor.get(vendor["id"]),
+        })
     return {
         "version": manifest.get("version", 1),
         "default_execution_ladder": manifest.get("default_execution_ladder", []),
         "seed_apps": manifest.get("seed_apps", []),
-        "vendors": vendor_status(),
+        "vendors": vendors,
         "capability_matrix": vendor_profile_matrix(),
     }
+
+
+@router.get("/config")
+def app_automation_config() -> dict:
+    """Return redacted runtime configuration status for configurable vendors."""
+    return all_vendor_config_status()
+
+
+@router.get("/config/{vendor_id}")
+def app_automation_vendor_config(vendor_id: str) -> dict:
+    """Return redacted runtime configuration status for one vendor."""
+    try:
+        return vendor_config_status(vendor_id)
+    except Exception as exc:  # pragma: no cover - defensive route boundary
+        raise HTTPException(status_code=404, detail=f"Unknown vendor: {vendor_id}") from exc
+
+
+@router.put("/config/{vendor_id}")
+def update_app_automation_vendor_config(vendor_id: str, body: AppAutomationVendorConfigInput) -> dict:
+    """Persist endpoint/command configuration for one vendor runtime."""
+    try:
+        return save_vendor_config(vendor_id, body)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown vendor: {vendor_id}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/config/{vendor_id}")
+def delete_app_automation_vendor_config(vendor_id: str) -> dict:
+    """Clear stored runtime configuration for one vendor."""
+    try:
+        return clear_vendor_config(vendor_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown vendor: {vendor_id}") from exc
 
 
 @router.get("/capabilities")
