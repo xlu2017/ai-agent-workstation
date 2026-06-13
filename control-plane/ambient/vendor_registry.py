@@ -49,39 +49,59 @@ class AmbientVendor:
         return not self.python_path_hints and self.source_present
 
     def status(self) -> dict[str, Any]:
-        fetched_metadata_path = self.source_path / "VENDORED_METADATA.json"
-        fetched_metadata: dict[str, Any] = {}
-        if fetched_metadata_path.exists():
-            try:
-                fetched_metadata = json.loads(fetched_metadata_path.read_text())
-            except (OSError, json.JSONDecodeError):
-                fetched_metadata = {"metadata_error": "failed_to_read"}
         return {
+            **self.as_manifest_entry(),
+            "source_present": self.source_present,
+            "candidate_python_paths": [str(path) for path in self.candidate_python_paths()],
+            "module_available": self.module_available(),
+            "fetched_metadata": self.fetched_metadata(),
+        }
+
+    def as_manifest_entry(self) -> dict[str, Any]:
+        return {
+            **self.metadata,
             "id": self.id,
             "name": self.name,
             "repo_url": self.repo_url,
             "target_dir": self.target_dir,
-            "source_present": self.source_present,
-            "candidate_python_paths": [str(path) for path in self.candidate_python_paths()],
-            "module_available": self.module_available(),
             "role": self.role,
             "collector_targets": self.collector_targets,
             "python_path_hints": self.python_path_hints,
-            "fetched_metadata": fetched_metadata,
         }
 
+    def fetched_metadata(self) -> dict[str, Any]:
+        metadata_paths = [
+            self.source_path.parent / "fetched_metadata.json",
+            self.source_path / "VENDORED_METADATA.json",
+        ]
+        for fetched_metadata_path in metadata_paths:
+            if not fetched_metadata_path.exists():
+                continue
+            try:
+                return json.loads(fetched_metadata_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                return {"metadata_error": "failed_to_read"}
+        return {}
 
-def load_ambient_vendor_manifest() -> dict[str, Any]:
-    if not MANIFEST_PATH.exists():
+
+def load_ambient_vendor_manifest(manifest_path: Path | None = None) -> dict[str, Any]:
+    path = manifest_path or MANIFEST_PATH
+    if not path.exists():
         return {"version": 0, "intent": "ambient vendor manifest missing", "selected_tools": []}
     try:
-        return json.loads(MANIFEST_PATH.read_text())
+        return json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return {"version": 0, "intent": "ambient vendor manifest unreadable", "selected_tools": []}
 
 
-def list_ambient_vendors() -> list[AmbientVendor]:
-    manifest = load_ambient_vendor_manifest()
+def load_manifest(manifest_path: Path | None = None) -> dict[str, Any]:
+    """Compatibility alias used by the ambient vendor API package."""
+
+    return load_ambient_vendor_manifest(manifest_path)
+
+
+def list_ambient_vendors(manifest_path: Path | None = None) -> list[AmbientVendor]:
+    manifest = load_ambient_vendor_manifest(manifest_path)
     vendors: list[AmbientVendor] = []
     for raw in manifest.get("selected_tools", []):
         if not isinstance(raw, dict):
@@ -101,11 +121,47 @@ def list_ambient_vendors() -> list[AmbientVendor]:
     return [vendor for vendor in vendors if vendor.id and vendor.target_dir]
 
 
-def get_ambient_vendor(vendor_id: str) -> AmbientVendor | None:
-    for vendor in list_ambient_vendors():
+def list_vendors(manifest_path: Path | None = None) -> list[dict[str, Any]]:
+    """Return vendor entries as API-friendly dictionaries.
+
+    This is the stable function consumed by ``api.ambient_vendor.registry``.
+    It keeps first-party API code from depending on the dataclass shape while
+    preserving runtime status fields such as source presence and fetch metadata.
+    """
+
+    vendors = []
+    for vendor in list_ambient_vendors(manifest_path):
+        entry = vendor.as_manifest_entry()
+        entry["source_present"] = vendor.source_present
+        entry["fetched_metadata"] = vendor.fetched_metadata() or None
+        vendors.append(entry)
+    return vendors
+
+
+def get_ambient_vendor(vendor_id: str, manifest_path: Path | None = None) -> AmbientVendor | None:
+    for vendor in list_ambient_vendors(manifest_path):
         if vendor.id == vendor_id:
             return vendor
     return None
+
+
+def get_vendor(vendor_id: str, manifest_path: Path | None = None) -> dict[str, Any] | None:
+    """Return one API-friendly vendor entry by id."""
+
+    vendor = get_ambient_vendor(vendor_id, manifest_path)
+    if not vendor:
+        return None
+    entry = vendor.as_manifest_entry()
+    entry["source_present"] = vendor.source_present
+    entry["fetched_metadata"] = vendor.fetched_metadata() or None
+    return entry
+
+
+def source_present(vendor_id: str, manifest_path: Path | None = None) -> bool:
+    """Compatibility helper for vendor-management services."""
+
+    vendor = get_ambient_vendor(vendor_id, manifest_path)
+    return bool(vendor and vendor.source_present)
 
 
 def ambient_vendor_status() -> dict[str, Any]:
