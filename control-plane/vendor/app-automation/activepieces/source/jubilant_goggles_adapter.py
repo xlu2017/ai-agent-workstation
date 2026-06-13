@@ -10,9 +10,20 @@ from typing import Any
 
 VENDOR_ID = "activepieces"
 SUPPORTED_ACTIONS = {
-    "google_sheets.append_row",
-    "jira.create_issue",
+    "calendar_event.create",
+    "contact.create",
+    "email.create",
+    "email.send",
+    "issue.create",
+    "message.send",
+    "page.create",
+    "spreadsheet_row.append",
     "discord.send_message",
+    "google_calendar.create_event",
+    "google_sheets.append_row",
+    "hubspot.create_contact",
+    "jira.create_issue",
+    "notion.create_page",
     "slack.send_message",
 }
 
@@ -44,10 +55,10 @@ def _response(envelope: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": True,
         "status": "adapter_contract_completed",
-        "message": f"Vendored {VENDOR_ID} adapter accepted {action_id}. Configure ACTIVEPIECES_WEBHOOK_URL for live workflow execution.",
+        "message": f"Vendored {VENDOR_ID} adapter accepted provider-neutral action {action_id}. Configure ACTIVEPIECES_WEBHOOK_URL for live workflow execution.",
         "planned_steps": [
-            "Accepted normalized Jubilant Goggles action envelope.",
-            "Mapped action into the Activepieces workflow/piece layer.",
+            "Accepted provider-neutral Jubilant Goggles action envelope.",
+            "Mapped provider/app specificity from params into the Activepieces workflow layer.",
             "Stopped at the local vendored adapter boundary without external side effects.",
         ],
         "result": {
