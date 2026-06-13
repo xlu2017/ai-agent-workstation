@@ -88,6 +88,59 @@ def test_context_packet_includes_browser_source_candidates():
     assert "src/features/auth/LoginForm.tsx" in packet.relevant_files
 
 
+def test_context_packet_includes_browser_page_state_source_hint_candidates():
+    from ambient.context_packet import build_context_packet
+    from ambient.types import AmbientEvent, AmbientSource
+
+    event = AmbientEvent(
+        event_type="browser.tab_observed",
+        session_id="s1",
+        source=AmbientSource.BROWSER,
+        actor="system",
+        confidence=0.92,
+        payload={
+            "page_state": {
+                "interactive": [
+                    {
+                        "tagName": "button",
+                        "text": "Save",
+                        "testId": "save-button",
+                        "sourceHint": {
+                            "componentName": "SaveButton",
+                            "sourceFile": "src/components/SaveButton.tsx",
+                            "sourceLine": 12,
+                            "sourceConfidence": 0.94,
+                        },
+                    }
+                ],
+                "buttons": [
+                    {
+                        "tagName": "button",
+                        "text": "Save",
+                        "testId": "save-button",
+                        "sourceHint": {
+                            "componentName": "SaveButton",
+                            "sourceFile": "src/components/SaveButton.tsx",
+                            "sourceLine": 12,
+                        },
+                    }
+                ],
+            }
+        },
+    )
+
+    packet = build_context_packet("s1", [event], goal="fix save")
+
+    assert packet.source_candidates
+    candidate = packet.source_candidates[0]
+    assert candidate["path"] == "src/components/SaveButton.tsx"
+    assert candidate["line"] == 12
+    assert candidate["symbol"] == "SaveButton"
+    assert candidate["source"] == "browser_cdp"
+    assert candidate["reason"] == "browser page-state source hint"
+    assert "src/components/SaveButton.tsx" in packet.relevant_files
+
+
 def test_browser_cdp_playwright_page_extracts_tab_network_console_and_ax_events():
     from ambient.collectors.browser_cdp import BrowserCdpCollector
 
