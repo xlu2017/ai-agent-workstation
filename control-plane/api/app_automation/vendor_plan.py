@@ -60,6 +60,20 @@ VENDOR_PROFILES: dict[str, dict[str, Any]] = {
 
 
 ACTION_VENDOR_PREFERENCES: dict[str, list[str]] = {
+    # Provider-neutral action IDs emitted by recommend-next.
+    "browser_task.perform": ["stagehand", "browser_use", "skyvern"],
+    "calendar_event.create": ["composio", "activepieces", "n8n"],
+    "contact.create": ["composio", "activepieces", "n8n"],
+    "email.create": ["composio", "activepieces", "n8n"],
+    "email.search": ["composio", "mcp_servers", "activepieces"],
+    "email.send": ["composio", "activepieces", "n8n"],
+    "issue.create": ["mcp_servers", "composio", "activepieces", "n8n"],
+    "message.send": ["composio", "activepieces", "n8n"],
+    "page.create": ["composio", "activepieces", "n8n"],
+    "repository.search": ["mcp_servers", "composio"],
+    "spreadsheet_row.append": ["activepieces", "composio", "n8n"],
+    "visual_browser_task.perform": ["skyvern", "stagehand", "browser_use"],
+    # Legacy app-specific IDs remain supported for existing API callers.
     "github.create_issue": ["mcp_servers", "composio", "activepieces"],
     "github.search_repo": ["mcp_servers", "composio"],
     "slack.send_message": ["composio", "activepieces", "n8n"],
@@ -98,6 +112,9 @@ def vendor_profile_matrix() -> list[dict[str, Any]]:
 def route_candidates_for_action(action: AppAction) -> list[dict[str, Any]]:
     tools = {tool.id: tool for tool in list_vendor_tools()}
     candidate_ids = ACTION_VENDOR_PREFERENCES.get(action.id, [action.preferred_vendor])
+    forced_vendor = str(action.input_schema.get("forced_vendor", "") or "")
+    if forced_vendor and forced_vendor in tools:
+        candidate_ids = [forced_vendor, *[candidate for candidate in candidate_ids if candidate != forced_vendor]]
     if action.preferred_vendor not in candidate_ids:
         candidate_ids = [action.preferred_vendor, *candidate_ids]
     candidates: list[dict[str, Any]] = []
