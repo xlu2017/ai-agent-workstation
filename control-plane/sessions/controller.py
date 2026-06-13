@@ -164,7 +164,6 @@ class SessionController:
         if session is None:
             return {"error": f"Session {session_id} not found."}
 
-        # 1. Record prompt received
         prompt_event = create_event(
             EventType.USER_PROMPT_RECEIVED,
             session_id,
@@ -173,7 +172,6 @@ class SessionController:
         )
         self.event_store.append(prompt_event)
 
-        # 2. Build routing input from session state
         plan_status = self._infer_plan_status(session)
         current_action = self._get_current_action(session_id)
         recent_events = self.event_store.get_events(
@@ -191,10 +189,8 @@ class SessionController:
             user_intent_hint=request.user_intent_hint,
         )
 
-        # 3. Route (LLM-first with heuristic fallback)
         routing_output = await route_prompt_async(routing_input)
 
-        # 4. Record routing decision
         self.event_store.append(
             create_event(
                 EventType.ROUTING_DECISION_MADE,
@@ -206,7 +202,6 @@ class SessionController:
             )
         )
 
-        # 5. Execute the routing decision
         result = await self._execute_routing_decision(session, routing_output, request.prompt)
 
         return result
@@ -252,8 +247,6 @@ class SessionController:
             return {"status": "cancelled", "message": "Session cancelled."}
 
         elif command == "commit_checkpoint":
-            # Do not emit COMMIT_CREATED without a real commit.
-            # Request a commit via the workflow if available.
             return {
                 "status": "commit_requested",
                 "message": "Commit checkpoint requested; pending platform validation.",
@@ -267,17 +260,7 @@ class SessionController:
         prompt: str,
         mode_preference: str = "finite",
     ) -> dict[str, Any]:
-        """Request one next suggested action, wrap it, and start the workflow.
-
-        Flow:
-          1. Emit PLAN_REQUESTED as a compatibility event for UI/live-feed code.
-          2. Call AgentCoreClient.recommend_next(), not AgentCoreClient.plan().
-          3. Convert the single recommendation into a one-step executor plan shell.
-          4. Locally validate that the single action is visible for this session.
-          5. Emit PLAN_GENERATED with source=next_suggested_plan.
-          6. Call WorkflowAdapter.start_plan().
-          7. Emit PLAN_STARTED.
-        """
+        """Request one next suggested action, wrap it, and start the workflow."""
         session_id = session.session_id
 
         if self.agent_core_client is None:
@@ -318,7 +301,6 @@ class SessionController:
                 session_id=session_id,
                 repo_id=session.repo_id,
                 ambient_context=ambient_context,
-                suggested_plan=None,
             )
         except Exception as e:
             self.event_store.append(
@@ -428,7 +410,6 @@ class SessionController:
         routing: RoutingOutput,
         prompt: str,
     ) -> dict[str, Any]:
-        """Execute the routing decision."""
         decision = routing.decision
 
         if decision == RoutingDecision.INTERRUPT_CURRENT:
@@ -455,7 +436,6 @@ class SessionController:
                     prompt=prompt,
                 )
             )
-            # Request and start the next suggested action for child session
             child_id = child_result["session"]["session_id"]
             child_session = self.session_store.get(child_id)
             plan_result = {}
@@ -475,7 +455,6 @@ class SessionController:
                     session_type="root_session",
                 )
             )
-            # Request and start the next suggested action for new session
             new_id = new_result["session"]["session_id"]
             new_session = self.session_store.get(new_id)
             plan_result = {}
@@ -494,7 +473,6 @@ class SessionController:
                 "message": "Queued until the current operation finishes.",
             }
 
-        # APPEND_TO_CURRENT or MODIFY_CURRENT_PLAN now ask recommend-next for one action.
         plan_result = {}
         if self.agent_core_client and self.workflow_adapter:
             mode = "finite"
@@ -510,7 +488,6 @@ class SessionController:
         }
 
     def _infer_plan_status(self, session: Session) -> str:
-        """Infer plan status from session status."""
         status_map = {
             SessionStatus.EDITING: "running",
             SessionStatus.VALIDATING: "running",
@@ -523,7 +500,6 @@ class SessionController:
         return status_map.get(session.status, "none")
 
     def _get_current_action(self, session_id: str) -> str:
-        """Get the most recent action_started event."""
         evt = self.event_store.get_latest_event(
             session_id, EventType.ACTION_STARTED
         )
