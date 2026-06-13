@@ -118,7 +118,9 @@ def test_execute_read_only_action_dry_run_plans():
     assert data["route_plan"]["selected_vendor"] == "mcp_servers"
 
 
-def test_execute_read_only_action_reaches_committed_vendor_scaffold():
+def test_execute_read_only_action_completes_with_mock_runtime(monkeypatch):
+    monkeypatch.setenv("APP_AUTOMATION_MOCK", "true")
+
     response = _client().post("/api/app-automation/execute", json={
         "app_id": "github",
         "action_id": "github.search_repo",
@@ -128,11 +130,30 @@ def test_execute_read_only_action_reaches_committed_vendor_scaffold():
 
     assert response.status_code == 200
     data = response.json()
-    assert data["ok"] is False
-    assert data["status"] == "adapter_scaffolded"
+    assert data["ok"] is True
+    assert data["status"] == "completed"
     assert data["vendor"] == "mcp_servers"
-    assert data["error"]["code"] == "ADAPTER_SCAFFOLDED"
+    assert data["result"]["mock"] is True
+    assert data["result"]["action_id"] == "github.search_repo"
     assert data["route_plan"]["candidates"][0]["vendor"] == "mcp_servers"
+
+
+def test_execute_unconfigured_http_vendor_returns_structured_runtime_error(monkeypatch):
+    monkeypatch.delenv("APP_AUTOMATION_MOCK", raising=False)
+    monkeypatch.delenv("COMPOSIO_PROXY_URL", raising=False)
+
+    response = _client().post("/api/app-automation/execute", json={
+        "app_id": "gmail",
+        "action_id": "gmail.search_email",
+        "params": {"query": "from:test@example.com"},
+        "dry_run": False,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is False
+    assert data["status"] == "runtime_not_configured"
+    assert data["error"]["code"] == "RUNTIME_NOT_CONFIGURED"
 
 
 def test_execute_side_effect_action_requires_approval():
@@ -150,6 +171,25 @@ def test_execute_side_effect_action_requires_approval():
     assert data["status"] == "needs_approval"
     assert data["required_approval"] is True
     assert data["route_plan"]["selected_vendor"] == "composio"
+
+
+def test_execute_side_effect_action_completes_with_mock_after_approval(monkeypatch):
+    monkeypatch.setenv("APP_AUTOMATION_MOCK", "true")
+
+    response = _client().post("/api/app-automation/execute", json={
+        "app_id": "slack",
+        "action_id": "slack.send_message",
+        "params": {"channel": "engineering", "text": "hello"},
+        "dry_run": False,
+        "approval_granted": True,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["status"] == "completed"
+    assert data["vendor"] == "composio"
+    assert data["result"]["mock"] is True
 
 
 def test_execute_unknown_action_returns_structured_error():
