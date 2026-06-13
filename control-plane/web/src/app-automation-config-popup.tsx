@@ -50,10 +50,11 @@ function installFetchInterceptor() {
   if ((window as any)[key]) return
   ;(window as any)[key] = true
   const originalFetch = window.fetch.bind(window)
-  window.fetch = async (...args) => {
+  window.fetch = async (...args: Parameters<typeof fetch>): Promise<Response> => {
     const response = await originalFetch(...args)
     try {
-      const url = typeof args[0] === 'string' ? args[0] : args[0] instanceof Request ? args[0].url : ''
+      const input = args[0]
+      const url = typeof input === 'string' ? input : input instanceof Request ? input.url : input instanceof URL ? input.toString() : ''
       if (url.includes('/app-automation/execute')) {
         response.clone().json().then((body: any) => {
           if (body?.status === 'runtime_not_configured' || body?.error?.code === 'RUNTIME_NOT_CONFIGURED') {
