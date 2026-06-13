@@ -29,6 +29,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
+from execution.recommend_next_app_automation_provider_inventory import (
+    APP_AUTOMATION_ACTION_DECISION_TYPE,
+)
 from execution.recommend_next_execution_service import RecommendNextDecisionType
 
 
@@ -120,11 +123,22 @@ STOP_ACTIONS: tuple[ActionCategoryEntry, ...] = (
 )
 
 
+APP_AUTOMATION_PROVIDER_ACTIONS: tuple[ActionCategoryEntry, ...] = tuple(
+    ActionCategoryEntry(
+        action_name=action_name,
+        decision_type=decision_type,
+        rationale="Deduplicated provider-supported app-automation action; see recommend_next_app_automation_provider_inventory.py.",
+    )
+    for action_name, decision_type in sorted(APP_AUTOMATION_ACTION_DECISION_TYPE.items())
+)
+
+
 ALL_ACTION_CATEGORY_ENTRIES: tuple[ActionCategoryEntry, ...] = (
     *EXECUTE_ACTIONS,
     *FIND_OUT_MORE_ACTIONS,
     *ASK_USER_ACTIONS,
     *STOP_ACTIONS,
+    *APP_AUTOMATION_PROVIDER_ACTIONS,
 )
 
 
