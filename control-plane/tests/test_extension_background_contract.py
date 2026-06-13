@@ -28,3 +28,13 @@ def test_extension_propagates_chat_submit_failure_to_overlay():
     assert "transport: 'none'" in source
     assert "graph_error" in source
     assert "legacy_error" in source
+
+
+def test_extension_mirrors_ambient_event_to_created_child_session():
+    source = EXTENSION_BACKGROUND.read_text()
+
+    assert "const childSessionId = chatJson?.work_session?.id || chatJson?.goal_session?.id || '';" in source
+    assert "childSessionId && childSessionId !== sessionId" in source
+    assert "parent_ambient_event_id: ambientEventId" in source
+    assert "chrome_extension.region_prompt.mirrored_to_child_session" in source
+    assert "childAmbientEventId" in source
