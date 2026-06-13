@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 VENDOR_ID = "mcp_servers"
-SUPPORTED_ACTIONS = {"github.search_repo", "github.create_issue"}
+SUPPORTED_ACTIONS = {"github.search_repo", "github.create_issue", "repository.search", "issue.create", "email.search"}
 
 
 def _read_envelope() -> dict[str, Any]:
@@ -39,10 +39,10 @@ def _response(envelope: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": True,
         "status": "adapter_contract_completed",
-        "message": f"Vendored {VENDOR_ID} adapter accepted {action_id}. The platform runtime performs live GitHub actions when credentials are configured.",
+        "message": f"Vendored {VENDOR_ID} adapter accepted provider-neutral action {action_id}. The platform runtime performs live provider actions when credentials are configured.",
         "planned_steps": [
-            "Accepted normalized Jubilant Goggles action envelope.",
-            "Validated that the action belongs to the MCP/GitHub tool surface.",
+            "Accepted provider-neutral Jubilant Goggles action envelope.",
+            "Validated that provider/app specificity is carried through params.",
             "Stopped at the local vendored adapter boundary without external side effects.",
         ],
         "result": {
