@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowUp, Loader2 } from 'lucide-react'
-import type { BrowseEntry, GitHubRepo, GraphSession, RepoSource } from './types'
-import { getControlPlaneJson, postControlPlaneJson } from './platformHomeControlPlaneRequestHelpers'
-import { compactTitleFromInitialPrompt, displayNameForGitHubRepository, displayNameForLocalRepositoryPath } from './platformHomeRepositoryNameHelpers'
+import type { BrowseEntry, GitHubRepo, RepoSource } from './types'
+import { getControlPlaneJson } from './platformHomeControlPlaneRequestHelpers'
 import PlatformHomeRepositoryScopeSelector from './PlatformHomeRepositoryScopeSelector'
 import PlatformHomeThreePaneShell from './PlatformHomeThreePaneShell'
+import { createOptionalRepositorySessionFromHomeSelection } from './createOptionalRepositorySessionFromHomeSelection'
+import { createGoalSessionForHomePrompt } from './createGoalSessionForHomePrompt'
+import { mountRepositorySessionUnderGoalSession } from './mountRepositorySessionUnderGoalSession'
 
 export default function PlatformHomeInitialChatScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
   const [prompt, setPrompt] = useState('')
@@ -67,9 +69,15 @@ export default function PlatformHomeInitialChatScreen({ onNavigate }: { onNaviga
     setCreating(true)
     setError('')
     try {
-      const repoSession = await createOptionalRepoSession(repoSource, selectedGithubRepo, localPath)
-      const goalSession = await createGoalSession(cleanPrompt, repoSession)
-      if (repoSession) await mountRepoUnderGoal(repoSession, goalSession, cleanPrompt)
+      const repoSession = await createOptionalRepositorySessionFromHomeSelection({ repoSource, selectedGithubRepo, localPath })
+      const goalSession = await createGoalSessionForHomePrompt(cleanPrompt, repoSession)
+      if (repoSession) {
+        await mountRepositorySessionUnderGoalSession({
+          repoSession,
+          goalSession,
+          userIntent: `Use ${repoSession.title} as context for: ${cleanPrompt}`,
+        })
+      }
       onNavigate(`/session/${goalSession.id}`)
     } catch (err) {
       setError((err as Error).message)
@@ -96,51 +104,4 @@ export default function PlatformHomeInitialChatScreen({ onNavigate }: { onNaviga
       </div>
     </PlatformHomeThreePaneShell>
   )
-}
-
-async function createOptionalRepoSession(repoSource: RepoSource, selectedGithubRepo?: GitHubRepo, localPath = ''): Promise<GraphSession | null> {
-  if (repoSource === 'github' && selectedGithubRepo) {
-    const response = await postControlPlaneJson<{ session: GraphSession }>('/session-graph/sessions', {
-      kind: 'repo',
-      title: displayNameForGitHubRepository(selectedGithubRepo),
-      summary: selectedGithubRepo.description || `GitHub repository ${displayNameForGitHubRepository(selectedGithubRepo)}`,
-      status: 'active',
-      facets: { repo: { source: 'github', full_name: selectedGithubRepo.full_name, clone_url: selectedGithubRepo.clone_url, html_url: selectedGithubRepo.html_url, default_branch: selectedGithubRepo.default_branch } },
-      metadata: { created_from: 'home_chat', repo_source: 'github' },
-    })
-    return response.session
-  }
-  if (repoSource === 'local' && localPath.trim()) {
-    const path = localPath.trim()
-    const response = await postControlPlaneJson<{ session: GraphSession }>('/session-graph/sessions', {
-      kind: 'repo',
-      title: displayNameForLocalRepositoryPath(path),
-      summary: `Local repository or folder at ${path}`,
-      status: 'active',
-      facets: { repo: { source: 'local', path, selected_from_home: true } },
-      metadata: { created_from: 'home_chat', repo_source: 'local' },
-    })
-    return response.session
-  }
-  return null
-}
-
-async function createGoalSession(prompt: string, repoSession: GraphSession | null): Promise<GraphSession> {
-  const response = await postControlPlaneJson<{ session: GraphSession }>('/session-graph/sessions', {
-    kind: 'goal',
-    title: compactTitleFromInitialPrompt(prompt),
-    summary: prompt,
-    status: 'active',
-    facets: { goal: { initial_prompt: prompt, repo_optional_at_start: true } },
-    state: { initial_prompt: prompt, chat_turns: [{ role: 'user', content: prompt }] },
-    metadata: { created_from: 'home_chat', repo_attached_at_start: Boolean(repoSession), repo_session_id: repoSession?.id || null },
-  })
-  return response.session
-}
-
-async function mountRepoUnderGoal(repoSession: GraphSession, goalSession: GraphSession, prompt: string): Promise<void> {
-  await postControlPlaneJson('/session-graph/actions/apply', {
-    action_name: 'session.mount',
-    params: { source_session_id: repoSession.id, target_session_id: goalSession.id, user_intent: `Use ${repoSession.title} as context for: ${prompt}`, mount_mode: 'reference', create_adaptation_session: true, make_active: true },
-  })
 }
