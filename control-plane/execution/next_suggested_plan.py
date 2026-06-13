@@ -4,7 +4,7 @@ from typing import Any
 
 
 class NextSuggestedPlanError(ValueError):
-    """Raised when a recommend-next payload cannot be converted to a plan."""
+    """Raised when a recommend-next payload cannot be converted to one executable action."""
 
 
 def next_suggestion_to_plan(
@@ -13,19 +13,17 @@ def next_suggestion_to_plan(
     recommendation: dict[str, Any],
     mode_preference: str = "finite",
 ) -> dict[str, Any]:
-    """Convert an advisory recommend-next response into an executable plan shell.
+    """Wrap a single recommend-next action in the executor's one-step plan shell.
 
-    jubilant-goggles no longer calls agent-core's plan endpoint here. Instead,
-    recommend-next is the advisory source of truth. This adapter keeps the
-    existing workflow executor contract by wrapping the recommended next action
-    as a one-step, platform-validated plan.
+    recommend-next is intentionally a single-action advisory interface. The
+    returned object is called a plan only to preserve the existing workflow
+    executor contract, which consumes ``plan.steps``. This adapter rejects
+    multi-step plan-shaped payloads rather than treating recommend-next as a
+    planning endpoint.
     """
 
     raw = _recommendation_payload(recommendation)
-    explicit_plan = _extract_explicit_next_plan(raw)
-    if explicit_plan is not None:
-        return _normalize_plan(explicit_plan, prompt=prompt, mode_preference=mode_preference, source_payload=raw)
-
+    _reject_plan_shaped_payload(raw)
     action = _extract_action(raw)
     action_name = str(action.get("action_name") or action.get("name") or "").strip()
     if not action_name:
@@ -42,7 +40,7 @@ def next_suggestion_to_plan(
         "source": "next_suggested_plan",
         "advisory_only": True,
         "requires_platform_validation": True,
-        "next_suggested_plan": raw,
+        "next_suggested_action": raw,
         "steps": [
             {
                 "action_name": action_name,
@@ -63,46 +61,13 @@ def _recommendation_payload(recommendation: dict[str, Any]) -> dict[str, Any]:
     return recommendation
 
 
-def _extract_explicit_next_plan(raw: dict[str, Any]) -> dict[str, Any] | None:
-    for key in ("next_suggested_plan", "suggested_plan", "plan"):
+def _reject_plan_shaped_payload(raw: dict[str, Any]) -> None:
+    for key in ("next_suggested_plan", "suggested_plan", "plan", "steps"):
         value = raw.get(key)
-        if isinstance(value, dict) and isinstance(value.get("steps"), list) and value["steps"]:
-            return value
-    return None
-
-
-def _normalize_plan(
-    plan: dict[str, Any],
-    *,
-    prompt: str,
-    mode_preference: str,
-    source_payload: dict[str, Any],
-) -> dict[str, Any]:
-    steps = plan.get("steps")
-    if not isinstance(steps, list) or not steps:
-        raise NextSuggestedPlanError("next suggested plan must include at least one step")
-    for index, step in enumerate(steps):
-        if not isinstance(step, dict):
-            raise NextSuggestedPlanError(f"next suggested plan step {index} must be an object")
-        action_name = str(step.get("action_name") or step.get("name") or "").strip()
-        if not action_name:
-            raise NextSuggestedPlanError(f"next suggested plan step {index} is missing action_name")
-        step["action_name"] = action_name
-        if "params" not in step:
-            step["params"] = step.get("parameters") or {}
-        if not isinstance(step["params"], dict):
-            raise NextSuggestedPlanError(f"next suggested plan step {index} params must be an object")
-        step.setdefault("source", "next_suggested_plan")
-    return {
-        **plan,
-        "mode": plan.get("mode") or mode_preference or "finite",
-        "goal": plan.get("goal") or prompt,
-        "source": "next_suggested_plan",
-        "advisory_only": True,
-        "requires_platform_validation": True,
-        "next_suggested_plan": source_payload,
-        "steps": steps,
-    }
+        if value:
+            raise NextSuggestedPlanError(
+                f"recommend-next must suggest exactly one action; plan-shaped field '{key}' is not supported"
+            )
 
 
 def _extract_action(raw: dict[str, Any]) -> dict[str, Any]:
