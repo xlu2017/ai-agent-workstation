@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { ChatTurn, GraphSession } from './types'
-import { getControlPlaneJson, patchControlPlaneJson } from './platformHomeControlPlaneRequestHelpers'
-import { appendChatTurn, assistantAcknowledgementForPrompt, normalizeChatTurns } from './platformHomeChatTurnHelpers'
+import type { GraphSession } from './types'
+import { getControlPlaneJson } from './platformHomeControlPlaneRequestHelpers'
+import { normalizeChatTurns } from './platformHomeChatTurnHelpers'
+import { sendGraphSessionChatMessage } from './sendGraphSessionChatMessage'
 import PlatformGraphSessionChatComposer from './PlatformGraphSessionChatComposer'
 import PlatformGraphSessionMessageList from './PlatformGraphSessionMessageList'
 import PlatformGraphSessionRepoScopeNotice from './PlatformGraphSessionRepoScopeNotice'
@@ -34,26 +35,16 @@ export default function PlatformGraphSessionWorkspaceScreen({
     if (!session || !message || saving) return
     setSaving(true)
     setError('')
-    const userTurns = appendChatTurn(turns, 'user', message)
-    const nextTurns: ChatTurn[] = appendChatTurn(
-      userTurns,
-      'assistant',
-      assistantAcknowledgementForPrompt(message, Boolean(session.metadata?.repo_session_id)),
-    )
     try {
-      const result = await patchControlPlaneJson<{ session: GraphSession }>(`/session-graph/sessions/${session.id}`, {
-        state: { ...(session.state || {}), chat_turns: nextTurns },
-        metadata: { ...(session.metadata || {}), last_home_chat_at: new Date().toISOString() },
-        reason: 'Append home workspace chat turn.',
-      })
-      setSession(result.session)
+      const nextSession = await sendGraphSessionChatMessage({ sessionId: session.id, content: message })
+      setSession(nextSession)
       setDraft('')
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setSaving(false)
     }
-  }, [draft, session, saving, turns])
+  }, [draft, session, saving])
 
   if (error && !session) {
     return (
