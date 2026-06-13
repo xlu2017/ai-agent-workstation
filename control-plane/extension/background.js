@@ -138,17 +138,34 @@ async function submitRegionEdit(payload) {
 
   const sourceCandidates = await fetchSourceCandidates(controlPlaneUrl, sessionId);
   const instruction = buildInstruction(payload, ambientEventId, sourceCandidates);
-  const chatRes = await fetch(`${controlPlaneUrl}/api/sessions/${encodeURIComponent(sessionId)}/chat`, {
+  const chatJson = await submitChatInstruction(controlPlaneUrl, sessionId, instruction);
+  await recordHistory({ payload, sessionId, ambientEventId, chat: chatJson, sourceCandidates });
+  return { ok: true, sessionId, ambientEventId, sourceCandidates, chat: chatJson };
+}
+
+async function submitChatInstruction(controlPlaneUrl, sessionId, instruction) {
+  const graphRes = await fetch(`${controlPlaneUrl}/api/session-graph/sessions/${encodeURIComponent(sessionId)}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: instruction, role: 'user', mode: 'finite' }),
+  });
+  const graphJson = await graphRes.json().catch(() => ({}));
+  if (graphRes.ok) return { ...graphJson, transport: 'session_graph_chat' };
+
+  const legacyRes = await fetch(`${controlPlaneUrl}/api/sessions/${encodeURIComponent(sessionId)}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ instruction, execution_mode: 'finite' }),
   });
-  const chatJson = await chatRes.json().catch(() => ({}));
-  if (!chatRes.ok) {
-    return { ok: false, error: chatJson?.error || chatRes.statusText, sessionId, ambientEventId };
-  }
-  await recordHistory({ payload, sessionId, ambientEventId, chat: chatJson, sourceCandidates });
-  return { ok: true, sessionId, ambientEventId, sourceCandidates, chat: chatJson };
+  const legacyJson = await legacyRes.json().catch(() => ({}));
+  if (legacyRes.ok) return { ...legacyJson, transport: 'legacy_session_chat' };
+
+  return {
+    ok: false,
+    error: graphJson?.error || legacyJson?.error || graphRes.statusText || legacyRes.statusText,
+    graph_status: graphRes.status,
+    legacy_status: legacyRes.status,
+  };
 }
 
 async function fetchSourceCandidates(controlPlaneUrl, sessionId) {
@@ -177,8 +194,9 @@ async function recordHistory({ payload, sessionId, ambientEventId, chat, sourceC
     prompt: payload.prompt || '',
     ambientEventId,
     sourceCandidates: sourceCandidates.slice(0, 8),
-    taskId: chat?.task_id || '',
-    status: chat?.state || 'submitted',
+    taskId: chat?.task_id || chat?.work_session?.id || chat?.goal_session?.id || '',
+    status: chat?.state || chat?.chat_status || 'submitted',
+    transport: chat?.transport || '',
   };
   await chrome.storage.local.set({ [HISTORY_KEY]: [item, ...history].slice(0, HISTORY_LIMIT) });
 }
