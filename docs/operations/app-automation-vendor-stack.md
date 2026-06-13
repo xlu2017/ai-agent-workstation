@@ -118,7 +118,7 @@ GET  /api/app-automation/actions/{action_id}/plan
 POST /api/app-automation/execute
 ```
 
-The execute endpoint now has a committed-vendor scaffold path:
+The execute endpoint now performs:
 
 1. action lookup
 2. vendor route plan construction
@@ -126,22 +126,43 @@ The execute endpoint now has a committed-vendor scaffold path:
 4. approval gate
 5. dry-run plan
 6. vendor source presence check
-7. platform-owned adapter scaffold dispatch
-8. normalized scaffold result
+7. platform-owned runtime adapter dispatch
+8. normalized runtime result
 
-Live runtime invocation is still intentionally blocked until one vendor adapter is explicitly wired and tested.
-
-## Routing scaffold files
+## Runtime adapter files
 
 ```text
 control-plane/api/app_automation/models.py
 control-plane/api/app_automation/vendor_plan.py
 control-plane/api/app_automation/adapter_base.py
 control-plane/api/app_automation/vendor_adapters.py
+control-plane/api/app_automation/runtime.py
 control-plane/api/app_automation/executor.py
 ```
 
-`vendor_plan.py` defines the capability matrix and per-action fallback chain. `adapter_base.py` defines the normalized health/result contract. `vendor_adapters.py` declares one adapter class per selected provider. `executor.py` dispatches approved non-dry-run requests into the selected scaffolded adapter once source is present.
+`vendor_plan.py` defines the capability matrix and per-action fallback chain. `adapter_base.py` defines the normalized health/result contract. `runtime.py` implements the initial live/mocked runtime dispatch. `executor.py` dispatches approved non-dry-run requests into the selected adapter once source is present.
+
+## End-to-end runtime paths
+
+The following paths are now implemented:
+
+| Vendor | End-to-end path |
+| --- | --- |
+| MCP servers | `github.search_repo` uses the GitHub Search API through server-side repo provider auth when not mocked; `github.create_issue` is implemented behind the approval gate. |
+| Composio | Uses `COMPOSIO_PROXY_URL` as a controlled HTTP runtime endpoint for normalized action envelopes. |
+| Activepieces | Uses `ACTIVEPIECES_WEBHOOK_URL` as a controlled workflow endpoint for normalized action envelopes. |
+| n8n | Uses `N8N_WEBHOOK_URL` as a controlled workflow endpoint. |
+| Stagehand | Uses `STAGEHAND_COMMAND`, a controlled command that receives the action envelope as JSON on stdin. |
+| Browser Use | Uses `BROWSER_USE_COMMAND`, a controlled command that receives the action envelope as JSON on stdin. |
+| Skyvern | Uses `SKYVERN_COMMAND`, a controlled command that receives the action envelope as JSON on stdin. |
+
+For deterministic local validation without external services:
+
+```bash
+APP_AUTOMATION_MOCK=true
+```
+
+Mock mode returns `completed` results for approved non-dry-run actions without external side effects.
 
 ## Seed app action routing
 
@@ -169,14 +190,13 @@ External side effects require approval before live execution. Dry runs are alway
 
 Before redistributing modified source, review the upstream license for each selected tool. n8n and Skyvern require special attention because their licenses may impose obligations that differ from permissive MIT/Apache-style libraries.
 
-## Next implementation pass
+## Validation
 
-Wire one real provider at a time:
+Run:
 
-1. MCP read-only action through vendored MCP reference servers.
-2. Composio read-only API action.
-3. Activepieces workflow dry-run/live run boundary.
-4. Stagehand or Browser Use browser action with a controlled browser profile.
-5. Skyvern visual-browser fallback only after browser/API alternatives are wired.
+```bash
+cd control-plane
+APP_AUTOMATION_MOCK=true pytest tests/test_app_automation.py -q
+```
 
-Each live adapter must include unavailable, dry-run, approval-blocked, success, and event-log tests.
+Unset `APP_AUTOMATION_MOCK` and configure the provider-specific endpoint/command variables to test real external runtimes.
