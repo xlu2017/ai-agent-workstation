@@ -182,6 +182,12 @@
 .platform-event-row { border: 1px solid var(--platform-border); border-radius: var(--platform-radius-md); padding: 8px; background: var(--platform-surface-soft); }
 .platform-event-row strong { display: block; font-size: 12px; color: var(--platform-text); margin-bottom: 2px; }
 .platform-event-row span { display: block; font-size: 12px; color: var(--platform-muted); overflow-wrap: anywhere; }
+.platform-wide-button { width: 100%; margin-top: 10px; }
+.platform-attach-repo-card .home-repo-controls { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
+.platform-attach-repo-card .home-field.wide { grid-column: auto; }
+.platform-attach-repo-card .home-search-row { flex-wrap: wrap; }
+.platform-attach-repo-card .home-search-row input { min-width: 140px; }
+.platform-attach-repo-card .home-local-browser { max-height: 150px; }
 
 .platform-home-centered-card {
   min-height: 100vh;
