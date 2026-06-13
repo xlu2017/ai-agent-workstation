@@ -35,12 +35,19 @@
   color: var(--platform-muted);
 }
 
-.platform-right-tabs {
+.platform-right-tabs,
+.platform-filter-row {
   display: flex;
   gap: 4px;
 }
 
-.platform-right-tabs button {
+.platform-filter-row {
+  flex-wrap: wrap;
+  margin: 10px 0 12px;
+}
+
+.platform-right-tabs button,
+.platform-filter-row button {
   border: 0;
   background: transparent;
   border-radius: var(--platform-radius-sm);
@@ -49,15 +56,50 @@
   cursor: pointer;
   font-size: 11px;
   font-weight: 700;
+  text-transform: capitalize;
 }
 
 .platform-right-tabs button.active,
-.platform-right-tabs button:hover {
+.platform-right-tabs button:hover,
+.platform-filter-row button.active,
+.platform-filter-row button:hover {
   background: var(--platform-accent-soft);
   color: var(--platform-accent);
 }
 
 .platform-pane-body { padding: 12px; }
+
+.platform-session-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--platform-border);
+  border-radius: var(--platform-radius-md);
+  padding: 8px 10px;
+  color: var(--platform-muted);
+}
+
+.platform-session-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--platform-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.platform-session-row-wrap {
+  position: relative;
+  border-radius: var(--platform-radius-md);
+  margin-bottom: 4px;
+}
+
+.platform-session-row-wrap:hover,
+.platform-session-row-wrap.active {
+  background: var(--platform-accent-soft);
+}
 
 .platform-session-row {
   width: 100%;
@@ -65,13 +107,11 @@
   background: transparent;
   text-align: left;
   border-radius: var(--platform-radius-md);
-  padding: 10px;
+  padding: 10px 62px 10px 10px;
   cursor: pointer;
   color: var(--platform-text);
 }
 
-.platform-session-row:hover,
-.platform-session-row.active { background: var(--platform-accent-soft); }
 .platform-session-row-title { display: block; font-weight: 700; font-size: 13px; }
 
 .platform-session-row-meta {
@@ -81,6 +121,37 @@
   margin-top: 4px;
   font-size: 11px;
   color: var(--platform-muted);
+}
+
+.platform-session-row-actions {
+  position: absolute;
+  right: 6px;
+  top: 8px;
+  display: flex;
+  gap: 3px;
+  opacity: .35;
+}
+
+.platform-session-row-wrap:hover .platform-session-row-actions,
+.platform-session-row-wrap.active .platform-session-row-actions {
+  opacity: 1;
+}
+
+.platform-session-row-actions button {
+  width: 23px;
+  height: 23px;
+  border: 0;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--platform-surface);
+  color: var(--platform-muted);
+  cursor: pointer;
+}
+
+.platform-session-row-actions button:hover {
+  color: var(--platform-accent);
 }
 
 .platform-status-pill {
