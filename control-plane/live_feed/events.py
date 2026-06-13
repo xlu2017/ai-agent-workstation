@@ -65,6 +65,13 @@ class EventType(str, Enum):
     VALIDATION_COMPLETED = "validation_completed"
     DIFF_SUMMARIZED = "diff_summarized"
 
+    # App automation audit event types
+    APP_AUTOMATION_PLANNED = "app_automation_planned"
+    APP_AUTOMATION_VALIDATION_FAILED = "app_automation_validation_failed"
+    APP_AUTOMATION_BLOCKED = "app_automation_blocked"
+    APP_AUTOMATION_EXECUTED = "app_automation_executed"
+    APP_AUTOMATION_FAILED = "app_automation_failed"
+
     # Ambient observation fabric mirror event types
     AMBIENT_CONTEXT_COLLECTED = "ambient_context_collected"
     AMBIENT_STATE_UPDATED = "ambient_state_updated"
