@@ -23,6 +23,7 @@ class PromptRouteRecommendation:
     payload: dict[str, Any] = field(default_factory=dict)
     assistant_response: str = ""
     response_session_kind: str = ""
+    narration: str = ""
 
 
 def _session_context(session: Any, prompt: str) -> dict[str, Any]:
@@ -57,6 +58,36 @@ def _fallback_direct_answer(prompt: str) -> str:
     return "I can answer that, but no direct answer is available yet."
 
 
+def _search_phrase_for_prompt(prompt: str) -> str:
+    text = " ".join(prompt.strip().lower().replace("?", "").split())
+    prefixes = (
+        "why is ",
+        "why are ",
+        "why does ",
+        "why do ",
+        "is ",
+        "are ",
+        "what is ",
+        "what are ",
+        "explain ",
+        "can you explain ",
+    )
+    for prefix in prefixes:
+        if text.startswith(prefix):
+            text = text[len(prefix):].strip()
+            break
+    return text or "that topic"
+
+
+def _repo_context_narration(prompt: str) -> str:
+    phrase = _search_phrase_for_prompt(prompt)
+    return (
+        f"Let me see if I can find references to {phrase} in your repository. "
+        f"I'll search for references to {phrase}. "
+        "Feel free to clarify what you want as I search."
+    )
+
+
 def _parse_route_params(params: Any, reason: str, source: str, payload: dict[str, Any]) -> PromptRouteRecommendation | None:
     if not isinstance(params, dict):
         return None
@@ -66,6 +97,7 @@ def _parse_route_params(params: Any, reason: str, source: str, payload: dict[str
     route_reason = str(params.get("reason") or reason or "agent-core recommended prompt route")
     assistant_response = str(params.get("assistant_response") or "")
     response_session_kind = str(params.get("response_session_kind") or ("question" if route == "question_only" else ""))
+    narration = str(params.get("narration") or params.get("progress_note") or "")
     return PromptRouteRecommendation(
         route=route,
         reason=route_reason,
@@ -73,6 +105,7 @@ def _parse_route_params(params: Any, reason: str, source: str, payload: dict[str
         payload=payload,
         assistant_response=assistant_response,
         response_session_kind=response_session_kind,
+        narration=narration,
     )
 
 
@@ -145,6 +178,7 @@ def _local_route_fallback(session: Any, prompt: str, source: str, reason: str) -
             "Prompt is explanatory, but repo context is attached; inspect repository context before answering.",
             source,
             {},
+            narration=_repo_context_narration(prompt),
         )
     if question_like and not has_action_word:
         return PromptRouteRecommendation(
