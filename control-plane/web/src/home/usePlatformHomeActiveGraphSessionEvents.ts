@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { GraphSessionEvent } from './types'
 import { getControlPlaneJson } from './platformHomeControlPlaneRequestHelpers'
 
-export function usePlatformHomeActiveGraphSessionEvents(sessionId?: string) {
+export function usePlatformHomeActiveGraphSessionEvents(sessionId?: string, refreshKey?: string) {
   const [events, setEvents] = useState<GraphSessionEvent[]>([])
   const [loadingEvents, setLoadingEvents] = useState(false)
   const [eventError, setEventError] = useState('')
@@ -23,7 +23,7 @@ export function usePlatformHomeActiveGraphSessionEvents(sessionId?: string) {
     } finally {
       setLoadingEvents(false)
     }
-  }, [sessionId])
+  }, [sessionId, refreshKey])
 
   useEffect(() => { void loadEvents() }, [loadEvents])
 
