@@ -77,8 +77,8 @@ class SessionController:
     """Orchestrates session lifecycle and prompt routing.
 
     Uses recommend-next as the advisory source of truth. The controller wraps the
-    single recommended action in a one-step executor plan because the workflow
-    executor consumes plan-shaped input.
+    single recommended action in a one-step executor shell because the existing
+    workflow executor consumes plan-shaped input.
     """
 
     def __init__(
@@ -107,7 +107,6 @@ class SessionController:
             allowed_actions=request.allowed_actions or DEFAULT_ALLOWED_ACTIONS,
         )
 
-        # For child sessions, inherit root_session_id from parent
         if request.parent_session_id:
             parent = self.session_store.get(request.parent_session_id)
             if parent:
@@ -115,7 +114,6 @@ class SessionController:
         else:
             session.root_session_id = session.session_id
 
-        # Create worktree for mutating sessions
         if request.repo_id and not session.worktree_id:
             worktree_id = f"worktree-{session.session_id}"
             worktree_path = REPOS_DIR / worktree_id
@@ -132,8 +130,6 @@ class SessionController:
                     session.worktree_id = worktree_id
 
         self.session_store.save(session)
-
-        # Record creation event
         self.event_store.append(
             create_event(
                 EventType.USER_PROMPT_RECEIVED,
@@ -202,9 +198,7 @@ class SessionController:
             )
         )
 
-        result = await self._execute_routing_decision(session, routing_output, request.prompt)
-
-        return result
+        return await self._execute_routing_decision(session, routing_output, request.prompt)
 
     async def handle_control(
         self, session_id: str, request: ControlRequest
@@ -254,7 +248,7 @@ class SessionController:
 
         return {"error": f"Unknown control command: {command}"}
 
-    async def _request_and_start_plan(
+    async def _request_next_action_and_start_workflow(
         self,
         session: Session,
         prompt: str,
@@ -280,7 +274,8 @@ class SessionController:
         self.session_store.update_status(session_id, SessionStatus.PLANNING)
         self.event_store.append(
             create_event(
-                EventType.PLAN_REQUESTED, session_id,
+                EventType.PLAN_REQUESTED,
+                session_id,
                 prompt=prompt,
                 mode_preference=mode_preference,
                 recommendation_source="recommend_next",
@@ -305,7 +300,8 @@ class SessionController:
         except Exception as e:
             self.event_store.append(
                 create_event(
-                    EventType.PLAN_VALIDATION_FAILED, session_id,
+                    EventType.PLAN_VALIDATION_FAILED,
+                    session_id,
                     error=str(e),
                     source="recommend_next",
                 )
@@ -317,7 +313,8 @@ class SessionController:
             error_msg = recommendation.get("error", "recommend-next failed")
             self.event_store.append(
                 create_event(
-                    EventType.PLAN_VALIDATION_FAILED, session_id,
+                    EventType.PLAN_VALIDATION_FAILED,
+                    session_id,
                     error=error_msg,
                     source="recommend_next_response",
                 )
@@ -335,7 +332,8 @@ class SessionController:
         except NextSuggestedPlanError as e:
             self.event_store.append(
                 create_event(
-                    EventType.PLAN_VALIDATION_FAILED, session_id,
+                    EventType.PLAN_VALIDATION_FAILED,
+                    session_id,
                     error=str(e),
                     source="next_suggested_plan_adapter",
                 )
@@ -345,7 +343,8 @@ class SessionController:
 
         self.event_store.append(
             create_event(
-                EventType.PLAN_GENERATED, session_id,
+                EventType.PLAN_GENERATED,
+                session_id,
                 plan=plan,
                 warnings=recommendation.get("warnings", []),
                 source="next_suggested_plan",
@@ -373,7 +372,8 @@ class SessionController:
 
         self.event_store.append(
             create_event(
-                EventType.PLAN_STARTED, session_id,
+                EventType.PLAN_STARTED,
+                session_id,
                 backend=workflow_result.get("backend", ""),
                 workflow_run_id=workflow_result.get("workflow_run_id", ""),
                 ambient_context_attached=bool(ambient_context),
@@ -440,7 +440,7 @@ class SessionController:
             child_session = self.session_store.get(child_id)
             plan_result = {}
             if child_session and self.agent_core_client and self.workflow_adapter:
-                plan_result = await self._request_and_start_plan(child_session, prompt)
+                plan_result = await self._request_next_action_and_start_workflow(child_session, prompt)
             return {
                 "routing": routing.to_dict(),
                 "child_session": child_result["session"],
@@ -459,7 +459,7 @@ class SessionController:
             new_session = self.session_store.get(new_id)
             plan_result = {}
             if new_session and self.agent_core_client and self.workflow_adapter:
-                plan_result = await self._request_and_start_plan(new_session, prompt)
+                plan_result = await self._request_next_action_and_start_workflow(new_session, prompt)
             return {
                 "routing": routing.to_dict(),
                 "new_session": new_result["session"],
@@ -478,7 +478,7 @@ class SessionController:
             mode = "finite"
             if decision == RoutingDecision.MODIFY_CURRENT_PLAN:
                 mode = "finite"
-            plan_result = await self._request_and_start_plan(session, prompt, mode)
+            plan_result = await self._request_next_action_and_start_workflow(session, prompt, mode)
 
         return {
             "routing": routing.to_dict(),
@@ -521,7 +521,7 @@ class SessionController:
 
 def _user_message(decision: RoutingDecision) -> str:
     messages = {
-        RoutingDecision.APPEND_TO_CURRENT: "Added this instruction to the current plan.",
+        RoutingDecision.APPEND_TO_CURRENT: "Requesting the next suggested action for this instruction.",
         RoutingDecision.MODIFY_CURRENT_PLAN: "Requesting the next suggested action for the revised instruction.",
         RoutingDecision.INTERRUPT_CURRENT: "Interrupting the current plan.",
         RoutingDecision.SPAWN_CHILD_SESSION: "Started a child session.",
