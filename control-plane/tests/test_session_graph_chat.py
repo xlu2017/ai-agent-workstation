@@ -84,7 +84,7 @@ def test_graph_session_chat_marks_work_ready_when_repo_is_attached(tmp_path: Pat
     assert body["work_session"]["facets"]["work"]["activation"]["auto_started"] is False
 
 
-def test_graph_session_chat_question_only_does_not_create_work(tmp_path: Path):
+def test_graph_session_chat_question_only_answers_without_work_when_no_repo_context(tmp_path: Path):
     client = _client(tmp_path)
     session = _create_goal_session(client)
 
@@ -95,9 +95,30 @@ def test_graph_session_chat_question_only_does_not_create_work(tmp_path: Path):
     assert body["routing_decision"]["route"] == "question_only"
     assert "work_session" not in body
     assert "execution_activation" not in body
-    assert body["chat_status"] == "question_only"
-    assert body["execution_state"] == "question_only"
+    assert body["chat_status"] == "answered"
+    assert body["execution_state"] == "answered_inline"
+    assert body["assistant_turn"]["role"] == "assistant"
+    assert body["question_session"]["status"] == "completed"
+    assert body["question_session"]["state"]["auto_started"] is False
     assert [event["type"] for event in body["events"]] == ["user.interjected", "observation.recorded"]
+
+
+def test_graph_session_chat_repo_context_question_routes_to_work_before_answering(tmp_path: Path):
+    client = _client(tmp_path)
+    session = _create_goal_session(client, repo_session_id="game-repo-context")
+
+    response = client.post(f"/api/session-graph/sessions/{session['id']}/chat", json={"content": "Why is the world round?"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["routing_decision"]["route"] == "continue_active"
+    assert body["chat_status"] == "ready"
+    assert body["execution_state"] == "ready_for_execution"
+    assert "assistant_turn" not in body
+    assert "question_session" not in body
+    assert body["work_session"]["kind"] == "work"
+    assert body["work_session"]["facets"]["work"]["requires_execution_start"] is True
+    assert body["execution_activation"]["status"] == "ready_not_started"
 
 
 def test_graph_session_chat_can_create_child_goal(tmp_path: Path):
