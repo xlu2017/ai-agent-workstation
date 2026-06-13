@@ -93,3 +93,82 @@ def test_recommend_next_route_forwards_ambient_context(monkeypatch):
     assert "src/components/SaveButton.tsx:12" in body["prompt_block"]
     assert FakeAgentCoreClient.last_call["ambient_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
     assert FakeAgentCoreClient.last_call["suggested_plan"]["steps"][0]["action_name"] == "read_file"
+
+
+def test_session_controller_plan_request_includes_ambient_context():
+    import asyncio
+
+    from ambient.event_log import persist_ambient_event
+    from ambient.types import AmbientEvent, AmbientSource
+    from sessions.controller import CreateSessionRequest, SessionController
+
+    class FakeAgentCoreClient:
+        def __init__(self):
+            self.plan_request = None
+
+        async def plan(self, request):
+            self.plan_request = request
+            return {
+                "ok": True,
+                "plan": {"mode": "finite", "steps": [{"action_name": "read_file", "params": {"path": "src/components/SaveButton.tsx"}}]},
+            }
+
+        async def validate_plan(self, allowed_actions, plan):
+            return {"valid": True, "errors": []}
+
+    class FakeWorkflowAdapter:
+        def __init__(self):
+            self.context = None
+
+        async def start_plan(self, session_id, plan, context):
+            self.context = context
+            return {"backend": "fake", "workflow_run_id": "wf-1"}
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        agent_core = FakeAgentCoreClient()
+        workflow = FakeWorkflowAdapter()
+        controller = SessionController(
+            sessions_dir=tmpdir,
+            agent_core_client=agent_core,
+            workflow_adapter=workflow,
+        )
+        result = controller.create_session(
+            CreateSessionRequest(
+                prompt="initial",
+                repo_id="repo-1",
+                allowed_actions=["read_file", "grep", "run_tests"],
+            )
+        )
+        session_id = result["session"]["session_id"]
+        event = AmbientEvent(
+            event_type="browser.element_selected",
+            session_id=session_id,
+            source=AmbientSource.BROWSER,
+            actor="user",
+            confidence=0.91,
+            payload={
+                "selection": {
+                    "elements": [
+                        {
+                            "selector": "[data-testid=save]",
+                            "componentName": "SaveButton",
+                            "sourceFile": "src/components/SaveButton.tsx",
+                            "sourceLine": 12,
+                            "sourceConfidence": 0.93,
+                        }
+                    ]
+                }
+            },
+        )
+        persist_ambient_event(event, sessions_dir=tmpdir)
+        session = controller.session_store.get(session_id)
+
+        plan_result = asyncio.run(controller._request_and_start_plan(session, "fix selected button"))
+
+        events = controller.event_store.get_events(session_id)
+
+    assert "plan" in plan_result
+    assert agent_core.plan_request.ambient_context["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
+    assert workflow.context["ambient_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
+    assert workflow.context["ambient_prompt_context"]
+    assert any(event["event_type"] == "plan_requested" and event["data"].get("ambient_context_attached") for event in events)
