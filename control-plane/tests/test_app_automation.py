@@ -36,6 +36,14 @@ def test_vendored_sources_are_present_for_all_selected_tools():
         assert installed[vendor_id] is True
 
 
+def test_local_vendor_adapters_are_present_for_runtime_contracts():
+    statuses = vendor_status()
+
+    local_adapters = {vendor["id"]: vendor["local_adapter_present"] for vendor in statuses}
+    for vendor_id in {"activepieces", "composio", "mcp_servers", "n8n", "stagehand", "browser_use", "skyvern"}:
+        assert local_adapters[vendor_id] is True
+
+
 def test_capability_matrix_orders_vendors_by_execution_ladder():
     matrix = vendor_profile_matrix()
 
@@ -61,7 +69,7 @@ def test_action_plan_contains_vendor_fallback_chain():
     assert "browser" in plan["execution_ladder"]
 
 
-def test_vendors_endpoint_reports_install_status_and_capabilities():
+def test_vendors_endpoint_reports_install_status_capabilities_and_local_adapters():
     response = _client().get("/api/app-automation/vendors")
 
     assert response.status_code == 200
@@ -69,6 +77,7 @@ def test_vendors_endpoint_reports_install_status_and_capabilities():
     assert "api" in data["default_execution_ladder"]
     assert any(vendor["id"] == "activepieces" for vendor in data["vendors"])
     assert all("installed" in vendor for vendor in data["vendors"])
+    assert all("local_adapter_present" in vendor for vendor in data["vendors"])
     assert any(row["vendor"] == "composio" for row in data["capability_matrix"])
 
 
@@ -138,9 +147,30 @@ def test_execute_read_only_action_completes_with_mock_runtime(monkeypatch):
     assert data["route_plan"]["candidates"][0]["vendor"] == "mcp_servers"
 
 
-def test_execute_unconfigured_http_vendor_returns_structured_runtime_error(monkeypatch):
+def test_execute_unconfigured_http_vendor_uses_vendored_local_adapter_contract(monkeypatch):
     monkeypatch.delenv("APP_AUTOMATION_MOCK", raising=False)
     monkeypatch.delenv("COMPOSIO_PROXY_URL", raising=False)
+    monkeypatch.delenv("APP_AUTOMATION_LOCAL_VENDOR_ADAPTERS", raising=False)
+
+    response = _client().post("/api/app-automation/execute", json={
+        "app_id": "gmail",
+        "action_id": "gmail.search_email",
+        "params": {"query": "from:test@example.com"},
+        "dry_run": False,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["status"] == "adapter_contract_completed"
+    assert data["result"]["vendor"] == "composio"
+    assert data["result"]["external_side_effect_performed"] is False
+
+
+def test_disabling_local_vendor_adapter_restores_runtime_not_configured(monkeypatch):
+    monkeypatch.delenv("APP_AUTOMATION_MOCK", raising=False)
+    monkeypatch.delenv("COMPOSIO_PROXY_URL", raising=False)
+    monkeypatch.setenv("APP_AUTOMATION_LOCAL_VENDOR_ADAPTERS", "false")
 
     response = _client().post("/api/app-automation/execute", json={
         "app_id": "gmail",
@@ -154,6 +184,27 @@ def test_execute_unconfigured_http_vendor_returns_structured_runtime_error(monke
     assert data["ok"] is False
     assert data["status"] == "runtime_not_configured"
     assert data["error"]["code"] == "RUNTIME_NOT_CONFIGURED"
+
+
+def test_browser_action_uses_stagehand_local_adapter_contract(monkeypatch):
+    monkeypatch.delenv("APP_AUTOMATION_MOCK", raising=False)
+    monkeypatch.delenv("STAGEHAND_COMMAND", raising=False)
+    monkeypatch.delenv("APP_AUTOMATION_LOCAL_VENDOR_ADAPTERS", raising=False)
+
+    response = _client().post("/api/app-automation/execute", json={
+        "app_id": "web",
+        "action_id": "web.perform_task",
+        "params": {"url": "https://example.com", "instruction": "summarize page"},
+        "dry_run": False,
+        "approval_granted": True,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["status"] == "adapter_contract_completed"
+    assert data["vendor"] == "stagehand"
+    assert data["result"]["browser_launched"] is False
 
 
 def test_execute_side_effect_action_requires_approval():
