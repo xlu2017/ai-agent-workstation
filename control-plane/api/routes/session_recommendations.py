@@ -22,7 +22,6 @@ class RecommendNextRequest(BaseModel):
     current_action: str = ""
     completed_actions: list[str] = Field(default_factory=list)
     repo_id: str = ""
-    visible_actions: list[str] = Field(default_factory=list)
     include_prompt_block: bool = True
 
 
@@ -55,7 +54,6 @@ async def recommend_next_action(session_id: str, body: RecommendNextRequest):
                 session_id=session_id,
                 repo_id=body.repo_id,
                 ambient_context=ambient_context,
-                visible_actions=body.visible_actions or None,
             )
         finally:
             await client.close()
@@ -67,7 +65,6 @@ async def recommend_next_action(session_id: str, body: RecommendNextRequest):
                 "message": str(exc),
                 "ambient_context": ambient_context,
                 "prompt_block": prompt_block,
-                "visible_actions": body.visible_actions,
                 "advisory_only": True,
                 "requires_platform_validation": True,
             },
@@ -78,7 +75,6 @@ async def recommend_next_action(session_id: str, body: RecommendNextRequest):
         "recommendation": response,
         "ambient_context": ambient_context,
         "prompt_block": prompt_block,
-        "visible_actions": body.visible_actions,
         "advisory_only": True,
         "requires_platform_validation": True,
     }
