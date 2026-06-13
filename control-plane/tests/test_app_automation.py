@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from api.server import app  # noqa: E402
-from api.app_automation.registry import list_actions, list_vendor_tools  # noqa: E402
+from api.app_automation.registry import list_actions, list_vendor_tools, vendor_status  # noqa: E402
 
 
 def _client():
@@ -25,6 +25,14 @@ def test_vendor_manifest_loads_selected_tools():
     assert "stagehand" in ids
     assert "browser_use" in ids
     assert "skyvern" in ids
+
+
+def test_vendored_sources_are_present_for_all_selected_tools():
+    statuses = vendor_status()
+
+    installed = {vendor["id"]: vendor["installed"] for vendor in statuses}
+    for vendor_id in {"activepieces", "composio", "mcp_servers", "n8n", "stagehand", "browser_use", "skyvern"}:
+        assert installed[vendor_id] is True
 
 
 def test_actions_cover_seed_apps():
@@ -68,6 +76,22 @@ def test_execute_read_only_action_dry_run_plans():
     assert data["status"] == "planned"
     assert data["required_approval"] is False
     assert data["vendor"] == "mcp_servers"
+
+
+def test_execute_read_only_action_reaches_committed_vendor_scaffold():
+    response = _client().post("/api/app-automation/execute", json={
+        "app_id": "github",
+        "action_id": "github.search_repo",
+        "params": {"repo": "xlu2017/jubilant-goggles", "query": "executor"},
+        "dry_run": False,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is False
+    assert data["status"] == "adapter_scaffolded"
+    assert data["vendor"] == "mcp_servers"
+    assert data["error"]["code"] == "ADAPTER_SCAFFOLDED"
 
 
 def test_execute_side_effect_action_requires_approval():
