@@ -99,16 +99,18 @@ def _mock_execution(vendor_id: str, source_path: Path, action: AppAction, reques
 
 
 def _execute_mcp_servers(source_path: Path, action: AppAction, request: AppAutomationExecuteRequest) -> AdapterExecution:
-    if action.id == "github.search_repo":
+    repository_provider = str(request.params.get("repository_provider") or "github").strip() or "github"
+    issue_provider = str(request.params.get("issue_provider") or "github").strip() or "github"
+    if action.id in {"github.search_repo", "repository.search"} and repository_provider == "github":
         return _github_search_repo(source_path, request)
-    if action.id == "github.create_issue":
+    if action.id in {"github.create_issue", "issue.create"} and issue_provider == "github":
         return _github_create_issue(source_path, request)
     return _execute_local_vendor_adapter(
         "mcp_servers",
         source_path,
         action,
         request,
-        missing_message=f"Vendored MCP reference adapter does not yet implement {action.id}.",
+        missing_message=f"Vendored MCP reference adapter does not yet implement {action.id} for the requested provider.",
     )
 
 
@@ -160,7 +162,7 @@ def _github_search_repo(source_path: Path, request: AppAutomationExecuteRequest)
 def _github_create_issue(source_path: Path, request: AppAutomationExecuteRequest) -> AdapterExecution:
     repo = str(request.params.get("repo", "")).strip()
     title = str(request.params.get("title", "")).strip()
-    body = str(request.params.get("body", ""))
+    body = str(request.params.get("body", "")) or str(request.params.get("description", ""))
     if not repo or not title:
         return AdapterExecution(False, "invalid_params", "repo and title are required.", error={"code": "INVALID_PARAMS", "message": "repo and title are required."})
     token = get_repo_provider_token()
@@ -199,7 +201,7 @@ def _execute_http_or_configured(vendor_id: str, source_path: Path, action: AppAc
         ok=True,
         status="completed",
         message=f"{vendor_id} action completed through configured endpoint.",
-        planned_steps=[f"Loaded vendored source from {source_path}.", f"Posted normalized action envelope to configured {vendor_id} endpoint."],
+        planned_steps=[f"Loaded vendored source from {source_path}.", f"Posted provider-neutral action envelope to configured {vendor_id} endpoint."],
         result={"vendor_response": data},
     )
 
