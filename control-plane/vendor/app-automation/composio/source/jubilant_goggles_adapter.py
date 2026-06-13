@@ -16,12 +16,32 @@ from typing import Any
 
 VENDOR_ID = "composio"
 SUPPORTED_ACTIONS = {
+    "calendar_event.create",
+    "contact.create",
+    "email.create",
+    "email.search",
+    "email.send",
+    "issue.create",
+    "message.send",
+    "page.create",
+    "repository.search",
+    "spreadsheet_row.append",
+    "discord.send_message",
+    "github.create_issue",
+    "github.search_repo",
+    "gmail.create_email",
     "gmail.search_email",
-    "slack.send_message",
+    "gmail.send_email",
     "google_calendar.create_event",
-    "notion.create_page",
-    "linear.create_issue",
+    "google_sheets.append_row",
     "hubspot.create_contact",
+    "jira.create_issue",
+    "linear.create_issue",
+    "notion.create_page",
+    "outlook.create_email",
+    "outlook.send_email",
+    "outlook_calendar.create_event",
+    "slack.send_message",
 }
 
 
@@ -52,10 +72,10 @@ def _response(envelope: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": True,
         "status": "adapter_contract_completed",
-        "message": f"Vendored {VENDOR_ID} adapter accepted {action_id}. Configure COMPOSIO_PROXY_URL for live external execution.",
+        "message": f"Vendored {VENDOR_ID} adapter accepted provider-neutral action {action_id}. Configure COMPOSIO_PROXY_URL for live external execution.",
         "planned_steps": [
-            "Accepted normalized Jubilant Goggles action envelope.",
-            "Validated that the action belongs to the Composio API connector surface.",
+            "Accepted provider-neutral Jubilant Goggles action envelope.",
+            "Dispatched using provider/app specificity from params instead of a provider-specific task name.",
             "Stopped at the local vendored adapter boundary without external side effects.",
         ],
         "result": {
