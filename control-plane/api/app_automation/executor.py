@@ -1,29 +1,38 @@
 """Execution scaffold for app automation actions.
 
-The executor performs catalog lookup, approval checks, and normalized planning.
-When a vendored source tree is present it now returns a vendor-specific scaffold
-plan instead of treating the provider as missing.
+The executor performs catalog lookup, approval checks, routing across the vendor
+ladder, and normalized planning. Live vendor runtime calls remain behind the
+platform-owned adapter boundary.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from api.app_automation.adapter_base import VendorAdapter
 from api.app_automation.models import AppAutomationExecuteRequest, AppAutomationExecuteResult
 from api.app_automation.registry import CONTROL_PLANE_ROOT, get_action, list_vendor_tools
+from api.app_automation.vendor_plan import build_action_plan
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _planned_steps(action, request: AppAutomationExecuteRequest) -> list[str]:
+def _planned_steps(action, request: AppAutomationExecuteRequest, route_plan: dict[str, Any] | None = None) -> list[str]:
     steps = [
         f"Resolve action {action.id} for app {action.app_id}.",
-        f"Select preferred vendor {action.preferred_vendor} with execution kind {action.execution_kind}.",
+        f"Build route plan across API, MCP, workflow, browser, visual browser, and desktop layers.",
         f"Validate parameters against action schema keys: {', '.join(action.input_schema.get('properties', {}).keys())}.",
     ]
+    if route_plan:
+        candidates = route_plan.get("candidates", [])
+        labels = [f"{item.get('rank')}. {item.get('vendor')} ({item.get('layer')}, {item.get('status')})" for item in candidates]
+        if labels:
+            steps.append("Candidate vendor ladder: " + "; ".join(labels))
+        if route_plan.get("selected_vendor"):
+            steps.append(f"Select {route_plan.get('selected_vendor')} at layer {route_plan.get('selected_layer')}.")
     if action.approval == "required" and not request.approval_granted:
         steps.append("Stop before execution because approval is required.")
     elif request.dry_run:
@@ -40,13 +49,23 @@ def _source_path_for_vendor(vendor_id: str):
     return None
 
 
-def _adapter_for(action) -> VendorAdapter | None:
-    source_path = _source_path_for_vendor(action.preferred_vendor)
+def _adapter_for_vendor(vendor_id: str | None) -> VendorAdapter | None:
+    if not vendor_id:
+        return None
+    source_path = _source_path_for_vendor(vendor_id)
     if source_path is None:
         return None
     adapter = VendorAdapter(source_path)
-    adapter.vendor_id = action.preferred_vendor
+    adapter.vendor_id = vendor_id
     return adapter
+
+
+def _selected_candidate_installed(route_plan: dict[str, Any]) -> bool:
+    selected = route_plan.get("selected_vendor")
+    for candidate in route_plan.get("candidates", []):
+        if candidate.get("vendor") == selected:
+            return bool(candidate.get("installed"))
+    return False
 
 
 def execute_app_action(request: AppAutomationExecuteRequest) -> AppAutomationExecuteResult:
@@ -62,6 +81,9 @@ def execute_app_action(request: AppAutomationExecuteRequest) -> AppAutomationExe
             error={"code": "UNKNOWN_ACTION", "message": f"Unknown app action: {request.app_id}/{request.action_id}"},
         )
 
+    route_plan = build_action_plan(action)
+    selected_vendor = route_plan.get("selected_vendor") or action.preferred_vendor
+    selected_layer = route_plan.get("selected_layer") or action.execution_kind
     required_approval = action.approval == "required" and not request.approval_granted
     event = {
         "event_type": "app_automation_planned",
@@ -69,10 +91,12 @@ def execute_app_action(request: AppAutomationExecuteRequest) -> AppAutomationExe
         "session_id": request.session_id,
         "app_id": request.app_id,
         "action_id": request.action_id,
-        "vendor": action.preferred_vendor,
-        "execution_kind": action.execution_kind,
+        "vendor": selected_vendor,
+        "preferred_vendor": action.preferred_vendor,
+        "execution_kind": selected_layer,
         "risk": action.risk,
         "dry_run": request.dry_run,
+        "route_candidates": route_plan.get("candidates", []),
         "params_preview": {key: str(value)[:120] for key, value in request.params.items()},
     }
 
@@ -80,14 +104,15 @@ def execute_app_action(request: AppAutomationExecuteRequest) -> AppAutomationExe
         return AppAutomationExecuteResult(
             ok=True,
             status="needs_approval",
-            vendor=action.preferred_vendor,
+            vendor=selected_vendor,
             execution_kind=action.execution_kind,
             app_id=request.app_id,
             action_id=request.action_id,
             dry_run=request.dry_run,
             required_approval=True,
             message=f"{action.label} requires approval before execution.",
-            planned_steps=_planned_steps(action, request),
+            planned_steps=_planned_steps(action, request, route_plan),
+            route_plan=route_plan,
             event=event,
         )
 
@@ -95,43 +120,46 @@ def execute_app_action(request: AppAutomationExecuteRequest) -> AppAutomationExe
         return AppAutomationExecuteResult(
             ok=True,
             status="planned",
-            vendor=action.preferred_vendor,
+            vendor=selected_vendor,
             execution_kind=action.execution_kind,
             app_id=request.app_id,
             action_id=request.action_id,
             dry_run=True,
-            message=f"Dry run planned for {action.label} via {action.preferred_vendor}.",
-            planned_steps=_planned_steps(action, request),
+            message=f"Dry run planned for {action.label} via {selected_vendor}.",
+            planned_steps=_planned_steps(action, request, route_plan),
+            route_plan=route_plan,
             event=event,
         )
 
-    if not action.available:
+    if not _selected_candidate_installed(route_plan):
         return AppAutomationExecuteResult(
             ok=False,
             status="vendor_not_installed",
-            vendor=action.preferred_vendor,
+            vendor=selected_vendor,
             execution_kind=action.execution_kind,
             app_id=request.app_id,
             action_id=request.action_id,
             dry_run=False,
-            message=action.unavailable_reason,
-            planned_steps=_planned_steps(action, request),
+            message=f"No installed vendor source is available for action {action.id}.",
+            planned_steps=_planned_steps(action, request, route_plan),
+            route_plan=route_plan,
             event=event,
-            error={"code": "VENDOR_NOT_INSTALLED", "message": action.unavailable_reason},
+            error={"code": "VENDOR_NOT_INSTALLED", "message": f"No installed vendor source is available for action {action.id}."},
         )
 
-    adapter = _adapter_for(action)
+    adapter = _adapter_for_vendor(selected_vendor)
     if adapter is None:
         return AppAutomationExecuteResult(
             ok=False,
             status="adapter_missing",
-            vendor=action.preferred_vendor,
+            vendor=selected_vendor,
             execution_kind=action.execution_kind,
             app_id=request.app_id,
             action_id=request.action_id,
             dry_run=False,
             message="No platform adapter scaffold is registered for this vendor.",
-            planned_steps=_planned_steps(action, request),
+            planned_steps=_planned_steps(action, request, route_plan),
+            route_plan=route_plan,
             event=event,
             error={"code": "ADAPTER_MISSING", "message": "No adapter scaffold is registered."},
         )
@@ -140,13 +168,14 @@ def execute_app_action(request: AppAutomationExecuteRequest) -> AppAutomationExe
     return AppAutomationExecuteResult(
         ok=adapter_result.ok,
         status=adapter_result.status,
-        vendor=action.preferred_vendor,
+        vendor=selected_vendor,
         execution_kind=action.execution_kind,
         app_id=request.app_id,
         action_id=request.action_id,
         dry_run=False,
         message=adapter_result.message,
-        planned_steps=[*_planned_steps(action, request), *adapter_result.planned_steps],
+        planned_steps=[*_planned_steps(action, request, route_plan), *adapter_result.planned_steps],
+        route_plan=route_plan,
         event={**event, "adapter_status": adapter_result.status},
         error=adapter_result.error,
     )
