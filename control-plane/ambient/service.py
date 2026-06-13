@@ -153,7 +153,7 @@ class AmbientObservationService:
         persisted = persist_many(events, sessions_dir=self.config.sessions_dir) if events else []
         all_events = load_ambient_events(session_id, sessions_dir=self.config.sessions_dir)
         state = reduce_ambient_events(all_events)
-        graph = write_evidence_graph(all_events, sessions_dir=self.config.sessions_dir)
+        write_evidence_graph(all_events, sessions_dir=self.config.sessions_dir)
         packet = build_context_packet(session_id=session_id, events=all_events, goal=goal)
         state_path, packet_path = self._write_reduced_outputs(session_id, state.model_dump(), packet.model_dump())
         return CollectionResult(
@@ -187,22 +187,37 @@ class AmbientObservationService:
         }
 
     def _load_session_meta(self, session_id: str) -> dict[str, Any]:
-        path = self.config.sessions_dir / session_id / "session.json"
-        if not path.exists():
-            return {"id": session_id}
-        try:
-            data = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
-            return {"id": session_id}
-        return data if isinstance(data, dict) else {"id": session_id}
+        session_dir = self.config.sessions_dir / session_id
+        for filename in ("session-meta.json", "session.json"):
+            path = session_dir / filename
+            if not path.exists():
+                continue
+            try:
+                data = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(data, dict):
+                data.setdefault("id", session_id)
+                return data
+        return {"id": session_id}
 
     def _resolve_repo_path(self, meta: dict[str, Any]) -> Path | None:
-        for key in ("worktree_path", "repo_path", "repo"):
+        for key in ("worktree_path", "workspace_path", "repo_path", "repo"):
             value = meta.get(key)
             if isinstance(value, str) and value:
                 path = Path(value)
                 if path.exists():
                     return path
+
+        for key in ("worktree_id", "repo_id"):
+            value = meta.get(key)
+            if isinstance(value, str) and value:
+                path = Path(value)
+                candidates = [path] if path.is_absolute() else [self.config.repos_dir / path]
+                for candidate in candidates:
+                    if candidate.exists():
+                        return candidate
+
         session_id = str(meta.get("id", ""))
         candidates = [
             self.config.repos_dir / f"worktree-{session_id}",
@@ -214,9 +229,14 @@ class AmbientObservationService:
         return None
 
     def _resolve_worktree_path(self, meta: dict[str, Any], repo_path: Path | None) -> Path | None:
-        value = meta.get("worktree_path")
-        if isinstance(value, str) and value and Path(value).exists():
-            return Path(value)
+        for key in ("worktree_path", "workspace_path", "worktree_id"):
+            value = meta.get(key)
+            if isinstance(value, str) and value:
+                path = Path(value)
+                candidates = [path] if path.is_absolute() else [self.config.repos_dir / path]
+                for candidate in candidates:
+                    if candidate.exists():
+                        return candidate
         return repo_path
 
     def _repo_id(self, repo_path: Path | None) -> str | None:
@@ -246,6 +266,6 @@ class AmbientObservationService:
             return []
         ids = []
         for item in self.config.sessions_dir.iterdir():
-            if item.is_dir() and (item / "session.json").exists():
+            if item.is_dir() and ((item / "session-meta.json").exists() or (item / "session.json").exists()):
                 ids.append(item.name)
         return sorted(ids)
