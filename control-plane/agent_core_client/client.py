@@ -96,24 +96,31 @@ class AgentCoreClient:
         repo_id: str = "",
         ambient_context: dict[str, Any] | None = None,
         suggested_plan: dict[str, Any] | None = None,
+        visible_actions: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Get an advisory single next-action recommendation."""
+        """Get an advisory single next-action recommendation.
+
+        visible_actions is selected by the platform workflow phase, not inferred
+        from the user prompt. It constrains which actions agent-core may choose.
+        """
         context: dict[str, Any] = {"session_id": session_id, "repo_id": repo_id}
+        if visible_actions:
+            context["visible_actions"] = visible_actions
         if ambient_context:
             context["ambient_context"] = ambient_context
         if suggested_plan:
             # This is accepted only for prompt-context compatibility. Execution
             # flows do not pass a plan here; recommend-next remains single-action.
             context["suggested_plan"] = suggested_plan
-        resp = await self._client.post(
-            "/actions/recommend-next",
-            json={
-                "task_type": task_type,
-                "current_action": current_action,
-                "completed_actions": completed_actions,
-                "context": context,
-            },
-        )
+        payload = {
+            "task_type": task_type,
+            "current_action": current_action,
+            "completed_actions": completed_actions,
+            "context": context,
+        }
+        if visible_actions:
+            payload["visible_actions"] = visible_actions
+        resp = await self._client.post("/actions/recommend-next", json=payload)
         resp.raise_for_status()
         return self._mark_advisory(resp.json())
 
