@@ -10,12 +10,31 @@ import { displayNameForGitHubRepository, displayNameForLocalRepositoryPath } fro
 
 type HomeMenu = 'source' | 'repository' | 'runtime' | 'attachments' | 'more' | null
 type HomeRuntimeId = 'ubuntu' | 'windows' | 'android' | 'ios' | 'macos'
+type HomeRepoSource = Extract<RepoSource, 'github' | 'local'>
 
 type RuntimeOption = {
   id: HomeRuntimeId
   label: string
   tag?: string
   description: string
+}
+
+type RepositoryPopoverProps = {
+  repoSource: RepoSource
+  repoQuery: string
+  setRepoQuery: (value: string) => void
+  githubRepos: GitHubRepo[]
+  githubRepoName: string
+  setGithubRepoName: (value: string) => void
+  localPath: string
+  setLocalPath: (value: string) => void
+  browsePath: string
+  browseEntries: BrowseEntry[]
+  loadingRepos: boolean
+  loadingBrowse: boolean
+  onLoadGithubRepos: () => void
+  onBrowseLocalPath: (path: string) => void
+  onClose: () => void
 }
 
 const runtimeOptions: RuntimeOption[] = [
@@ -28,7 +47,7 @@ const runtimeOptions: RuntimeOption[] = [
 
 export default function PlatformHomeInitialChatScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
   const [prompt, setPrompt] = useState('')
-  const [repoSource, setRepoSource] = useState<RepoSource>('github')
+  const [repoSource, setRepoSource] = useState<HomeRepoSource>('github')
   const [githubRepos, setGithubRepos] = useState<GitHubRepo[]>([])
   const [githubRepoName, setGithubRepoName] = useState('')
   const [repoQuery, setRepoQuery] = useState('')
@@ -88,7 +107,7 @@ export default function PlatformHomeInitialChatScreen({ onNavigate }: { onNaviga
     if (repoSource === 'local' && browseEntries.length === 0 && !loadingBrowse) void browseLocalPath(browsePath)
   }, [repoSource, githubRepos.length, browseEntries.length, loadingRepos, loadingBrowse, loadGithubRepos, browseLocalPath, browsePath])
 
-  const changeRepoSource = useCallback((nextSource: RepoSource) => {
+  const changeRepoSource = useCallback((nextSource: HomeRepoSource) => {
     setRepoSource(nextSource)
     setOpenMenu(null)
     if (nextSource === 'github' && githubRepos.length === 0 && !loadingRepos) void loadGithubRepos()
@@ -176,7 +195,7 @@ export default function PlatformHomeInitialChatScreen({ onNavigate }: { onNaviga
   )
 }
 
-function SourcePopover({ repoSource, onSelect }: { repoSource: RepoSource; onSelect: (value: RepoSource) => void }) {
+function SourcePopover({ repoSource, onSelect }: { repoSource: HomeRepoSource; onSelect: (value: HomeRepoSource) => void }) {
   return (
     <div className="home-popover home-source-popover">
       <button type="button" className="home-popover-option" onClick={() => onSelect('github')}>
@@ -193,23 +212,7 @@ function SourcePopover({ repoSource, onSelect }: { repoSource: RepoSource; onSel
   )
 }
 
-function RepositoryPopover(props: {
-  repoSource: RepoSource
-  repoQuery: string
-  setRepoQuery: (value: string) => void
-  githubRepos: GitHubRepo[]
-  githubRepoName: string
-  setGithubRepoName: (value: string) => void
-  localPath: string
-  setLocalPath: (value: string) => void
-  browsePath: string
-  browseEntries: BrowseEntry[]
-  loadingRepos: boolean
-  loadingBrowse: boolean
-  onLoadGithubRepos: () => void
-  onBrowseLocalPath: (path: string) => void
-  onClose: () => void
-}) {
+function RepositoryPopover(props: RepositoryPopoverProps) {
   if (props.repoSource === 'local') return <WorkstationRepositoryPopover {...props} />
   const query = props.repoQuery.trim().toLowerCase()
   const visibleRepos = query ? props.githubRepos.filter(repo => displayNameForGitHubRepository(repo).toLowerCase().includes(query)) : props.githubRepos
@@ -241,14 +244,23 @@ function GitHubRepositoryRow({ repo, selected, onSelect }: { repo: GitHubRepo; s
   )
 }
 
-function WorkstationRepositoryPopover(props: Parameters<typeof RepositoryPopover>[0]) {
+function WorkstationRepositoryPopover(props: RepositoryPopoverProps) {
+  const selectBrowseEntry = (entry: BrowseEntry) => {
+    if (entry.is_repo) {
+      props.setLocalPath(entry.path)
+      props.onClose()
+      return
+    }
+    props.onBrowseLocalPath(entry.path)
+  }
+
   return (
     <div className="home-popover home-repository-popover local">
       <div className="home-popover-search"><Folder size={16} /><input value={props.localPath} onChange={event => props.setLocalPath(event.target.value)} placeholder="/opt/workstation/repos/my-repo" /><button type="button" onClick={() => props.onBrowseLocalPath(props.localPath || props.browsePath)} disabled={props.loadingBrowse}>{props.loadingBrowse ? 'Loading…' : 'Browse'}</button></div>
       <div className="home-local-details">
         <div className="home-browser-path">{props.browsePath}</div>
         {props.browseEntries.slice(0, 10).map(entry => (
-          <button key={entry.path} type="button" className="home-repo-row" onClick={() => entry.is_repo ? (props.setLocalPath(entry.path), props.onClose()) : props.onBrowseLocalPath(entry.path)}>
+          <button key={entry.path} type="button" className="home-repo-row" onClick={() => selectBrowseEntry(entry)}>
             <span className="home-checkbox"><Folder size={13} /></span>
             <span className="home-repo-main"><strong>{entry.name}</strong><small>{entry.path}</small></span>
             {entry.is_repo && <span className="home-repo-owner">repo</span>}
