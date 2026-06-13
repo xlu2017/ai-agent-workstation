@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from api.app_automation.models import AppAction, AppAutomationExecuteRequest
+from api.app_automation.registry import LOCAL_ADAPTER_FILENAME
 
 
 @dataclass(frozen=True)
@@ -34,16 +35,21 @@ class VendorAdapter:
         self.source_path = source_path
 
     def health(self) -> AdapterHealth:
+        entrypoints = self.detect_entrypoints()
+        notes = []
+        if LOCAL_ADAPTER_FILENAME in entrypoints:
+            notes.append("Local Jubilant Goggles adapter contract is available.")
         return AdapterHealth(
             vendor=self.vendor_id,
             available=self.source_path.exists() and any(self.source_path.iterdir()),
             source_path=str(self.source_path),
             source_present=self.source_path.exists(),
-            entrypoints=self.detect_entrypoints(),
+            entrypoints=entrypoints,
+            notes=notes,
         )
 
     def detect_entrypoints(self) -> list[str]:
-        candidates = ["package.json", "pyproject.toml", "README.md", "src"]
+        candidates = [LOCAL_ADAPTER_FILENAME, "package.json", "pyproject.toml", "README.md", "src"]
         return [candidate for candidate in candidates if (self.source_path / candidate).exists()]
 
     def execute(self, action: AppAction, request: AppAutomationExecuteRequest) -> AdapterExecution:
