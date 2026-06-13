@@ -1,20 +1,20 @@
-"""Provider-level app-automation action inventory for recommend-next scaffolding.
+"""Top-level app-automation action inventory for recommend-next scaffolding.
 
-This file deduplicates the checked-in app-automation action surface across the
-selected app-automation providers. It is scaffold-only: no runtime code imports
-or enforces these maps yet.
+Only provider-neutral action names are tracked by the recommend-next taxonomy.
+Provider-specific or app-specific catalog IDs such as ``gmail.search_email`` or
+``outlook.create_email`` are compatibility aliases, route evidence, or executor
+inputs; they are not root-level tracked actions.
 
 Definitions
 -----------
-``PROVIDER_ROUTE_SUPPORT`` records the platform route matrix from
-``api.app_automation.vendor_plan.ACTION_VENDOR_PREFERENCES``. This is the broad
-provider coverage the control plane intends to route through.
+``PROVIDER_ROUTE_SUPPORT`` records which provider routes can serve each
+provider-neutral top-level action.
 
-``LOCAL_ADAPTER_SUPPORT`` records the narrower deterministic vendored adapter
-contracts from ``vendor/app-automation/*/source/jubilant_goggles_adapter.py``.
+``APP_CATALOG_ACTION_ALIASES`` maps checked-in app-specific seed action IDs to
+the top-level action names tracked by recommend-next.
 
-``DEDUPED_APP_AUTOMATION_ACTION_IDS`` is the provider-overlap-deduplicated total
-action set known to the checked-in app-automation stack.
+``DEDUPED_TOP_LEVEL_APP_AUTOMATION_ACTIONS`` is the provider-overlap-deduplicated
+total action set known to the checked-in app-automation stack.
 """
 
 from __future__ import annotations
@@ -26,140 +26,148 @@ from execution.recommend_next_execution_service import RecommendNextDecisionType
 
 PROVIDER_ROUTE_SUPPORT: Mapping[str, tuple[str, ...]] = {
     "activepieces": (
-        "github.create_issue",
-        "slack.send_message",
-        "gmail.search_email",
-        "google_calendar.create_event",
-        "google_sheets.append_row",
-        "notion.create_page",
-        "linear.create_issue",
-        "jira.create_issue",
-        "discord.send_message",
-        "hubspot.create_contact",
+        "issue.create",
+        "message.send",
+        "email.search",
+        "calendar_event.create",
+        "spreadsheet_row.append",
+        "page.create",
+        "contact.create",
     ),
     "composio": (
-        "github.create_issue",
-        "github.search_repo",
-        "slack.send_message",
-        "gmail.search_email",
-        "google_calendar.create_event",
-        "google_sheets.append_row",
-        "notion.create_page",
-        "linear.create_issue",
-        "jira.create_issue",
-        "discord.send_message",
-        "hubspot.create_contact",
+        "issue.create",
+        "repository.search",
+        "message.send",
+        "email.search",
+        "calendar_event.create",
+        "spreadsheet_row.append",
+        "page.create",
+        "contact.create",
     ),
     "mcp_servers": (
-        "github.create_issue",
-        "github.search_repo",
-        "gmail.search_email",
+        "issue.create",
+        "repository.search",
+        "email.search",
     ),
     "n8n": (
-        "slack.send_message",
-        "google_calendar.create_event",
-        "google_sheets.append_row",
-        "notion.create_page",
-        "jira.create_issue",
-        "discord.send_message",
-        "hubspot.create_contact",
+        "message.send",
+        "calendar_event.create",
+        "spreadsheet_row.append",
+        "page.create",
+        "issue.create",
+        "contact.create",
     ),
     "stagehand": (
-        "web.perform_task",
-        "web.visual_task",
+        "browser_task.perform",
+        "visual_browser_task.perform",
     ),
     "browser_use": (
-        "web.perform_task",
-        "web.visual_task",
+        "browser_task.perform",
+        "visual_browser_task.perform",
     ),
     "skyvern": (
-        "web.perform_task",
-        "web.visual_task",
+        "browser_task.perform",
+        "visual_browser_task.perform",
     ),
+}
+
+
+# Existing checked-in seed action IDs map to top-level action names. These IDs
+# may still be used by the app-automation executor, but they are not root-level
+# recommend-next action names.
+APP_CATALOG_ACTION_ALIASES: Mapping[str, str] = {
+    "github.create_issue": "issue.create",
+    "linear.create_issue": "issue.create",
+    "jira.create_issue": "issue.create",
+    "github.search_repo": "repository.search",
+    "gmail.search_email": "email.search",
+    "slack.send_message": "message.send",
+    "discord.send_message": "message.send",
+    "google_calendar.create_event": "calendar_event.create",
+    "google_sheets.append_row": "spreadsheet_row.append",
+    "notion.create_page": "page.create",
+    "hubspot.create_contact": "contact.create",
+    "web.perform_task": "browser_task.perform",
+    "web.visual_task": "visual_browser_task.perform",
 }
 
 
 LOCAL_ADAPTER_SUPPORT: Mapping[str, tuple[str, ...]] = {
     "activepieces": (
-        "google_sheets.append_row",
-        "jira.create_issue",
-        "discord.send_message",
-        "slack.send_message",
+        "spreadsheet_row.append",
+        "issue.create",
+        "message.send",
     ),
     "composio": (
-        "gmail.search_email",
-        "slack.send_message",
-        "google_calendar.create_event",
-        "notion.create_page",
-        "linear.create_issue",
-        "hubspot.create_contact",
+        "email.search",
+        "message.send",
+        "calendar_event.create",
+        "page.create",
+        "issue.create",
+        "contact.create",
     ),
     "mcp_servers": (
-        "github.search_repo",
-        "github.create_issue",
+        "repository.search",
+        "issue.create",
     ),
     "n8n": (
-        "slack.send_message",
-        "google_sheets.append_row",
-        "jira.create_issue",
-        "discord.send_message",
+        "message.send",
+        "spreadsheet_row.append",
+        "issue.create",
     ),
     "stagehand": (
-        "web.perform_task",
-        "web.visual_task",
+        "browser_task.perform",
+        "visual_browser_task.perform",
     ),
     "browser_use": (
-        "web.perform_task",
-        "web.visual_task",
+        "browser_task.perform",
+        "visual_browser_task.perform",
     ),
     "skyvern": (
-        "web.visual_task",
-        "web.perform_task",
+        "visual_browser_task.perform",
+        "browser_task.perform",
     ),
 }
 
 
-DEDUPED_APP_AUTOMATION_ACTION_IDS: tuple[str, ...] = tuple(sorted({
-    action_id
+DEDUPED_TOP_LEVEL_APP_AUTOMATION_ACTIONS: tuple[str, ...] = tuple(sorted({
+    action_name
     for provider_actions in PROVIDER_ROUTE_SUPPORT.values()
-    for action_id in provider_actions
+    for action_name in provider_actions
 } | {
-    action_id
+    action_name
     for provider_actions in LOCAL_ADAPTER_SUPPORT.values()
-    for action_id in provider_actions
+    for action_name in provider_actions
 }))
 
 
-ACTION_PROVIDER_ROUTE_CANDIDATES: Mapping[str, tuple[str, ...]] = {
-    action_id: tuple(provider for provider, actions in PROVIDER_ROUTE_SUPPORT.items() if action_id in actions)
-    for action_id in DEDUPED_APP_AUTOMATION_ACTION_IDS
+TOP_LEVEL_ACTION_PROVIDER_ROUTE_CANDIDATES: Mapping[str, tuple[str, ...]] = {
+    action_name: tuple(provider for provider, actions in PROVIDER_ROUTE_SUPPORT.items() if action_name in actions)
+    for action_name in DEDUPED_TOP_LEVEL_APP_AUTOMATION_ACTIONS
 }
 
 
-ACTION_LOCAL_ADAPTER_CANDIDATES: Mapping[str, tuple[str, ...]] = {
-    action_id: tuple(provider for provider, actions in LOCAL_ADAPTER_SUPPORT.items() if action_id in actions)
-    for action_id in DEDUPED_APP_AUTOMATION_ACTION_IDS
+TOP_LEVEL_ACTION_LOCAL_ADAPTER_CANDIDATES: Mapping[str, tuple[str, ...]] = {
+    action_name: tuple(provider for provider, actions in LOCAL_ADAPTER_SUPPORT.items() if action_name in actions)
+    for action_name in DEDUPED_TOP_LEVEL_APP_AUTOMATION_ACTIONS
 }
 
 
-APP_AUTOMATION_ACTION_DECISION_TYPE: Mapping[str, RecommendNextDecisionType] = {
-    "github.create_issue": RecommendNextDecisionType.EXECUTE,
-    "github.search_repo": RecommendNextDecisionType.FIND_OUT_MORE,
-    "slack.send_message": RecommendNextDecisionType.EXECUTE,
-    "gmail.search_email": RecommendNextDecisionType.FIND_OUT_MORE,
-    "google_calendar.create_event": RecommendNextDecisionType.EXECUTE,
-    "google_sheets.append_row": RecommendNextDecisionType.EXECUTE,
-    "notion.create_page": RecommendNextDecisionType.EXECUTE,
-    "linear.create_issue": RecommendNextDecisionType.EXECUTE,
-    "jira.create_issue": RecommendNextDecisionType.EXECUTE,
-    "discord.send_message": RecommendNextDecisionType.EXECUTE,
-    "hubspot.create_contact": RecommendNextDecisionType.EXECUTE,
-    "web.perform_task": RecommendNextDecisionType.EXECUTE,
-    "web.visual_task": RecommendNextDecisionType.EXECUTE,
+TOP_LEVEL_APP_AUTOMATION_ACTION_DECISION_TYPE: Mapping[str, RecommendNextDecisionType] = {
+    "browser_task.perform": RecommendNextDecisionType.EXECUTE,
+    "calendar_event.create": RecommendNextDecisionType.EXECUTE,
+    "contact.create": RecommendNextDecisionType.EXECUTE,
+    "email.search": RecommendNextDecisionType.FIND_OUT_MORE,
+    "issue.create": RecommendNextDecisionType.EXECUTE,
+    "message.send": RecommendNextDecisionType.EXECUTE,
+    "page.create": RecommendNextDecisionType.EXECUTE,
+    "repository.search": RecommendNextDecisionType.FIND_OUT_MORE,
+    "spreadsheet_row.append": RecommendNextDecisionType.EXECUTE,
+    "visual_browser_task.perform": RecommendNextDecisionType.EXECUTE,
 }
 
 
 # Scaffold invariant for future enforcement:
-# sorted(APP_AUTOMATION_ACTION_DECISION_TYPE) must match
-# DEDUPED_APP_AUTOMATION_ACTION_IDS, so every deduplicated app action is under
-# exactly one of execute, find_out_more, ask_user, or stop.
+# sorted(TOP_LEVEL_APP_AUTOMATION_ACTION_DECISION_TYPE) must match
+# DEDUPED_TOP_LEVEL_APP_AUTOMATION_ACTIONS. App-specific IDs and provider names
+# must remain aliases/route evidence and must not enter the root taxonomy.
