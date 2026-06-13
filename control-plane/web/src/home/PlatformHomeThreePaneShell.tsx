@@ -6,10 +6,12 @@ import PlatformHomeRightContextPane from './PlatformHomeRightContextPane'
 
 export default function PlatformHomeThreePaneShell({
   activeSession,
+  onActiveSessionUpdated,
   onNavigate,
   children,
 }: {
   activeSession?: GraphSession | null
+  onActiveSessionUpdated?: (session: GraphSession) => void
   onNavigate: (path: string) => void
   children: ReactNode
 }) {
@@ -35,7 +37,7 @@ export default function PlatformHomeThreePaneShell({
         onSoftDeleteSession={sessionList.softDeleteSession}
       />
       <main className="platform-center-pane">{children}</main>
-      <PlatformHomeRightContextPane activeSession={activeSession} />
+      <PlatformHomeRightContextPane activeSession={activeSession} onActiveSessionUpdated={onActiveSessionUpdated} />
     </div>
   )
 }
