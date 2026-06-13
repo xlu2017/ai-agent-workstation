@@ -21,7 +21,10 @@ The controller-level output remains one of:
 
 Granular names such as ``create_child_goal`` or ``grep`` may appear as metadata
 or later dispatch targets, but they are not first-class controller decision
-outputs.
+outputs. App-automation provider/app-specific names such as ``gmail.search`` or
+``outlook.create_email`` must remain aliases or routing metadata; the root
+taxonomy tracks only top-level actions such as ``email.search`` or
+``email.create``.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from execution.recommend_next_app_automation_provider_inventory import (
-    APP_AUTOMATION_ACTION_DECISION_TYPE,
+    TOP_LEVEL_APP_AUTOMATION_ACTION_DECISION_TYPE,
 )
 from execution.recommend_next_execution_service import RecommendNextDecisionType
 
@@ -123,13 +126,13 @@ STOP_ACTIONS: tuple[ActionCategoryEntry, ...] = (
 )
 
 
-APP_AUTOMATION_PROVIDER_ACTIONS: tuple[ActionCategoryEntry, ...] = tuple(
+APP_AUTOMATION_TOP_LEVEL_ACTIONS: tuple[ActionCategoryEntry, ...] = tuple(
     ActionCategoryEntry(
         action_name=action_name,
         decision_type=decision_type,
-        rationale="Deduplicated provider-supported app-automation action; see recommend_next_app_automation_provider_inventory.py.",
+        rationale="Provider-neutral app-automation action; provider/app-specific names are aliases only.",
     )
-    for action_name, decision_type in sorted(APP_AUTOMATION_ACTION_DECISION_TYPE.items())
+    for action_name, decision_type in sorted(TOP_LEVEL_APP_AUTOMATION_ACTION_DECISION_TYPE.items())
 )
 
 
@@ -138,7 +141,7 @@ ALL_ACTION_CATEGORY_ENTRIES: tuple[ActionCategoryEntry, ...] = (
     *FIND_OUT_MORE_ACTIONS,
     *ASK_USER_ACTIONS,
     *STOP_ACTIONS,
-    *APP_AUTOMATION_PROVIDER_ACTIONS,
+    *APP_AUTOMATION_TOP_LEVEL_ACTIONS,
 )
 
 
@@ -150,4 +153,5 @@ ACTION_DECISION_TYPE_BY_NAME: Mapping[str, RecommendNextDecisionType] = {
 # Scaffold invariant for future implementation:
 # any recommend-next action name not present in ACTION_DECISION_TYPE_BY_NAME
 # must fail closed until explicitly categorized here. Do not silently default
-# unknown actions to execute.
+# unknown actions to execute. Provider/app-specific aliases must be normalized
+# before this root-level lookup.
