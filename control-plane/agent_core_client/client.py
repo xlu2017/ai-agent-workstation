@@ -48,6 +48,7 @@ class PlanRequest:
     recent_memories: list[dict[str, Any]] = field(default_factory=list)
     context_summaries: list[str] = field(default_factory=list)
     recent_action_outcomes: list[dict[str, Any]] = field(default_factory=list)
+    ambient_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -104,6 +105,8 @@ class AgentCoreClient:
             payload["context_summaries"] = request.context_summaries
         if request.recent_action_outcomes:
             payload["recent_action_outcomes"] = request.recent_action_outcomes
+        if request.ambient_context:
+            payload["ambient_context"] = request.ambient_context
         resp = await self._client.post("/actions/plan", json=payload)
         resp.raise_for_status()
         return self._mark_advisory(resp.json())
@@ -141,15 +144,22 @@ class AgentCoreClient:
         completed_actions: list[str],
         session_id: str = "",
         repo_id: str = "",
+        ambient_context: dict[str, Any] | None = None,
+        suggested_plan: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Get an advisory next-action recommendation."""
+        context: dict[str, Any] = {"session_id": session_id, "repo_id": repo_id}
+        if ambient_context:
+            context["ambient_context"] = ambient_context
+        if suggested_plan:
+            context["suggested_plan"] = suggested_plan
         resp = await self._client.post(
             "/actions/recommend-next",
             json={
                 "task_type": task_type,
                 "current_action": current_action,
                 "completed_actions": completed_actions,
-                "context": {"session_id": session_id, "repo_id": repo_id},
+                "context": context,
             },
         )
         resp.raise_for_status()
