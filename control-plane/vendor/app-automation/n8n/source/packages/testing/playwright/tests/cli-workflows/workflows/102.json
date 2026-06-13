@@ -1,0 +1,72 @@
+{
+	"createdAt": "2021-03-04T10:41:43.011Z",
+	"updatedAt": "2021-03-04T10:41:43.011Z",
+	"id": "102",
+	"name": "ReadBinaryFile",
+	"active": false,
+	"nodes": [
+		{
+			"parameters": {},
+			"name": "Start",
+			"type": "n8n-nodes-base.manualTrigger",
+			"typeVersion": 1,
+			"position": [250, 300],
+			"id": "516a8267-1d35-4ec7-977b-87d0f961fe53"
+		},
+		{
+			"parameters": {
+				"filePath": "/tmp/n8n-logo.png"
+			},
+			"name": "Read Binary File",
+			"type": "n8n-nodes-base.readBinaryFile",
+			"typeVersion": 1,
+			"position": [500, 300],
+			"notesInFlow": true,
+			"notes": "Read the assets/n8n-logo.png",
+			"id": "839c17af-2415-41c4-bf13-8815df27ca4e"
+		},
+		{
+			"parameters": {
+				"functionCode": "testData='iVBORw0KGgoAAAANSUhEUgAAAcoAAAB8CAYAAADpePAA<ssh-key>';\nif(items[0].binary.data.data !== testData){\n  throw new Error('Error in Read Binary File node');\n}\nreturn items;"
+			},
+			"name": "Function",
+			"type": "n8n-nodes-base.function",
+			"typeVersion": 1,
+			"position": [650, 300],
+			"notesInFlow": true,
+			"notes": "assert the base64 value",
+			"id": "409eca37-f7a2-4ddc-9ae9-c4a9daeef481"
+		}
+	],
+	"connections": {
+		"Read Binary File": {
+			"main": [
+				[
+					{
+						"node": "Function",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Start": {
+			"main": [
+				[
+					{
+						"node": "Read Binary File",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		}
+	},
+	"settings": {},
+	"staticData": null,
+	"meta": null,
+	"pinData": null,
+	"versionId": null,
+	"triggerCount": 0,
+	"tags": []
+}

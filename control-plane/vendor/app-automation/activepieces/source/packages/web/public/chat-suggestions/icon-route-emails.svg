@@ -1,0 +1,18 @@
+<svg width="54" height="41" viewBox="0 0 54 41" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<rect x="5.27197" y="1.23018e-07" width="24" height="24" rx="6" transform="rotate(12.6891 5.27197 1.23018e-07)" fill="#F59E0B"/>
+<g clip-path="url(#clip0_538_2249)">
+<path d="M13.7228 14.735L9.6234 11.6847L20.544 10.421L14.7218 19.7462L13.7228 14.735ZM20.544 10.421L13.7228 14.735" stroke="white" stroke-width="1.5725" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<path d="M41.5 11.7099L38.375 14.459L35.25 11.7099M38.375 14.459L38.4863 14.0695C39.4328 10.7567 36.9454 7.45898 33.5 7.45898H30.7153" stroke="#F59E0B" stroke-width="1.5725" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M29.4307 28.918C29.4307 22.2906 34.8032 16.918 41.4307 16.918C48.0581 16.918 53.4307 22.2906 53.4307 28.918C53.4307 35.5454 48.0581 40.918 41.4307 40.918C34.8032 40.918 29.4307 35.5454 29.4307 28.918Z" fill="#262626"/>
+<path d="M29.4307 28.918C29.4307 22.2906 34.8032 16.918 41.4307 16.918C48.0581 16.918 53.4307 22.2906 53.4307 28.918C53.4307 35.5454 48.0581 40.918 41.4307 40.918C34.8032 40.918 29.4307 35.5454 29.4307 28.918Z" fill="url(#pattern0_538_2249)"/>
+<defs>
+<pattern id="pattern0_538_2249" patternContentUnits="objectBoundingBox" width="1" height="1">
+<use xlink:href="#image0_538_2249" transform="scale(0.00208333)"/>
+</pattern>
+<clipPath id="clip0_538_2249">
+<rect width="12.4516" height="12.4516" fill="white" transform="translate(9.63672 6.90149) rotate(12.6891)"/>
+</clipPath>
+<image id="image0_538_2249" width="480" height="480" preserveAspectRatio="none" xlink:href="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/4gxYSUNDX1BST0ZJTEUAAQEAAAxITGlubwIQAABtbnRyUkdCIFhZWiAHzgACAAkABgAxAABhY3NwTVNGVA<ssh-key>"/>
+</defs>
+</svg>

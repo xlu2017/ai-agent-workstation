@@ -1,0 +1,41 @@
+name: 'Setup Python with UV'
+description: 'Sets up Python and UV package manager, using .python-version for version'
+
+inputs:
+  python-version:
+    description: 'Python version to use. Defaults to .python-version file'
+    required: false
+    default: ''
+  python-version-file:
+    description: 'Path to .python-version or similar file'
+    required: false
+    default: '.python-version'
+  uv-version:
+    description: 'UV version to install'
+    required: false
+    default: 'latest'
+  enable-caching:
+    description: 'Enable UV caching'
+    required: false
+    default: 'true'
+
+outputs:
+  python-version:
+    description: 'The installed Python version (e.g., 3.12.0)'
+    value: ${{ steps.setup-python.outputs.python-version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Python
+      id: setup-python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      with:
+        python-version: ${{ inputs.python-version }}
+        python-version-file: ${{ inputs.python-version == '' && inputs.python-version-file || '' }}
+
+    - name: Install UV
+      uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      with:
+        version: ${{ inputs.uv-version }}
+        enable-cache: ${{ inputs.enable-caching }}
