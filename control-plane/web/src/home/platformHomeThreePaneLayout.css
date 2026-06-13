@@ -137,12 +137,13 @@
   opacity: 1;
 }
 
-.platform-session-row-actions button {
+.platform-session-row-actions button,
+.platform-context-icon-button {
   width: 23px;
   height: 23px;
   border: 0;
   border-radius: 7px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--platform-surface);
@@ -150,7 +151,8 @@
   cursor: pointer;
 }
 
-.platform-session-row-actions button:hover {
+.platform-session-row-actions button:hover,
+.platform-context-icon-button:hover {
   color: var(--platform-accent);
 }
 
@@ -175,6 +177,11 @@
 
 .platform-context-card h3 { margin: 0 0 6px; font-size: 14px; display: flex; align-items: center; gap: 6px; }
 .platform-context-card p { margin: 0; color: var(--platform-muted); font-size: 13px; line-height: 1.45; }
+.platform-danger-text { color: var(--platform-danger) !important; }
+.platform-event-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.platform-event-row { border: 1px solid var(--platform-border); border-radius: var(--platform-radius-md); padding: 8px; background: var(--platform-surface-soft); }
+.platform-event-row strong { display: block; font-size: 12px; color: var(--platform-text); margin-bottom: 2px; }
+.platform-event-row span { display: block; font-size: 12px; color: var(--platform-muted); overflow-wrap: anywhere; }
 
 .platform-home-centered-card {
   min-height: 100vh;
