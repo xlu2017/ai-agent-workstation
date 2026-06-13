@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 VENDOR_ID = "skyvern"
-SUPPORTED_ACTIONS = {"web.visual_task", "web.perform_task"}
+SUPPORTED_ACTIONS = {"browser_task.perform", "visual_browser_task.perform", "web.visual_task", "web.perform_task"}
 
 
 def _read_envelope() -> dict[str, Any]:
@@ -39,10 +39,10 @@ def _response(envelope: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": True,
         "status": "adapter_contract_completed",
-        "message": f"Vendored {VENDOR_ID} adapter accepted {action_id}. Configure SKYVERN_COMMAND for live visual-browser execution.",
+        "message": f"Vendored {VENDOR_ID} adapter accepted provider-neutral browser action {action_id}. Configure SKYVERN_COMMAND for live visual-browser execution.",
         "planned_steps": [
-            "Accepted normalized Jubilant Goggles action envelope.",
-            "Mapped action into the Skyvern visual-browser fallback layer.",
+            "Accepted provider-neutral Jubilant Goggles action envelope.",
+            "Mapped browser provider/runtime hints from params into the Skyvern visual-browser fallback layer.",
             "Stopped at the local vendored adapter boundary without launching a browser.",
         ],
         "result": {
