@@ -28,6 +28,11 @@ from pydantic import BaseModel
 
 from adapters.workflow.base import WorkflowAdapter
 from agent_core_client.client import AgentCoreClient, PlanRequest
+from execution.ambient_prompt_context import (
+    ambient_packet_to_agent_core_context,
+    ambient_packet_to_prompt_block,
+    load_ambient_context_packet,
+)
 from live_feed.events import EventStore, EventType, create_event
 from prompt_router.router import RoutingDecision, RoutingInput, RoutingOutput, route_prompt, route_prompt_async
 from sessions.models import Session, SessionStatus, SessionStore, SessionType
@@ -282,6 +287,14 @@ class SessionController:
         if self.workflow_adapter is None:
             return {"error": "workflow adapter not configured"}
 
+        ambient_packet = load_ambient_context_packet(
+            session_id,
+            goal=prompt,
+            sessions_dir=self.sessions_dir,
+        )
+        ambient_context = ambient_packet_to_agent_core_context(ambient_packet)
+        ambient_prompt_block = ambient_packet_to_prompt_block(ambient_packet)
+
         # 1. Emit PLAN_REQUESTED
         self.session_store.update_status(session_id, SessionStatus.PLANNING)
         self.event_store.append(
@@ -289,6 +302,10 @@ class SessionController:
                 EventType.PLAN_REQUESTED, session_id,
                 prompt=prompt,
                 mode_preference=mode_preference,
+                ambient_context_attached=bool(ambient_context),
+                source_candidate_count=len(ambient_context.get("source_candidates", [])),
+                evidence_event_ids=ambient_context.get("evidence_event_ids", []),
+                ambient_prompt_context=ambient_prompt_block[:4000],
             )
         )
 
@@ -300,6 +317,7 @@ class SessionController:
                 prompt=prompt,
                 allowed_actions=session.allowed_actions,
                 mode_preference=mode_preference,
+                ambient_context=ambient_context,
             )
             plan_response = await self.agent_core_client.plan(plan_request)
         except Exception as e:
@@ -363,6 +381,8 @@ class SessionController:
                 EventType.PLAN_GENERATED, session_id,
                 plan=plan,
                 warnings=plan_response.get("warnings", []),
+                ambient_context_attached=bool(ambient_context),
+                source_candidate_count=len(ambient_context.get("source_candidates", [])),
             )
         )
 
@@ -371,6 +391,8 @@ class SessionController:
             "repo_id": session.repo_id,
             "worktree_id": session.worktree_id,
             "allowed_actions": session.allowed_actions,
+            "ambient_context": ambient_context,
+            "ambient_prompt_context": ambient_prompt_block,
         }
         try:
             workflow_result = await self.workflow_adapter.start_plan(
@@ -386,6 +408,7 @@ class SessionController:
                 EventType.PLAN_STARTED, session_id,
                 backend=workflow_result.get("backend", ""),
                 workflow_run_id=workflow_result.get("workflow_run_id", ""),
+                ambient_context_attached=bool(ambient_context),
             )
         )
         self.session_store.update_status(session_id, SessionStatus.EDITING)
@@ -393,6 +416,7 @@ class SessionController:
         return {
             "plan": plan,
             "workflow": workflow_result,
+            "ambient_context": ambient_context,
             "message": "Plan generated and workflow started.",
         }
 
