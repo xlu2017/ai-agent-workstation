@@ -1,5 +1,5 @@
 """
-ExecutionRouter — capability-aware routing to agentic or deterministic executor.
+ExecutionRouter — capability-aware routing to agentic, deterministic, or app automation execution.
 
 Routing policy:
 
@@ -14,7 +14,12 @@ Routing policy:
     apply_patch (with intent), run_tests (when repair/diagnosis requested),
     run_command (when interpretation needed)
 
-  Platform-native (not routed through executors):
+  App automation executor:
+    provider-neutral app actions such as email.create, email.search,
+    message.send, issue.create, browser_task.perform. Provider-specific app
+    choices are params and are dispatched directly to vendor runtimes/adapters.
+
+  Platform-native (not routed through coding executors):
     request_approval, wait_for_approval, request_credential, wait_for_secret,
     record_skipped_validation, restart_service, update_latest_from_github,
     start_service, stop_service, create_pr, check_pr_status, check_ci_status,
@@ -32,6 +37,9 @@ import os
 from typing import Any
 
 from adapters.execution.base import ExecutionAdapter
+from api.app_automation.executor import execute_app_action
+from api.app_automation.models import AppAutomationExecuteRequest
+from api.app_automation.provider_neutral import is_provider_neutral_app_action, resolve_provider_neutral_app_action
 from execution.deterministic_executor import DeterministicExecutor
 from execution.agentic_executor import AgenticExecutor
 from execution.results import ExecutionResult
@@ -61,7 +69,7 @@ CONTEXT_ROUTED_ACTIONS = {
 
 
 class ExecutionRouter:
-    """Capability-aware router selecting agentic or deterministic executor."""
+    """Capability-aware router selecting agentic, deterministic, or app automation execution."""
 
     def __init__(
         self,
@@ -109,7 +117,7 @@ class ExecutionRouter:
     def _route_action(
         self, action_name: str, params: dict[str, Any],
     ) -> tuple[ExecutionAdapter, str, bool, str]:
-        """Determine which executor handles the action.
+        """Determine which coding executor handles the action.
 
         Returns: (adapter, backend_name, is_fallback, fallback_reason)
         """
@@ -197,6 +205,9 @@ class ExecutionRouter:
         params: dict[str, Any],
         context: dict[str, Any],
     ) -> ExecutionResult:
+        if is_provider_neutral_app_action(action_name):
+            return self._execute_app_automation_action(session_id, action_name, params)
+
         adapter, backend_name, is_fallback, fallback_reason = self._route_action(
             action_name, params,
         )
@@ -207,6 +218,37 @@ class ExecutionRouter:
             result.fallback_used = True
             result.fallback_reason = fallback_reason
         return result
+
+    def _execute_app_automation_action(self, session_id: str, action_name: str, params: dict[str, Any]) -> ExecutionResult:
+        try:
+            resolved = resolve_provider_neutral_app_action(action_name, params)
+            request = AppAutomationExecuteRequest(
+                app_id=resolved.app_id,
+                action_id=resolved.action_id,
+                params=resolved.params,
+                session_id=session_id,
+                dry_run=bool(resolved.params.get("dry_run", False)),
+                approval_granted=bool(resolved.params.get("approval_granted") or resolved.params.get("platform_approval_granted")),
+            )
+            result = execute_app_action(request)
+        except Exception as exc:  # pragma: no cover - defensive platform boundary
+            return ExecutionResult(
+                status="failed",
+                backend="app_automation",
+                summary=f"App automation dispatch failed for {action_name}.",
+                error=str(exc),
+                output={"action_name": action_name},
+            )
+
+        status = "succeeded" if result.ok and result.status not in {"needs_approval", "invalid_params"} else "blocked" if result.status in {"needs_approval", "invalid_params"} else "failed"
+        return ExecutionResult(
+            status=status,
+            backend="app_automation",
+            summary=result.message,
+            output=result.model_dump(),
+            error=result.error.get("message", "") if result.error else "",
+            files_touched=[],
+        )
 
     def _get_adapter(self) -> ExecutionAdapter:
         """Resolve the primary adapter; raises RuntimeError if none configured."""
