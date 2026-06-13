@@ -72,7 +72,7 @@ export default function PlatformGraphSessionWorkspaceScreen({
   }
 
   return (
-    <PlatformHomeThreePaneShell activeSession={session} onNavigate={onNavigate}>
+    <PlatformHomeThreePaneShell activeSession={session} onActiveSessionUpdated={setSession} onNavigate={onNavigate}>
       <div className="graph-session-page workspace-shell">
         <header className="graph-session-header">
           <button className="home-link" onClick={() => onNavigate('/')}>← New session</button>
