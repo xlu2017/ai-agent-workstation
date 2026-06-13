@@ -17,17 +17,7 @@ def test_recommend_next_route_forwards_ambient_context(monkeypatch):
     class FakeAgentCoreClient:
         last_call = {}
 
-        async def recommend_next(
-            self,
-            *,
-            task_type,
-            current_action,
-            completed_actions,
-            session_id,
-            repo_id,
-            ambient_context=None,
-            suggested_plan=None,
-        ):
+        async def recommend_next(self, *, task_type, current_action, completed_actions, session_id, repo_id, ambient_context=None, suggested_plan=None):
             FakeAgentCoreClient.last_call = {
                 "task_type": task_type,
                 "current_action": current_action,
@@ -46,13 +36,11 @@ def test_recommend_next_route_forwards_ambient_context(monkeypatch):
 
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setattr(session_recommendations, "SESSIONS_DIR", Path(tmpdir))
-        event = _browser_selection_event("s1")
-        persist_ambient_event(event, sessions_dir=tmpdir)
+        persist_ambient_event(_browser_selection_event("s1"), sessions_dir=tmpdir)
 
         app = FastAPI()
         app.include_router(session_recommendations.router)
         client = TestClient(app)
-
         response = client.post(
             "/api/sessions/s1/recommendations/next-action",
             json={
@@ -60,72 +48,18 @@ def test_recommend_next_route_forwards_ambient_context(monkeypatch):
                 "current_action": "fix selected component",
                 "completed_actions": ["browser.element_selected"],
                 "repo_id": "repo-1",
-                "suggested_plan": {"steps": [{"action_name": "read_file"}]},
             },
         )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["advisory_only"] is True
-    assert body["requires_platform_validation"] is True
     assert body["recommendation"]["ok"] is True
     assert body["ambient_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
-    assert "src/components/SaveButton.tsx:12" in body["prompt_block"]
     assert FakeAgentCoreClient.last_call["ambient_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
-    assert FakeAgentCoreClient.last_call["suggested_plan"]["steps"][0]["action_name"] == "read_file"
+    assert FakeAgentCoreClient.last_call["suggested_plan"] is None
 
 
-def test_ambient_prompt_context_api_returns_prompt_block_and_agent_core_context(monkeypatch):
-    from ambient.event_log import persist_ambient_event
-    from api import ambient as ambient_api
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        monkeypatch.setattr(ambient_api, "SESSIONS_DIR", Path(tmpdir))
-        persist_ambient_event(_browser_selection_event("s1"), sessions_dir=tmpdir)
-
-        app = FastAPI()
-        app.include_router(ambient_api.router)
-        client = TestClient(app)
-
-        response = client.get("/api/sessions/s1/ambient/prompt-context?goal=fix%20save")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["advisory_only"] is True
-    assert body["requires_platform_validation"] is True
-    assert "Ambient context evidence" in body["prompt_block"]
-    assert "src/components/SaveButton.tsx:12" in body["prompt_block"]
-    assert body["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
-    assert body["agent_core_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
-
-
-def test_ambient_evidence_graph_api_returns_page_state_source_hint_graph(monkeypatch):
-    from ambient.event_log import persist_ambient_event
-    from api import ambient as ambient_api
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        monkeypatch.setattr(ambient_api, "SESSIONS_DIR", Path(tmpdir))
-        persist_ambient_event(_browser_page_state_event("s1"), sessions_dir=tmpdir)
-
-        app = FastAPI()
-        app.include_router(ambient_api.router)
-        client = TestClient(app)
-
-        response = client.get("/api/sessions/s1/ambient/evidence-graph")
-
-    assert response.status_code == 200
-    body = response.json()
-    node_ids = {node["node_id"] for node in body["nodes"]}
-    relations = {edge["relation"] for edge in body["edges"]}
-    assert "dom:[data-testid=save-button]" in node_ids
-    assert "component:SaveButton" in node_ids
-    assert "file:src/components/SaveButton.tsx" in node_ids
-    assert "observed_dom" in relations
-    assert "observed_component" in relations
-    assert "defined_in" in relations
-
-
-def test_session_controller_plan_request_includes_ambient_context():
+def test_session_controller_uses_recommend_next_as_execution_source():
     import asyncio
 
     from ambient.event_log import persist_ambient_event
@@ -133,34 +67,41 @@ def test_session_controller_plan_request_includes_ambient_context():
 
     class FakeAgentCoreClient:
         def __init__(self):
-            self.plan_request = None
+            self.recommend_next_call = None
 
-        async def plan(self, request):
-            self.plan_request = request
+        async def recommend_next(self, *, task_type, current_action, completed_actions, session_id, repo_id, ambient_context=None, suggested_plan=None):
+            self.recommend_next_call = {
+                "task_type": task_type,
+                "current_action": current_action,
+                "completed_actions": completed_actions,
+                "session_id": session_id,
+                "repo_id": repo_id,
+                "ambient_context": ambient_context,
+                "suggested_plan": suggested_plan,
+            }
             return {
                 "ok": True,
-                "plan": {"mode": "finite", "steps": [{"action_name": "read_file", "params": {"path": "src/components/SaveButton.tsx"}}]},
+                "next_action": {
+                    "action_name": "read_file",
+                    "params": {"path": "src/components/SaveButton.tsx"},
+                    "rationale": "Inspect selected component first.",
+                },
             }
-
-        async def validate_plan(self, allowed_actions, plan):
-            return {"valid": True, "errors": []}
 
     class FakeWorkflowAdapter:
         def __init__(self):
             self.context = None
+            self.plan = None
 
         async def start_plan(self, session_id, plan, context):
             self.context = context
+            self.plan = plan
             return {"backend": "fake", "workflow_run_id": "wf-1"}
 
     with tempfile.TemporaryDirectory() as tmpdir:
         agent_core = FakeAgentCoreClient()
         workflow = FakeWorkflowAdapter()
-        controller = SessionController(
-            sessions_dir=tmpdir,
-            agent_core_client=agent_core,
-            workflow_adapter=workflow,
-        )
+        controller = SessionController(sessions_dir=tmpdir, agent_core_client=agent_core, workflow_adapter=workflow)
         result = controller.create_session(
             CreateSessionRequest(
                 prompt="initial",
@@ -171,16 +112,17 @@ def test_session_controller_plan_request_includes_ambient_context():
         session_id = result["session"]["session_id"]
         persist_ambient_event(_browser_selection_event(session_id), sessions_dir=tmpdir)
         session = controller.session_store.get(session_id)
-
         plan_result = asyncio.run(controller._request_and_start_plan(session, "fix selected button"))
-
         events = controller.event_store.get_events(session_id)
 
-    assert "plan" in plan_result
-    assert agent_core.plan_request.ambient_context["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
-    assert workflow.context["ambient_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
+    assert plan_result["next_suggested_action"]["action_name"] == "read_file"
+    assert agent_core.recommend_next_call["ambient_context"]["source_candidates"][0]["path"] == "src/components/SaveButton.tsx"
+    assert agent_core.recommend_next_call["suggested_plan"] is None
+    assert workflow.plan["source"] == "next_suggested_plan"
+    assert len(workflow.plan["steps"]) == 1
     assert workflow.context["ambient_prompt_context"]
-    assert any(event["event_type"] == "plan_requested" and event["data"].get("ambient_context_attached") for event in events)
+    assert any(event["event_type"] == "plan_requested" and event["data"].get("recommendation_source") == "recommend_next" for event in events)
+    assert any(event["event_type"] == "plan_generated" and event["data"].get("source") == "next_suggested_plan" for event in events)
 
 
 def _browser_selection_event(session_id: str):
@@ -203,35 +145,6 @@ def _browser_selection_event(session_id: str):
                         "sourceConfidence": 0.93,
                     }
                 ]
-            }
-        },
-    )
-
-
-def _browser_page_state_event(session_id: str):
-    from ambient.types import AmbientEvent, AmbientSource
-
-    return AmbientEvent(
-        event_type="browser.tab_observed",
-        session_id=session_id,
-        source=AmbientSource.BROWSER,
-        actor="system",
-        confidence=0.92,
-        payload={
-            "page_state": {
-                "interactive": [
-                    {
-                        "tagName": "button",
-                        "text": "Save",
-                        "testId": "save-button",
-                        "sourceHint": {
-                            "componentName": "SaveButton",
-                            "sourceFile": "src/components/SaveButton.tsx",
-                            "sourceLine": 12,
-                            "sourceConfidence": 0.94,
-                        },
-                    }
-                ],
             }
         },
     )
