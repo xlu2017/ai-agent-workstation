@@ -2,10 +2,17 @@ import { useState } from 'react'
 import { Activity, FileText, GitBranch, Info, Monitor, RefreshCw } from 'lucide-react'
 import type { GraphSession, GraphSessionEvent } from './types'
 import { usePlatformHomeActiveGraphSessionEvents } from './usePlatformHomeActiveGraphSessionEvents'
+import PlatformHomeAttachRepositoryToActiveSessionCard from './PlatformHomeAttachRepositoryToActiveSessionCard'
 
 type RightPaneTab = 'worklog' | 'changes' | 'desktop'
 
-export default function PlatformHomeRightContextPane({ activeSession }: { activeSession?: GraphSession | null }) {
+export default function PlatformHomeRightContextPane({
+  activeSession,
+  onActiveSessionUpdated,
+}: {
+  activeSession?: GraphSession | null
+  onActiveSessionUpdated?: (session: GraphSession) => void
+}) {
   const [activeTab, setActiveTab] = useState<RightPaneTab>('worklog')
   const repoAttached = Boolean(activeSession?.metadata?.repo_session_id || activeSession?.metadata?.repo_attached_at_start)
   const eventState = usePlatformHomeActiveGraphSessionEvents(activeSession?.id)
@@ -21,7 +28,7 @@ export default function PlatformHomeRightContextPane({ activeSession }: { active
         </div>
       </div>
       <div className="platform-pane-body">
-        {activeTab === 'worklog' && <WorklogContext activeSession={activeSession} repoAttached={repoAttached} events={eventState.events} loading={eventState.loadingEvents} error={eventState.eventError} onRefresh={eventState.loadEvents} />}
+        {activeTab === 'worklog' && <WorklogContext activeSession={activeSession} repoAttached={repoAttached} events={eventState.events} loading={eventState.loadingEvents} error={eventState.eventError} onRefresh={eventState.loadEvents} onActiveSessionUpdated={onActiveSessionUpdated} />}
         {activeTab === 'changes' && <ChangesContext events={eventState.events} />}
         {activeTab === 'desktop' && <DesktopContext />}
       </div>
@@ -36,6 +43,7 @@ function WorklogContext({
   loading,
   error,
   onRefresh,
+  onActiveSessionUpdated,
 }: {
   activeSession?: GraphSession | null
   repoAttached: boolean
@@ -43,6 +51,7 @@ function WorklogContext({
   loading: boolean
   error: string
   onRefresh: () => void
+  onActiveSessionUpdated?: (session: GraphSession) => void
 }) {
   return (
     <>
@@ -55,6 +64,7 @@ function WorklogContext({
         <h3><GitBranch size={14} /> Repository scope</h3>
         <p>{repoAttached ? 'Repo context is mounted for this session.' : 'No repo context is mounted. Select one before file edits or tests.'}</p>
       </section>
+      {activeSession && !repoAttached && <PlatformHomeAttachRepositoryToActiveSessionCard activeSession={activeSession} onSessionUpdated={onActiveSessionUpdated} />}
       <section className="platform-context-card">
         <h3><Activity size={14} /> Worklog <button className="platform-context-icon-button" onClick={onRefresh} title="Refresh events"><RefreshCw size={12} /></button></h3>
         {error && <p className="platform-danger-text">{error}</p>}
