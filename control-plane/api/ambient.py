@@ -16,11 +16,13 @@ from ambient.evidence_graph import build_evidence_graph, write_evidence_graph
 from ambient.reducers import reduce_ambient_events
 from ambient.service import AmbientObservationService
 from ambient.source_candidates import build_source_candidates
+from ambient.source_validation import validate_ambient_source_candidates
 from ambient.types import AmbientEvent
 from ambient.vendor_registry import ambient_vendor_status
 from execution.ambient_prompt_context import ambient_packet_to_agent_core_context, ambient_packet_to_prompt_block
 
 SESSIONS_DIR = Path(os.environ.get("SESSIONS_DIR", "/opt/workstation/sessions"))
+REPOS_DIR = Path(os.environ.get("REPOS_DIR", "/opt/workstation/repos"))
 
 router = APIRouter(prefix="/api/sessions/{session_id}/ambient", tags=["ambient-context"])
 
@@ -192,6 +194,22 @@ def get_ambient_source_candidates(session_id: str, limit: int = 500, collect: bo
         "session_id": session_id,
         "source_candidates": build_source_candidates(events),
     }
+
+
+@router.get("/source-candidates/validated")
+def get_validated_ambient_source_candidates(session_id: str, limit: int = 500, collect: bool = Query(False)):
+    """Return source candidates with explicit session-worktree validation metadata."""
+
+    if collect:
+        AmbientObservationService(get_ambient_config()).collect_once(session_id=session_id)
+    events = load_ambient_events(session_id, sessions_dir=SESSIONS_DIR, limit=limit)
+    return validate_ambient_source_candidates(
+        session_id,
+        events,
+        sessions_dir=SESSIONS_DIR,
+        repos_dir=REPOS_DIR,
+        max_candidates=limit,
+    )
 
 
 @router.get("/evidence-graph")
