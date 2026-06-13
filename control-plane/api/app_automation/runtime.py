@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -14,9 +15,15 @@ from api.app_automation.adapter_base import AdapterExecution
 from api.app_automation.models import AppAction, AppAutomationExecuteRequest
 from api.repo_provider import get_repo_provider_token
 
+LOCAL_ADAPTER_FILENAME = "jubilant_goggles_adapter.py"
+
 
 def _mock_enabled() -> bool:
     return os.environ.get("APP_AUTOMATION_MOCK", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _local_vendor_adapters_enabled() -> bool:
+    return os.environ.get("APP_AUTOMATION_LOCAL_VENDOR_ADAPTERS", "true").lower() not in {"0", "false", "no", "off"}
 
 
 def _json_request(method: str, url: str, headers: dict[str, str] | None = None, payload: dict[str, Any] | None = None, timeout: int = 20) -> dict[str, Any]:
@@ -95,12 +102,12 @@ def _execute_mcp_servers(source_path: Path, action: AppAction, request: AppAutom
         return _github_search_repo(source_path, request)
     if action.id == "github.create_issue":
         return _github_create_issue(source_path, request)
-    return AdapterExecution(
-        ok=False,
-        status="action_not_supported_by_adapter",
-        message=f"Vendored MCP reference adapter does not yet implement {action.id}.",
-        planned_steps=["MCP source is present.", "Implement process/client transport for this tool before live use."],
-        error={"code": "ACTION_NOT_SUPPORTED_BY_ADAPTER", "message": f"MCP adapter does not implement {action.id}."},
+    return _execute_local_vendor_adapter(
+        "mcp_servers",
+        source_path,
+        action,
+        request,
+        missing_message=f"Vendored MCP reference adapter does not yet implement {action.id}.",
     )
 
 
@@ -174,15 +181,13 @@ def _github_create_issue(source_path: Path, request: AppAutomationExecuteRequest
 def _execute_http_or_configured(vendor_id: str, source_path: Path, action: AppAction, request: AppAutomationExecuteRequest, env_name: str) -> AdapterExecution:
     url = os.environ.get(env_name)
     if not url:
-        return AdapterExecution(
-            ok=False,
-            status="runtime_not_configured",
-            message=f"{vendor_id} source is vendored, but {env_name} is not configured for live execution.",
-            planned_steps=[
-                f"Loaded vendored source from {source_path}.",
-                f"Set {env_name} to enable live {vendor_id} execution through a controlled endpoint.",
-            ],
-            error={"code": "RUNTIME_NOT_CONFIGURED", "message": f"Set {env_name} to enable live execution."},
+        return _execute_local_vendor_adapter(
+            vendor_id,
+            source_path,
+            action,
+            request,
+            missing_message=f"{vendor_id} source is vendored, but {env_name} is not configured for live external execution.",
+            missing_env=env_name,
         )
     payload = {"app_id": action.app_id, "action_id": action.id, "params": request.params, "session_id": request.session_id}
     try:
@@ -201,16 +206,51 @@ def _execute_http_or_configured(vendor_id: str, source_path: Path, action: AppAc
 def _execute_command_or_configured(vendor_id: str, source_path: Path, action: AppAction, request: AppAutomationExecuteRequest, env_name: str) -> AdapterExecution:
     command = os.environ.get(env_name)
     if not command:
-        return AdapterExecution(
-            ok=False,
-            status="runtime_not_configured",
-            message=f"{vendor_id} source is vendored, but {env_name} is not configured for live execution.",
-            planned_steps=[
-                f"Loaded vendored source from {source_path}.",
-                f"Set {env_name} to a controlled command that accepts a JSON envelope on stdin.",
-            ],
-            error={"code": "RUNTIME_NOT_CONFIGURED", "message": f"Set {env_name} to enable live execution."},
+        return _execute_local_vendor_adapter(
+            vendor_id,
+            source_path,
+            action,
+            request,
+            missing_message=f"{vendor_id} source is vendored, but {env_name} is not configured for live external execution.",
+            missing_env=env_name,
         )
+    return _execute_command(vendor_id, source_path, action, request, command, planned_note=f"Ran controlled command from {env_name}.")
+
+
+def _execute_local_vendor_adapter(
+    vendor_id: str,
+    source_path: Path,
+    action: AppAction,
+    request: AppAutomationExecuteRequest,
+    missing_message: str,
+    missing_env: str | None = None,
+) -> AdapterExecution:
+    adapter_path = source_path / LOCAL_ADAPTER_FILENAME
+    if _local_vendor_adapters_enabled() and adapter_path.exists():
+        return _execute_command(
+            vendor_id,
+            source_path,
+            action,
+            request,
+            f"{shlex.quote(sys.executable)} {shlex.quote(str(adapter_path))}",
+            planned_note=f"Ran vendored local adapter {LOCAL_ADAPTER_FILENAME}.",
+        )
+
+    planned_steps = [f"Loaded vendored source from {source_path}."]
+    if missing_env:
+        planned_steps.append(f"Set {missing_env} or add {LOCAL_ADAPTER_FILENAME} to enable non-dry-run adapter dispatch.")
+    else:
+        planned_steps.append(f"Add {LOCAL_ADAPTER_FILENAME} to enable non-dry-run adapter dispatch.")
+    return AdapterExecution(
+        ok=False,
+        status="runtime_not_configured",
+        message=missing_message,
+        planned_steps=planned_steps,
+        error={"code": "RUNTIME_NOT_CONFIGURED", "message": missing_message},
+    )
+
+
+def _execute_command(vendor_id: str, source_path: Path, action: AppAction, request: AppAutomationExecuteRequest, command: str, planned_note: str) -> AdapterExecution:
     envelope = json.dumps({"app_id": action.app_id, "action_id": action.id, "params": request.params, "session_id": request.session_id})
     try:
         result = subprocess.run(shlex.split(command), input=envelope, capture_output=True, text=True, timeout=120, cwd=source_path)
@@ -223,10 +263,21 @@ def _execute_command_or_configured(vendor_id: str, source_path: Path, action: Ap
         parsed = json.loads(result.stdout) if result.stdout.strip() else {"stdout": ""}
     except json.JSONDecodeError:
         parsed = {"stdout": result.stdout[-4000:]}
+
+    if isinstance(parsed, dict) and {"ok", "status", "message"}.issubset(parsed):
+        return AdapterExecution(
+            ok=bool(parsed.get("ok")),
+            status=str(parsed.get("status")),
+            message=str(parsed.get("message")),
+            planned_steps=[f"Loaded vendored source from {source_path}.", planned_note, *parsed.get("planned_steps", [])],
+            result=parsed.get("result") if isinstance(parsed.get("result"), dict) else {"vendor_response": parsed},
+            error=parsed.get("error") if isinstance(parsed.get("error"), dict) else None,
+        )
+
     return AdapterExecution(
         ok=True,
         status="completed",
         message=f"{vendor_id} action completed through configured command.",
-        planned_steps=[f"Loaded vendored source from {source_path}.", f"Ran controlled command from {env_name}."],
+        planned_steps=[f"Loaded vendored source from {source_path}.", planned_note],
         result={"vendor_response": parsed},
     )
