@@ -44,18 +44,17 @@ def _session_context(session: Any, prompt: str) -> dict[str, Any]:
 
 
 def _fallback_direct_answer(prompt: str) -> str:
-    """Return deterministic answers only for trivial fallback cases.
-
-    The configured LLM is the preferred source for question-only chat. This helper
-    exists so graph chat still behaves sanely when agent-core is unavailable.
-    """
+    """Return deterministic answers only for trivial fallback cases."""
 
     text = " ".join(prompt.strip().lower().split()).rstrip("?")
-    if text == "are you fat":
+    tokens = text.split()
+    if len(tokens) >= 3 and tokens[0] in {"who", "what"} and tokens[1] in {"are", "r"} and tokens[2] in {"you", "u"}:
+        return "I am an AI agent to help you understand, plan, and work on software tasks."
+    if text.startswith("are you "):
         return "No."
     if text in {"is the world round", "is earth round", "is the earth round"}:
         return "Yes. Earth is roughly spherical, more precisely an oblate spheroid."
-    return "I can answer that, but the configured LLM is unavailable right now."
+    return "I can answer that, but no direct answer is available yet."
 
 
 def _parse_route_params(params: Any, reason: str, source: str, payload: dict[str, Any]) -> PromptRouteRecommendation | None:
@@ -112,6 +111,11 @@ def _parse_recommendation(payload: dict[str, Any]) -> PromptRouteRecommendation 
     return _parse_next_task_decision(payload) or _parse_legacy_recommendation(payload)
 
 
+def _is_self_description_question(text: str) -> bool:
+    tokens = text.replace("?", "").split()
+    return len(tokens) >= 3 and tokens[0] in {"who", "what"} and tokens[1] in {"are", "r"} and tokens[2] in {"you", "u"}
+
+
 def _local_route_fallback(session: Any, prompt: str, source: str, reason: str) -> PromptRouteRecommendation:
     text = " ".join(prompt.strip().lower().split())
     root_phrases = ("new session", "new root", "separate session", "different goal", "unrelated task", "unrelated goal", "start over")
@@ -125,6 +129,23 @@ def _local_route_fallback(session: Any, prompt: str, source: str, reason: str) -
         return PromptRouteRecommendation("create_child_goal", "User requested a separately tracked subtask.", source, {})
     question_like = text.endswith("?") or any(text.startswith(prefix) for prefix in question_prefixes)
     has_action_word = any(word in action_words for word in text.replace("?", "").split())
+    has_repo_context = bool(session.metadata.get("repo_session_id"))
+    if question_like and not has_action_word and _is_self_description_question(text):
+        return PromptRouteRecommendation(
+            "question_only",
+            reason,
+            source,
+            {},
+            assistant_response=_fallback_direct_answer(prompt),
+            response_session_kind="question",
+        )
+    if question_like and not has_action_word and has_repo_context:
+        return PromptRouteRecommendation(
+            "continue_active",
+            "Prompt is explanatory, but repo context is attached; inspect repository context before answering.",
+            source,
+            {},
+        )
     if question_like and not has_action_word:
         return PromptRouteRecommendation(
             "question_only",
