@@ -8,7 +8,6 @@ adapter boundary.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from live_feed.events import EventType
@@ -18,10 +17,6 @@ from api.app_automation.event_log import emit_app_automation_event, redact_sensi
 from api.app_automation.models import AppAutomationExecuteRequest, AppAutomationExecuteResult
 from api.app_automation.registry import CONTROL_PLANE_ROOT, get_action, list_vendor_tools
 from api.app_automation.vendor_plan import build_action_plan
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _planned_steps(action, request: AppAutomationExecuteRequest, route_plan: dict[str, Any] | None = None) -> list[str]:
@@ -74,9 +69,6 @@ def _selected_candidate_installed(route_plan: dict[str, Any]) -> bool:
 
 def _make_base_event(action, request: AppAutomationExecuteRequest, route_plan: dict[str, Any], selected_vendor: str | None, selected_layer: str | None) -> dict[str, Any]:
     return {
-        "event_type": EventType.APP_AUTOMATION_PLANNED.value,
-        "timestamp": _now(),
-        "session_id": request.session_id,
         "app_id": request.app_id,
         "action_id": request.action_id,
         "vendor": selected_vendor,
@@ -139,7 +131,6 @@ def _validate_params(action, params: dict[str, Any]) -> dict[str, Any] | None:
 def _failure_event(base_event: dict[str, Any], status: str, message: str, error: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         **base_event,
-        "event_type": EventType.APP_AUTOMATION_FAILED.value,
         "status": status,
         "message": message,
         "error": error,
