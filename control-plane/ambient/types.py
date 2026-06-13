@@ -93,6 +93,7 @@ class ContextPacket(BaseModel):
     latest: dict[str, Any] = Field(default_factory=dict)
     recent_observations: list[str] = Field(default_factory=list)
     relevant_files: list[str] = Field(default_factory=list)
+    source_candidates: list[dict[str, Any]] = Field(default_factory=list)
     evidence_event_ids: list[str] = Field(default_factory=list)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     privacy: PrivacyMark = Field(default_factory=PrivacyMark)
