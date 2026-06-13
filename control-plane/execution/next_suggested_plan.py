@@ -7,6 +7,14 @@ class NextSuggestedPlanError(ValueError):
     """Raised when a recommend-next payload cannot be converted to one executable action."""
 
 
+class NextSuggestedStop(NextSuggestedPlanError):
+    """Raised when recommend-next deliberately returns a terminal stop decision."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason or "recommend-next returned stop")
+        self.reason = reason or "recommend-next returned stop"
+
+
 def next_suggestion_to_plan(
     *,
     prompt: str,
@@ -24,10 +32,13 @@ def next_suggestion_to_plan(
 
     raw = _recommendation_payload(recommendation)
     _reject_plan_shaped_payload(raw)
+    if raw.get("decision") == "stop":
+        raise NextSuggestedStop(str(raw.get("reason") or raw.get("progress_note") or "recommend-next returned stop"))
+
     action = _extract_action(raw)
     action_name = str(action.get("action_name") or action.get("name") or "").strip()
     if not action_name:
-        raise NextSuggestedPlanError("recommend-next response did not include an action_name")
+        raise NextSuggestedPlanError("recommend-next response did not include an action_name or task_name")
 
     params = action.get("params") or action.get("parameters") or {}
     if not isinstance(params, dict):
@@ -55,9 +66,17 @@ def next_suggestion_to_plan(
 def _recommendation_payload(recommendation: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(recommendation, dict):
         raise NextSuggestedPlanError("recommend-next response must be an object")
-    nested = recommendation.get("recommendation")
-    if isinstance(nested, dict):
-        return nested
+
+    next_task_decision = recommendation.get("next_task_decision")
+    legacy_recommendation = recommendation.get("recommendation")
+
+    if isinstance(next_task_decision, dict):
+        if next_task_decision.get("decision") == "stop" or not isinstance(legacy_recommendation, dict):
+            return next_task_decision
+
+    if isinstance(legacy_recommendation, dict):
+        return legacy_recommendation
+
     return recommendation
 
 
@@ -71,10 +90,14 @@ def _reject_plan_shaped_payload(raw: dict[str, Any]) -> None:
 
 
 def _extract_action(raw: dict[str, Any]) -> dict[str, Any]:
+    task_name = raw.get("task_name")
+    if isinstance(task_name, str) and task_name.strip():
+        return {"action_name": task_name, "params": raw.get("params") or {}}
+
     for key in ("next_action", "suggested_action", "action"):
         value = raw.get(key)
         if isinstance(value, dict):
             return value
         if isinstance(value, str):
             return {"action_name": value, "params": {}}
-    raise NextSuggestedPlanError("recommend-next response did not include next_action, suggested_action, or action")
+    raise NextSuggestedPlanError("recommend-next response did not include next_action, suggested_action, action, or task_name")
