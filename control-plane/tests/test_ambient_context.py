@@ -88,6 +88,74 @@ def test_context_packet_includes_browser_source_candidates():
     assert "src/features/auth/LoginForm.tsx" in packet.relevant_files
 
 
+def test_browser_cdp_playwright_page_extracts_tab_network_console_and_ax_events():
+    from ambient.collectors.browser_cdp import BrowserCdpCollector
+
+    class FakeCdpSession:
+        def send(self, method, params=None):
+            if method == "Accessibility.getFullAXTree":
+                return {"nodes": [{"role": {"value": "button"}, "name": {"value": "Save"}, "ignored": False}]}
+            if method == "DOM.getDocument":
+                return {
+                    "root": {
+                        "nodeName": "HTML",
+                        "nodeType": 1,
+                        "attributes": [],
+                        "children": [
+                            {
+                                "nodeName": "BUTTON",
+                                "nodeType": 1,
+                                "attributes": ["data-testid", "save", "data-source", "src/App.tsx"],
+                                "children": [],
+                            }
+                        ],
+                    }
+                }
+            raise AssertionError(method)
+
+        def detach(self):
+            return None
+
+    class FakeContext:
+        def new_cdp_session(self, page):
+            return FakeCdpSession()
+
+    class FakePage:
+        url = "http://localhost:5173"
+        context = FakeContext()
+
+        def title(self):
+            return "App"
+
+        def evaluate(self, script):
+            return {
+                "readyState": "complete",
+                "title": "App",
+                "url": self.url,
+                "interactive": [{"tagName": "button", "text": "Save", "testId": "save"}],
+                "networkRequests": [{"name": "http://localhost:5173/api/save", "initiatorType": "fetch", "duration": 12}],
+                "consoleEvents": [{"level": "error", "message": "boom", "timestamp": "2026-01-01T00:00:00Z"}],
+            }
+
+    events = BrowserCdpCollector()._events_from_playwright_page(
+        "s1",
+        FakePage(),
+        "http://127.0.0.1:9222",
+        repo_id="r1",
+        worktree_id="/tmp/repo",
+        branch="main",
+    )
+
+    event_types = [event.event_type for event in events]
+    assert event_types == ["browser.tab_observed", "browser.network_request", "browser.console_log"]
+    tab = events[0]
+    assert tab.payload["page_state"]["interactive"][0]["testId"] == "save"
+    assert tab.payload["accessibility"]["nodes"][0]["role"] == "button"
+    assert tab.payload["dom_snapshot"]["children"][0]["attributes"]["data-source"] == "src/App.tsx"
+    assert events[1].payload["request"]["initiatorType"] == "fetch"
+    assert events[2].payload["message"] == "boom"
+
+
 def test_ambient_event_persistence_mirrors_live_feed():
     from ambient.collectors.terminal_collector import TerminalObservationBuilder
     from ambient.event_log import load_ambient_events, persist_ambient_event
