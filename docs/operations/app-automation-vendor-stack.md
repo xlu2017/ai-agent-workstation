@@ -12,21 +12,68 @@ control-plane/vendor/app-automation/manifest.json
 
 Selected tools:
 
-| Tool | Role | Execution kinds |
-| --- | --- | --- |
-| Activepieces | workflow engine and MCP-capable connector/piece catalog | workflow, MCP |
-| Composio | app API toolkit and auth bridge | API, MCP |
-| MCP reference servers | reference server catalog and protocol examples | MCP |
-| n8n | deterministic workflow engine | workflow |
-| Stagehand | TypeScript browser-agent SDK | browser |
-| Browser Use | Python browser-agent runtime | browser |
-| Skyvern | visual browser workflow runtime | browser, visual browser |
+| Tool | Layer | Role | Execution kinds |
+| --- | --- | --- | --- |
+| Composio | API | API toolkit and app account bridge | API, MCP |
+| MCP reference servers | MCP | protocol examples and local/server tool references | MCP |
+| Activepieces | Workflow | connector workflows and approval-capable automations | workflow, MCP |
+| n8n | Workflow | deterministic long-running workflows and webhooks | workflow |
+| Stagehand | Browser | TypeScript browser-agent SDK for DOM-aware web apps | browser |
+| Browser Use | Browser | Python browser-agent runtime | browser |
+| Skyvern | Visual browser | screenshot/vision fallback for brittle web apps | browser, visual_browser |
 
 The stack intentionally covers APIs, MCP, deterministic workflows, browser automation, and visual browser fallback.
 
+## How the vendors work together
+
+The control plane treats these vendors as a ladder, not as peers that all run at once.
+
+```text
+api -> mcp -> workflow -> browser -> visual_browser -> desktop
+```
+
+Default coordination rules:
+
+1. Prefer native API execution when an app has a reliable API surface.
+2. Use MCP when a tool protocol boundary is useful or the tool is local/server-oriented.
+3. Use workflow engines for repeatable multi-step app automations.
+4. Use browser agents when there is no reliable API/MCP route.
+5. Use visual browser automation only when DOM/browser automation is insufficient.
+6. Use desktop automation only as a final fallback.
+
+## Vendor responsibilities
+
+### Composio
+
+Use for API-first SaaS actions such as Gmail search, Slack actions, Linear, Notion, HubSpot, and Google Calendar. It should usually be the first choice for stable read-only or account-scoped app actions.
+
+### MCP reference servers
+
+Use for protocol-level tools and local/server tool examples. MCP schema validation is not authorization; the platform must still validate policy, workspace, app, and approval requirements.
+
+### Activepieces
+
+Use for connector workflows, approval-friendly flows, and app-to-app automation. It is the preferred workflow vendor for Google Sheets append, Jira create issue, Discord send message, and similar deterministic automations.
+
+### n8n
+
+Use for larger self-hosted or webhook-heavy workflows after license and deployment review. It is a secondary workflow route behind Activepieces for most current seed actions.
+
+### Stagehand
+
+Use for DOM-aware browser workflows when API/MCP coverage is absent. It should usually run before Browser Use and Skyvern for normal web-app pages.
+
+### Browser Use
+
+Use as a Python-native browser automation fallback for natural-language web navigation when Stagehand is not the right runtime.
+
+### Skyvern
+
+Use as visual-browser fallback for unstable DOMs and pages where visual evidence is more reliable than selectors. Do not make it the default while API/MCP/browser routes are available.
+
 ## Current vendored-source status
 
-The selected provider source trees are now present under:
+The selected provider source trees are present under:
 
 ```text
 control-plane/vendor/app-automation/<tool>/source
@@ -65,14 +112,16 @@ Endpoints:
 
 ```text
 GET  /api/app-automation/vendors
+GET  /api/app-automation/capabilities
 GET  /api/app-automation/actions
+GET  /api/app-automation/actions/{action_id}/plan
 POST /api/app-automation/execute
 ```
 
 The execute endpoint now has a committed-vendor scaffold path:
 
 1. action lookup
-2. vendor selection
+2. vendor route plan construction
 3. risk classification
 4. approval gate
 5. dry-run plan
@@ -82,41 +131,29 @@ The execute endpoint now has a committed-vendor scaffold path:
 
 Live runtime invocation is still intentionally blocked until one vendor adapter is explicitly wired and tested.
 
-## Adapter scaffold files
+## Routing scaffold files
 
 ```text
+control-plane/api/app_automation/models.py
+control-plane/api/app_automation/vendor_plan.py
 control-plane/api/app_automation/adapter_base.py
 control-plane/api/app_automation/vendor_adapters.py
 control-plane/api/app_automation/executor.py
 ```
 
-`adapter_base.py` defines the normalized health/result contract for vendor adapters. `vendor_adapters.py` declares one adapter class per selected provider. `executor.py` dispatches approved non-dry-run requests into the scaffolded adapter boundary once source is present.
+`vendor_plan.py` defines the capability matrix and per-action fallback chain. `adapter_base.py` defines the normalized health/result contract. `vendor_adapters.py` declares one adapter class per selected provider. `executor.py` dispatches approved non-dry-run requests into the selected scaffolded adapter once source is present.
 
-## Seed app actions
+## Seed app action routing
 
-The scaffold seeds actions for:
+Examples:
 
-- GitHub
-- Slack
-- Gmail
-- Google Calendar
-- Google Sheets
-- Notion
-- Linear
-- Jira
-- Discord
-- HubSpot
-- generic web/browser tasks
-
-## Execution ladder
-
-Default selection order:
-
-```text
-api -> mcp -> workflow -> browser -> visual_browser -> desktop
-```
-
-Use API/MCP when the app has reliable native integration. Use workflow engines for deterministic multi-step app automations. Use browser or visual-browser automation when no stable API/MCP surface exists.
+| Action | Vendor ladder |
+| --- | --- |
+| `github.search_repo` | MCP servers -> Composio |
+| `slack.send_message` | Composio -> Activepieces -> n8n |
+| `google_sheets.append_row` | Activepieces -> Composio -> n8n |
+| `web.perform_task` | Stagehand -> Browser Use -> Skyvern |
+| `web.visual_task` | Skyvern -> Stagehand -> Browser Use |
 
 ## Approval policy
 
