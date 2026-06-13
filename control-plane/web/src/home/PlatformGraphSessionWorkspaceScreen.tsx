@@ -17,6 +17,8 @@ export default function PlatformGraphSessionWorkspaceScreen({
 }) {
   const [session, setSession] = useState<GraphSession | null>(null)
   const [latestWorkSession, setLatestWorkSession] = useState<GraphSession | null>(null)
+  const [latestGoalSession, setLatestGoalSession] = useState<GraphSession | null>(null)
+  const [lastRoute, setLastRoute] = useState('')
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -40,6 +42,8 @@ export default function PlatformGraphSessionWorkspaceScreen({
       const response = await sendGraphSessionChatMessage({ sessionId: session.id, content: message })
       setSession(response.session)
       setLatestWorkSession(response.work_session || null)
+      setLatestGoalSession(response.goal_session || null)
+      setLastRoute(response.routing_decision?.route || response.chat_status || '')
       setDraft('')
     } catch (err) {
       setError((err as Error).message)
@@ -81,6 +85,8 @@ export default function PlatformGraphSessionWorkspaceScreen({
           </div>
           <PlatformGraphSessionRepoScopeNotice session={session} />
           {latestWorkSession && <div className="workspace-work-created">Created work session: <strong>{latestWorkSession.title}</strong></div>}
+          {latestGoalSession && <div className="workspace-work-created">Created goal session: <strong>{latestGoalSession.title}</strong> <button className="home-link" onClick={() => onNavigate(`/session/${latestGoalSession.id}`)}>Open</button></div>}
+          {lastRoute === 'question_only' && <div className="workspace-work-created">Recorded as a question-only follow-up. No work session was created.</div>}
           <PlatformGraphSessionMessageList turns={turns} />
           <PlatformGraphSessionChatComposer value={draft} disabled={saving} onChange={setDraft} onSubmit={submitDraft} />
           {error && <div className="home-error">{error}</div>}
