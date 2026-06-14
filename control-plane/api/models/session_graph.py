@@ -110,6 +110,19 @@ class SessionEventActor(str, Enum):
     AGENT = "agent"
 
 
+class ActionStakes(str, Enum):
+    READ_ONLY = "read_only"
+    EXECUTION = "execution"
+    MODIFICATION = "modification"
+    EXTERNAL_SIDE_EFFECT = "external_side_effect"
+
+
+class ActionRisk(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class ProjectionMode(str, Enum):
     SUMMARY = "summary"
     BEHAVIOR_MAP = "behavior_map"
