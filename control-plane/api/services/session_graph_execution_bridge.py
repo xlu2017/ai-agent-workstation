@@ -1,22 +1,22 @@
-"""Session-graph to execution activation bridge scaffold.
+"""Session-graph to execution readiness bridge scaffold.
 
 Intent
 ------
 Graph chat creates ``SessionKind.WORK`` nodes. Those nodes are not executable by
-being present in the graph; they must be translated into the same activation
-contract used by classic session prompts.
+being present in the graph; they must be translated into the same execution
+readiness contract used by classic session prompts.
 
-This module provides that translation and records activation intent on graph work
-sessions without claiming that execution started. The scaffold now records the
+This module provides that translation and records execution readiness on graph
+work sessions without claiming that execution started. The scaffold records the
 next execution boundary explicitly:
 
     ready work session
-    -> workflow adapter start boundary
+    -> executor start boundary
     -> first read/search action
     -> next LLM call after the read/search outcome
 
 The future implementation should inject ``ExecutionActivationService`` with the
-extracted workflow-start callback and set ``auto_started`` only after that
+extracted executor-start callback and set ``auto_started`` only after that
 callback succeeds.
 """
 
@@ -38,8 +38,8 @@ def work_facet(session: SessionRecord) -> dict[str, Any]:
     return facet if isinstance(facet, dict) else {}
 
 
-def should_activate_graph_work_session(session: SessionRecord) -> bool:
-    """Return true when a graph work session should enter activation flow.
+def should_mark_graph_work_execution_ready(session: SessionRecord) -> bool:
+    """Return true when a graph work session should enter readiness flow.
 
     This means the work is ready and pending. It does not mean the platform is
     allowed to execute it; runtime validation still happens later.
@@ -55,13 +55,19 @@ def should_activate_graph_work_session(session: SessionRecord) -> bool:
     )
 
 
-def build_graph_work_activation_request(
+def should_activate_graph_work_session(session: SessionRecord) -> bool:
+    """Backward-compatible alias for older callers."""
+
+    return should_mark_graph_work_execution_ready(session)
+
+
+def build_graph_work_execution_readiness_request(
     *,
     work_session: SessionRecord,
     parent_session: SessionRecord | None,
     source: ExecutionActivationSource = ExecutionActivationSource.SESSION_GRAPH_CHAT,
 ) -> ExecutionActivationRequest:
-    """Translate graph work-session state into the shared activation request."""
+    """Translate graph work-session state into the shared readiness request."""
 
     facet = work_facet(work_session)
     parent_metadata = parent_session.metadata if parent_session is not None else {}
@@ -88,11 +94,26 @@ def build_graph_work_activation_request(
     )
 
 
+def build_graph_work_activation_request(
+    *,
+    work_session: SessionRecord,
+    parent_session: SessionRecord | None,
+    source: ExecutionActivationSource = ExecutionActivationSource.SESSION_GRAPH_CHAT,
+) -> ExecutionActivationRequest:
+    """Backward-compatible alias for older callers."""
+
+    return build_graph_work_execution_readiness_request(
+        work_session=work_session,
+        parent_session=parent_session,
+        source=source,
+    )
+
+
 def _initial_context_action(request: ExecutionActivationRequest) -> dict[str, Any]:
     """Build the first low-risk repo context action for a ready work session.
 
-    This is an action proposal, not an executed action. The workflow adapter must
-    still validate and run it before the next LLM call is allowed.
+    This is an action proposal, not an executed action. The executor must still
+    validate and run it before the next LLM call is allowed.
     """
 
     return {
@@ -114,12 +135,12 @@ def _initial_context_action(request: ExecutionActivationRequest) -> dict[str, An
     }
 
 
-def build_graph_work_execution_plan(request: ExecutionActivationRequest) -> dict[str, Any]:
-    """Return the scaffolded execution plan for graph-created work.
+def build_graph_work_initial_execution_scaffold(request: ExecutionActivationRequest) -> dict[str, Any]:
+    """Return the scaffolded first-action contract for graph-created work.
 
-    The plan intentionally contains exactly one first action. After that action's
-    outcome is recorded, the platform must call recommend-next again rather than
-    executing a second top-level action from this scaffold.
+    The scaffold intentionally contains exactly one first action. After that
+    action's outcome is recorded, the platform must call recommend-next again
+    rather than executing a second top-level action from this scaffold.
     """
 
     first_action = _initial_context_action(request)
@@ -128,8 +149,8 @@ def build_graph_work_execution_plan(request: ExecutionActivationRequest) -> dict
         "source": request.source.value,
         "work_session_id": request.session_id,
         "repo_context_id": request.repo_context_id,
-        "workflow_start": {
-            "status": "scaffolded_not_started",
+        "executor_start": {
+            "status": "pending_adapter",
             "adapter_required": True,
             "auto_started": False,
         },
@@ -143,15 +164,40 @@ def build_graph_work_execution_plan(request: ExecutionActivationRequest) -> dict
     }
 
 
-def record_activation_result_on_work_session(
+def build_graph_work_execution_plan(request: ExecutionActivationRequest) -> dict[str, Any]:
+    """Backward-compatible alias for older callers."""
+
+    return build_graph_work_initial_execution_scaffold(request)
+
+
+def execution_readiness_response(result: ExecutionActivationResult) -> dict[str, Any]:
+    """Return the public graph-chat readiness payload without activation wording."""
+
+    payload = result.to_response_dict()
+    if "activation_id" in payload:
+        payload["execution_readiness_id"] = payload.pop("activation_id")
+    if "plan" in payload:
+        payload["initial_execution_scaffold"] = payload.pop("plan")
+    if "workflow" in payload:
+        payload["executor"] = payload.pop("workflow")
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict):
+        if "requires_shared_activation_service" in metadata:
+            metadata["requires_shared_execution_readiness_service"] = metadata.pop("requires_shared_activation_service")
+        if "workflow_adapter_start_scaffolded" in metadata:
+            metadata["executor_start_scaffolded"] = metadata.pop("workflow_adapter_start_scaffolded")
+    return payload
+
+
+def record_execution_readiness_on_work_session(
     work_session: SessionRecord,
     result: ExecutionActivationResult,
 ) -> SessionRecord:
-    """Record activation result on a work session without fabricating success."""
+    """Record execution readiness on a work session without fabricating success."""
 
     facet = dict(work_facet(work_session))
-    activation_record = result.to_response_dict()
-    facet["activation"] = activation_record
+    readiness_record = execution_readiness_response(result)
+    facet["execution_readiness"] = readiness_record
     facet["auto_started"] = result.auto_started
     if result.status == ExecutionActivationStatus.STARTED:
         facet["execution_state"] = "started"
@@ -165,17 +211,26 @@ def record_activation_result_on_work_session(
     work_session.facets = {**work_session.facets, "work": facet}
     work_session.state = {
         **work_session.state,
-        "execution_activation": activation_record,
+        "execution_readiness": readiness_record,
         "auto_started": result.auto_started,
     }
     return work_session
 
 
-def scaffold_activation_result(request: ExecutionActivationRequest) -> ExecutionActivationResult:
-    """Build a deterministic non-executing activation result for graph chat.
+def record_activation_result_on_work_session(
+    work_session: SessionRecord,
+    result: ExecutionActivationResult,
+) -> SessionRecord:
+    """Backward-compatible alias for older callers."""
 
-    This keeps graph chat wired to the activation boundary before the real
-    workflow-start callback is extracted. When repo context exists, the response
+    return record_execution_readiness_on_work_session(work_session, result)
+
+
+def scaffold_execution_readiness_result(request: ExecutionActivationRequest) -> ExecutionActivationResult:
+    """Build a deterministic non-executing readiness result for graph chat.
+
+    This keeps graph chat wired to the execution boundary before the real
+    executor-start callback is extracted. When repo context exists, the response
     includes the first read/search action and the requirement to make the next LLM
     call only after that action outcome is recorded.
     """
@@ -187,15 +242,15 @@ def scaffold_activation_result(request: ExecutionActivationRequest) -> Execution
             metadata={"source": request.source.value},
         )
 
-    plan = build_graph_work_execution_plan(request)
+    scaffold = build_graph_work_initial_execution_scaffold(request)
     return ExecutionActivationResult(
         status=ExecutionActivationStatus.READY_NOT_STARTED,
-        message="Execution activation scaffold recorded; workflow start is not wired from graph chat yet.",
-        plan=plan,
+        message="Execution readiness recorded; executor start is not wired from graph chat yet.",
+        plan=scaffold,
         workflow={
             "status": "not_started",
             "adapter": "workflow_adapter",
-            "reason": "Workflow adapter start callback is not wired from graph chat yet.",
+            "reason": "Executor-start callback is not wired from graph chat yet.",
             "first_action_status": "proposed_not_executed",
             "next_llm_call": "after_first_action_outcome",
         },
@@ -203,7 +258,13 @@ def scaffold_activation_result(request: ExecutionActivationRequest) -> Execution
             "source": request.source.value,
             "requires_shared_activation_service": True,
             "workflow_adapter_start_scaffolded": True,
-            "initial_context_action": plan["steps"][0],
-            "next_llm_after_outcome": plan["after_step"],
+            "initial_context_action": scaffold["steps"][0],
+            "next_llm_after_outcome": scaffold["after_step"],
         },
     )
+
+
+def scaffold_activation_result(request: ExecutionActivationRequest) -> ExecutionActivationResult:
+    """Backward-compatible alias for older callers."""
+
+    return scaffold_execution_readiness_result(request)
