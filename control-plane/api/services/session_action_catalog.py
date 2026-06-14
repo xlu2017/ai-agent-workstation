@@ -9,6 +9,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from api.models.session_graph import EdgeType, SessionEdge, SessionEvent, SessionEventActor, SessionEventType, SessionKind
+from api.services.session_graph_repo_execution import reactivate_blocked_work_sessions_after_repo_attach
 from api.services.session_graph_service import SessionGraphStore, validate_graph_update
 
 
@@ -61,6 +62,13 @@ def validate_session_action_params(action_name: str, params: dict[str, object]) 
 
 
 def execute_session_action(store: SessionGraphStore, action_name: str, params: dict[str, object], *, preview: bool = False) -> dict[str, object]:
+    """Execute a graph action synchronously.
+
+    API routes should prefer ``execute_session_action_async`` so repo mount can
+    restart blocked graph work. This sync function remains for compatibility with
+    direct callers and tests that do not need execution reactivation.
+    """
+
     validation = validate_session_action_params(action_name, params)
     if not validation["ok"]:
         raise ValueError(str(validation["error"]))
@@ -68,6 +76,21 @@ def execute_session_action(store: SessionGraphStore, action_name: str, params: d
         request = MountSessionRequest.model_validate(params)
         is_preview = preview or action_name == "session.mount.preview"
         result = _preview_mount(store, request) if is_preview else _mount(store, request)
+        return {"action_name": action_name, "preview": is_preview, "result": result}
+    request = UnmountSessionActionParams.model_validate(params)
+    return {"action_name": action_name, "preview": False, "result": _unmount(store, request)}
+
+
+async def execute_session_action_async(store: SessionGraphStore, action_name: str, params: dict[str, object], *, preview: bool = False) -> dict[str, object]:
+    """Execute a graph action, including async repo-attach reactivation hooks."""
+
+    validation = validate_session_action_params(action_name, params)
+    if not validation["ok"]:
+        raise ValueError(str(validation["error"]))
+    if action_name in {"session.mount", "session.mount.preview"}:
+        request = MountSessionRequest.model_validate(params)
+        is_preview = preview or action_name == "session.mount.preview"
+        result = _preview_mount(store, request) if is_preview else await _mount_async(store, request)
         return {"action_name": action_name, "preview": is_preview, "result": result}
     request = UnmountSessionActionParams.model_validate(params)
     return {"action_name": action_name, "preview": False, "result": _unmount(store, request)}
@@ -92,12 +115,12 @@ def _preview_mount(store: SessionGraphStore, request: MountSessionRequest) -> di
     return {"ok": not duplicate, "source_session_id": source.id, "target_session_id": target.id, "duplicate": duplicate}
 
 
-def _mount(store: SessionGraphStore, request: MountSessionRequest) -> dict[str, object]:
-    graph, source, target = _pair(store, request)
+def _apply_mount_to_graph(graph, source, target, request: MountSessionRequest) -> tuple[SessionEdge, SessionEvent, object]:
     if any(edge.type == EdgeType.MOUNTED_UNDER and edge.source_session_id == source.id and edge.target_session_id == target.id for edge in graph.edges):
         raise ValueError(f"Duplicate mounted_under edge {source.id} -> {target.id}.")
     edge = SessionEdge(type=EdgeType.MOUNTED_UNDER, source_session_id=source.id, target_session_id=target.id, metadata={"reason": request.user_intent, "mount_mode": request.mount_mode})
     graph.edges.append(edge)
+    updated_target = target
     if request.make_active:
         for idx, session in enumerate(graph.sessions):
             if session.id == target.id:
@@ -107,14 +130,43 @@ def _mount(store: SessionGraphStore, request: MountSessionRequest) -> dict[str, 
                     metadata["repo_session_id"] = source.id
                 session.metadata = metadata
                 graph.sessions[idx] = session
+                updated_target = session
                 break
     event = SessionEvent(type=SessionEventType.SESSION_MOUNTED, session_id=target.id, actor=SessionEventActor.SYSTEM, data={"source_session_id": source.id, "target_session_id": target.id, "edge_id": edge.id})
     graph.events.append(event)
+    return edge, event, updated_target
+
+
+def _mount(store: SessionGraphStore, request: MountSessionRequest) -> dict[str, object]:
+    graph, source, target = _pair(store, request)
+    edge, event, _updated_target = _apply_mount_to_graph(graph, source, target, request)
     issues = validate_graph_update(graph)
     if issues:
         raise ValueError(" ".join(issues))
     store.save(graph)
     return {"edge": edge.model_dump(mode="json"), "event": event.model_dump(mode="json")}
+
+
+async def _mount_async(store: SessionGraphStore, request: MountSessionRequest) -> dict[str, object]:
+    graph, source, target = _pair(store, request)
+    edge, event, updated_target = _apply_mount_to_graph(graph, source, target, request)
+    reactivated_work_sessions: list[dict[str, object]] = []
+    if request.make_active and source.kind == SessionKind.REPO:
+        reactivated_work_sessions = await reactivate_blocked_work_sessions_after_repo_attach(
+            graph=graph,
+            parent_session=updated_target,
+            source_event_id=event.id,
+        )
+    issues = validate_graph_update(graph)
+    if issues:
+        raise ValueError(" ".join(issues))
+    store.save(graph)
+    return {
+        "edge": edge.model_dump(mode="json"),
+        "event": event.model_dump(mode="json"),
+        "reactivated_work_sessions": reactivated_work_sessions,
+        "reactivated_work_session_count": len(reactivated_work_sessions),
+    }
 
 
 def _unmount(store: SessionGraphStore, request: UnmountSessionActionParams) -> dict[str, object]:
