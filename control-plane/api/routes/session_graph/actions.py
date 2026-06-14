@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from api.routes.session_graph.helpers import RequestContext, _context, _get_visible_session, _store
 from api.services.session_action_catalog import (
-    execute_session_action,
+    execute_session_action_async,
     get_session_action,
     session_action_catalog,
     validate_session_action_params,
@@ -41,11 +41,11 @@ def validate_session_graph_action(body: SessionActionRequest) -> dict[str, objec
 
 
 @router.post("/actions/apply")
-def apply_session_graph_action(body: SessionActionRequest, context: RequestContext = Depends(_context)) -> dict[str, object]:
+async def apply_session_graph_action(body: SessionActionRequest, context: RequestContext = Depends(_context)) -> dict[str, object]:
     store = _store()
     _assert_action_sessions_visible(body.action_name, body.params, store, context)
     try:
-        return execute_session_action(store, body.action_name, body.params, preview=body.preview)
+        return await execute_session_action_async(store, body.action_name, body.params, preview=body.preview)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
