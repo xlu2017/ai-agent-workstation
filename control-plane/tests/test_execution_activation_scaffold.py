@@ -6,11 +6,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from api.models.session_graph import SessionKind, SessionRecord, SessionStatus  # noqa: E402
 from api.services.session_graph_execution_bridge import (  # noqa: E402
-    build_graph_work_activation_request,
-    build_graph_work_execution_plan,
-    record_activation_result_on_work_session,
-    scaffold_activation_result,
-    should_activate_graph_work_session,
+    build_graph_work_execution_readiness_request,
+    build_graph_work_initial_execution_scaffold,
+    record_execution_readiness_on_work_session,
+    scaffold_execution_readiness_result,
+    should_mark_graph_work_execution_ready,
 )
 from execution.activation import (  # noqa: E402
     ExecutionActivationRequest,
@@ -74,7 +74,7 @@ def test_activation_service_marks_started_only_after_callback_success():
     assert result.workflow == {"workflow_run_id": "run-work-1"}
 
 
-def test_graph_work_activation_request_uses_parent_repo_context():
+def test_graph_work_execution_readiness_request_uses_parent_repo_context():
     parent = SessionRecord(
         id="goal-1",
         kind=SessionKind.GOAL,
@@ -92,8 +92,8 @@ def test_graph_work_activation_request_uses_parent_repo_context():
         facets={"work": {"prompt": "Run validation", "execution_state": "ready_for_execution", "requires_execution_start": True, "auto_started": False}},
     )
 
-    assert should_activate_graph_work_session(work) is True
-    request = build_graph_work_activation_request(work_session=work, parent_session=parent)
+    assert should_mark_graph_work_execution_ready(work) is True
+    request = build_graph_work_execution_readiness_request(work_session=work, parent_session=parent)
 
     assert request.session_id == "work-1"
     assert request.parent_session_id == "goal-1"
@@ -101,7 +101,7 @@ def test_graph_work_activation_request_uses_parent_repo_context():
     assert request.prompt == "Run validation"
 
 
-def test_graph_work_execution_plan_scaffolds_first_context_action_then_llm_gate():
+def test_graph_work_initial_execution_scaffold_has_first_context_action_then_llm_gate():
     request = ExecutionActivationRequest(
         session_id="work-1",
         prompt="Why is the world round?",
@@ -109,20 +109,20 @@ def test_graph_work_execution_plan_scaffolds_first_context_action_then_llm_gate(
         repo_context_id="repo-session-1",
     )
 
-    plan = build_graph_work_execution_plan(request)
+    scaffold = build_graph_work_initial_execution_scaffold(request)
 
-    assert plan["workflow_start"]["status"] == "scaffolded_not_started"
-    assert plan["workflow_start"]["auto_started"] is False
-    assert len(plan["steps"]) == 1
-    assert plan["steps"][0]["decision"] == "find_out_more"
-    assert plan["steps"][0]["task_name"] == "search_code"
-    assert plan["steps"][0]["params"]["query"] == "Why is the world round?"
-    assert plan["steps"][0]["params"]["scope"] == "repo-session-1"
-    assert plan["after_step"]["requires_llm_after_outcome"] is True
-    assert plan["after_step"]["max_top_level_actions_before_next_llm"] == 1
+    assert scaffold["executor_start"]["status"] == "pending_adapter"
+    assert scaffold["executor_start"]["auto_started"] is False
+    assert len(scaffold["steps"]) == 1
+    assert scaffold["steps"][0]["decision"] == "find_out_more"
+    assert scaffold["steps"][0]["task_name"] == "search_code"
+    assert scaffold["steps"][0]["params"]["query"] == "Why is the world round?"
+    assert scaffold["steps"][0]["params"]["scope"] == "repo-session-1"
+    assert scaffold["after_step"]["requires_llm_after_outcome"] is True
+    assert scaffold["after_step"]["max_top_level_actions_before_next_llm"] == 1
 
 
-def test_graph_work_records_non_starting_activation_result():
+def test_graph_work_records_non_starting_execution_readiness_result():
     work = SessionRecord(
         id="work-1",
         kind=SessionKind.WORK,
@@ -132,16 +132,16 @@ def test_graph_work_records_non_starting_activation_result():
         root_id="goal-1",
         facets={"work": {"prompt": "Run validation", "execution_state": "ready_for_execution", "requires_execution_start": True, "auto_started": False}},
     )
-    request = build_graph_work_activation_request(work_session=work, parent_session=None)
-    result = scaffold_activation_result(request)
-    record_activation_result_on_work_session(work, result)
+    request = build_graph_work_execution_readiness_request(work_session=work, parent_session=None)
+    result = scaffold_execution_readiness_result(request)
+    record_execution_readiness_on_work_session(work, result)
 
-    assert work.state["execution_activation"]["status"] == "blocked_needs_repo"
-    assert work.state["execution_activation"]["auto_started"] is False
-    assert work.facets["work"]["activation"]["auto_started"] is False
+    assert work.state["execution_readiness"]["status"] == "blocked_needs_repo"
+    assert work.state["execution_readiness"]["auto_started"] is False
+    assert work.facets["work"]["execution_readiness"]["auto_started"] is False
 
 
-def test_graph_work_records_ready_activation_plan_when_repo_context_exists():
+def test_graph_work_records_ready_execution_readiness_scaffold_when_repo_context_exists():
     parent = SessionRecord(
         id="goal-1",
         kind=SessionKind.GOAL,
@@ -159,14 +159,14 @@ def test_graph_work_records_ready_activation_plan_when_repo_context_exists():
         facets={"work": {"prompt": "Why is the world round?", "execution_state": "ready_for_execution", "requires_execution_start": True, "auto_started": False}},
     )
 
-    request = build_graph_work_activation_request(work_session=work, parent_session=parent)
-    result = scaffold_activation_result(request)
-    record_activation_result_on_work_session(work, result)
+    request = build_graph_work_execution_readiness_request(work_session=work, parent_session=parent)
+    result = scaffold_execution_readiness_result(request)
+    record_execution_readiness_on_work_session(work, result)
 
-    activation = work.state["execution_activation"]
-    assert activation["status"] == "ready_not_started"
-    assert activation["auto_started"] is False
-    assert activation["plan"]["steps"][0]["task_name"] == "search_code"
-    assert activation["plan"]["after_step"]["requires_llm_after_outcome"] is True
-    assert activation["workflow"]["status"] == "not_started"
-    assert activation["metadata"]["workflow_adapter_start_scaffolded"] is True
+    readiness = work.state["execution_readiness"]
+    assert readiness["status"] == "ready_not_started"
+    assert readiness["auto_started"] is False
+    assert readiness["initial_execution_scaffold"]["steps"][0]["task_name"] == "search_code"
+    assert readiness["initial_execution_scaffold"]["after_step"]["requires_llm_after_outcome"] is True
+    assert readiness["executor"]["status"] == "not_started"
+    assert readiness["metadata"]["executor_start_scaffolded"] is True
