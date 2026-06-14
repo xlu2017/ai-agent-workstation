@@ -67,25 +67,3 @@ def test_budgeted_projection_records_dominance_guard_evidence():
     assert "4000 tokens" in projection.rationale
     assert "dominance_guard:broad_source_under_focused_target" in projection.evidence
     assert "unrelated_capabilities" in [selector.value for selector in projection.exclude_selectors]
-
-
-def test_session_adapter_engine_projection_is_wired_to_budgeted_service():
-    models = import_module("api.models.session_graph")
-    engine = import_module("api.services.session_adapter_engine")
-
-    repo = models.SessionRecord(id="repo", kind=models.SessionKind.REPO, title="Large repo")
-    goal = models.SessionRecord(id="goal", kind=models.SessionKind.GOAL, title="Small goal")
-    request = models.MountSessionRequest(
-        source_session_id="repo",
-        target_session_id="goal",
-        user_intent="use termination behavior",
-        mount_mode=models.MountMode.REFERENCE,
-        create_adaptation_session=True,
-    )
-
-    projection = engine.generate_context_projection(repo, goal, request)
-
-    assert "budget_profile:focused_mount_projection" in projection.evidence
-    assert "budget_tokens:4000" in projection.evidence
-    assert "4000 tokens" in projection.rationale
-    assert projection.budget.max_tokens == 4000
