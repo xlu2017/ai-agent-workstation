@@ -99,7 +99,7 @@ def _make_work_session(
     )
 
 
-def _make_question_session(
+def _make_chat_session(
     session: SessionRecord,
     content: str,
     user_turn: dict[str, object],
@@ -109,18 +109,19 @@ def _make_question_session(
     route_source: str,
 ) -> SessionRecord:
     return SessionRecord(
-        kind=SessionKind.QUESTION,
+        kind=SessionKind.CHAT,
         title=_short_title(content),
         summary=str(assistant_turn.get("content") or content),
         status=SessionStatus.COMPLETED,
         parent_id=session.id,
         root_id=session.root_id or session.id,
         facets={
-            "question": {
+            "chat": {
                 "prompt": content,
-                "answer": assistant_turn.get("content") or "",
+                "response": assistant_turn.get("content") or "",
                 "source_session_id": session.id,
                 "route_source": route_source,
+                "non_executable": True,
             }
         },
         state={
@@ -292,7 +293,7 @@ def append_graph_session_chat_turn(
         turns.append(assistant_turn)
         session.state = {**session.state, "chat_turns": turns, "last_assistant_message": answer}
         graph.sessions[index] = session
-        created_session = _make_question_session(session, content, turn, assistant_turn, now, context, classification.source)
+        created_session = _make_chat_session(session, content, turn, assistant_turn, now, context, classification.source)
         created_session.created_from_event_id = user_event.id
         graph.sessions.append(created_session)
         created_edge = SessionEdge(
@@ -314,7 +315,7 @@ def append_graph_session_chat_turn(
                 "reason": classification.reason,
                 "source": classification.source,
                 "assistant_response": answer,
-                "response_session_kind": "question",
+                "response_session_kind": "chat",
                 "auto_started": False,
                 "narration": narration,
             },
@@ -354,7 +355,9 @@ def append_graph_session_chat_turn(
         response["execution_activation"] = activation_response
     if created_session is not None:
         key = "work_session" if created_session.kind == SessionKind.WORK else "goal_session"
-        if created_session.kind == SessionKind.QUESTION:
+        if created_session.kind == SessionKind.CHAT:
+            key = "chat_session"
+        elif created_session.kind == SessionKind.QUESTION:
             key = "question_session"
         response[key] = created_session.model_dump(mode="json")
     if created_edge is not None:
