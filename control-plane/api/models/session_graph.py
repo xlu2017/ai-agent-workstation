@@ -110,6 +110,52 @@ class SessionEventActor(str, Enum):
     AGENT = "agent"
 
 
+class ProjectionMode(str, Enum):
+    SUMMARY = "summary"
+    BEHAVIOR_MAP = "behavior_map"
+
+
+class ProjectionSource(str, Enum):
+    HEURISTIC = "heuristic"
+    MAPPING_BASED = "mapping_based"
+    MANUAL = "manual"
+
+
+class ProjectionSelector(str, Enum):
+    SUMMARY = "summary"
+    FACETS = "facets"
+    RELATIONSHIPS = "relationships"
+    ADAPTER_MAPPINGS = "adapter_mappings"
+    CAPABILITIES = "capabilities"
+    BEHAVIORS = "behaviors"
+    INTERFACES = "interfaces"
+    TERMINATION_CONDITIONS = "termination_conditions"
+    UNRELATED_UI = "unrelated_ui"
+    DEPLOYMENT = "deployment"
+    PLUGINS = "plugins"
+    HISTORICAL_NOISE = "historical_noise"
+    UNRELATED_CAPABILITIES = "unrelated_capabilities"
+
+
+class ContextProjectionBudget(BaseModel):
+    max_tokens: int = 0
+    max_files: int = 0
+    max_events: int = 0
+
+
+class SessionPolicy(BaseModel):
+    visibility: str = "workspace"
+    allow_mount: bool = True
+    allow_inbound_mount: bool = True
+    allow_outbound_mount: bool = True
+    allow_adapt: bool = True
+    allow_inbound_adapt: bool = True
+    allow_outbound_adapt: bool = True
+    effective_policy_source_ids: list[str] = Field(default_factory=list)
+    license: str = ""
+    security_constraints: list[str] = Field(default_factory=list)
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -125,6 +171,7 @@ class SessionRecord(BaseModel):
     facets: dict[str, object] = Field(default_factory=dict)
     state: dict[str, object] = Field(default_factory=dict)
     metadata: dict[str, object] = Field(default_factory=dict)
+    policy: SessionPolicy = Field(default_factory=SessionPolicy)
     created_at: str = Field(default_factory=utc_now)
     updated_at: str = Field(default_factory=utc_now)
     created_from_event_id: str | None = None
@@ -154,6 +201,14 @@ class ContextProjection(BaseModel):
     id: str = Field(default_factory=lambda: f"projection-{uuid4().hex[:12]}")
     active_session_id: str
     source_session_ids: list[str] = Field(default_factory=list)
+    projection_mode: ProjectionMode = ProjectionMode.SUMMARY
+    projection_source: ProjectionSource = ProjectionSource.HEURISTIC
+    relevance_score: float = 0.0
+    evidence: list[str] = Field(default_factory=list)
+    include_selectors: list[ProjectionSelector] = Field(default_factory=list)
+    exclude_selectors: list[ProjectionSelector] = Field(default_factory=list)
+    budget: ContextProjectionBudget = Field(default_factory=ContextProjectionBudget)
+    rationale: str = ""
     summary: str = ""
     data: dict[str, object] = Field(default_factory=dict)
     created_at: str = Field(default_factory=utc_now)
