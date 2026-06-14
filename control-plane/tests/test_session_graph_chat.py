@@ -95,11 +95,15 @@ def test_graph_session_chat_question_only_answers_without_work_when_no_repo_cont
     assert body["routing_decision"]["route"] == "question_only"
     assert "work_session" not in body
     assert "execution_activation" not in body
+    assert "question_session" not in body
     assert body["chat_status"] == "answered"
     assert body["execution_state"] == "answered_inline"
     assert body["assistant_turn"]["role"] == "assistant"
-    assert body["question_session"]["status"] == "completed"
-    assert body["question_session"]["state"]["auto_started"] is False
+    assert body["chat_session"]["kind"] == "chat"
+    assert body["chat_session"]["status"] == "completed"
+    assert body["chat_session"]["facets"]["chat"]["non_executable"] is True
+    assert body["chat_session"]["state"]["auto_started"] is False
+    assert body["events"][-1]["data"]["response_session_kind"] == "chat"
     assert [event["type"] for event in body["events"]] == ["user.interjected", "observation.recorded"]
 
 
@@ -115,6 +119,7 @@ def test_graph_session_chat_repo_context_question_routes_to_work_before_answerin
     assert body["chat_status"] == "ready"
     assert body["execution_state"] == "ready_for_execution"
     assert "assistant_turn" not in body
+    assert "chat_session" not in body
     assert "question_session" not in body
     assert body["work_session"]["kind"] == "work"
     assert body["work_session"]["facets"]["work"]["requires_execution_start"] is True
