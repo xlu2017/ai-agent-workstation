@@ -22,7 +22,7 @@ from api.services.session_graph_execution_bridge import (
     record_activation_result_on_work_session,
     scaffold_activation_result,
 )
-from api.services.session_graph_prompt_recommendation import recommend_graph_prompt_route
+from api.services.session_graph_prompt_recommendation import PromptRoutingUnavailable, recommend_graph_prompt_route
 
 router = APIRouter()
 
@@ -178,7 +178,17 @@ def append_graph_session_chat_turn(
     _assert_session_visible(session, context)
 
     now = utc_now()
-    classification = recommend_graph_prompt_route(session, content)
+    try:
+        classification = recommend_graph_prompt_route(session, content)
+    except PromptRoutingUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "prompt_routing_unavailable",
+                "message": "Prompt routing is unavailable because agent-core or its configured LLM is unavailable or returned an invalid route.",
+                "reason": str(exc),
+            },
+        ) from exc
     narration = classification.narration
     turn = {"role": "user", "content": content, "created_at": now}
     turns = _chat_turns(session)
