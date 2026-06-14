@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from api.routes.session_graph import chat as chat_route  # noqa: E402
 from api.server import app  # noqa: E402
+from api.services import session_graph_repo_execution as repo_execution_service  # noqa: E402
 from api.services.session_graph_prompt_recommendation import PromptRouteRecommendation  # noqa: E402
 
 
@@ -103,6 +104,70 @@ def test_graph_session_chat_marks_work_ready_when_repo_is_attached(tmp_path: Pat
     assert body["work_session"]["facets"]["work"]["requires_repo"] is False
     assert body["work_session"]["facets"]["work"]["execution_readiness"]["auto_started"] is False
     assert [event["type"] for event in body["events"]] == ["user.interjected", "work.execution_readiness_recorded"]
+
+
+def test_repo_attach_reactivates_blocked_graph_work_session(tmp_path: Path, monkeypatch):
+    worktree_base = tmp_path / "repos"
+    local_repo = worktree_base / "local-repo"
+    local_repo.mkdir(parents=True)
+    monkeypatch.setenv("WORKTREE_BASE", str(worktree_base))
+
+    async def fake_start_graph_workflow(request):
+        return {
+            "plan": {"steps": [{"action_name": "search_code", "params": {"query": request.prompt}}]},
+            "workflow": {"started": True, "backend": "test", "workflow_run_id": "test-run"},
+        }
+
+    monkeypatch.setattr(repo_execution_service, "start_graph_workflow", fake_start_graph_workflow)
+
+    client = _client(tmp_path)
+    session = _create_goal_session(client)
+    _stub_prompt_routing(monkeypatch, route="continue_active")
+
+    blocked_response = client.post(
+        f"/api/session-graph/sessions/{session['id']}/chat",
+        json={"content": "Implement GET /users."},
+    )
+    assert blocked_response.status_code == 200
+    blocked_work = blocked_response.json()["work_session"]
+    assert blocked_work["state"]["execution_state"] == "blocked_needs_repo"
+
+    repo_response = client.post(
+        "/api/session-graph/sessions",
+        json={
+            "id": "repo-local",
+            "kind": "repo",
+            "title": "Local repo",
+            "status": "active",
+            "facets": {"repo": {"source": "local", "path": str(local_repo)}},
+        },
+    )
+    assert repo_response.status_code == 200
+
+    patch_response = client.patch(
+        f"/api/session-graph/sessions/{session['id']}",
+        json={"metadata": {"repo_session_id": "repo-local"}, "reason": "Attach local repo."},
+    )
+
+    assert patch_response.status_code == 200
+    body = patch_response.json()
+    assert body["reactivated_work_session_count"] == 1
+    reactivated = body["reactivated_work_sessions"][0]
+    assert reactivated["session"]["id"] == blocked_work["id"]
+    assert reactivated["session"]["status"] == "active"
+    assert reactivated["session"]["metadata"]["repo_session_id"] == "repo-local"
+    assert reactivated["session"]["metadata"]["worktree_id"] == "local-repo"
+    assert reactivated["session"]["state"]["execution_state"] == "started"
+    assert reactivated["execution_readiness"]["status"] == "started"
+    assert reactivated["auto_started"] is True
+    assert reactivated["event"]["type"] == "work.started"
+
+    refreshed = client.get(f"/api/session-graph/sessions/{blocked_work['id']}")
+    assert refreshed.status_code == 200
+    refreshed_work = refreshed.json()["session"]
+    assert refreshed_work["state"]["execution_state"] == "started"
+    assert refreshed_work["state"]["execution_readiness"]["status"] == "started"
+    assert refreshed_work["facets"]["work"]["requires_execution_start"] is False
 
 
 def test_graph_session_chat_question_only_answers_without_work_when_no_repo_context(tmp_path: Path, monkeypatch):
