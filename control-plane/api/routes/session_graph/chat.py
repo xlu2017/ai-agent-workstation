@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -21,9 +24,10 @@ from api.services.session_graph_execution_bridge import (
     build_graph_work_execution_readiness_request,
     execution_readiness_response,
     record_execution_readiness_on_work_session,
-    scaffold_execution_readiness_result,
+    start_graph_workflow,
 )
 from api.services.session_graph_prompt_recommendation import PromptRoutingUnavailable, recommend_graph_prompt_route
+from execution.activation import ExecutionActivationService
 
 router = APIRouter()
 
@@ -49,6 +53,10 @@ def _base_metadata(session: SessionRecord, context: RequestContext) -> dict[str,
         "workspace_id": session.metadata.get("workspace_id", context.workspace_id),
         "owner_user_id": session.metadata.get("owner_user_id") or context.user_id,
         "repo_session_id": session.metadata.get("repo_session_id"),
+        "repo_id": session.metadata.get("repo_id"),
+        "worktree_id": session.metadata.get("worktree_id"),
+        "repo_path": session.metadata.get("repo_path"),
+        "allowed_actions": session.metadata.get("allowed_actions"),
     }
 
 
@@ -67,6 +75,8 @@ def _make_work_session(
 ) -> SessionRecord:
     repo_needed = not bool(session.metadata.get("repo_session_id"))
     execution_state = _work_execution_state(repo_needed)
+    base_metadata = _base_metadata(session, context)
+    allowed_actions = base_metadata.get("allowed_actions")
     work_facet = {
         "prompt": content,
         "source_session_id": session.id,
@@ -76,6 +86,8 @@ def _make_work_session(
         "auto_started": False,
         "requires_execution_start": not repo_needed,
     }
+    if isinstance(allowed_actions, list):
+        work_facet["allowed_actions"] = allowed_actions
     state = {
         "chat_turns": [turn],
         "status_reason": "needs_repo" if repo_needed else "ready_for_execution",
@@ -94,7 +106,7 @@ def _make_work_session(
         root_id=session.root_id or session.id,
         facets={"work": work_facet},
         state=state,
-        metadata={**_base_metadata(session, context), "created_from": "session_graph_chat"},
+        metadata={**base_metadata, "created_from": "session_graph_chat"},
         created_at=now,
         updated_at=now,
     )
@@ -156,8 +168,54 @@ def _make_goal_session(session: SessionRecord, content: str, turn: dict[str, obj
     return goal
 
 
+def _repo_facet(session: SessionRecord) -> dict[str, object]:
+    facet = session.facets.get("repo", {})
+    return facet if isinstance(facet, dict) else {}
+
+
+def _worktree_id_from_local_path(path_text: str) -> str:
+    path = Path(path_text).expanduser()
+    worktree_base = Path(os.environ.get("WORKTREE_BASE", os.environ.get("REPOS_DIR", "/opt/workstation/repos"))).expanduser()
+    try:
+        return str(path.resolve().relative_to(worktree_base.resolve()))
+    except (OSError, ValueError):
+        return ""
+
+
+def _apply_repo_execution_metadata(work_session: SessionRecord, parent_session: SessionRecord, graph_sessions: list[SessionRecord]) -> SessionRecord:
+    repo_session_id = str(parent_session.metadata.get("repo_session_id") or work_session.metadata.get("repo_session_id") or "")
+    if not repo_session_id:
+        return work_session
+
+    repo_session = next((candidate for candidate in graph_sessions if candidate.id == repo_session_id), None)
+    if repo_session is None:
+        return work_session
+
+    repo = _repo_facet(repo_session)
+    metadata_patch: dict[str, object] = {"repo_session_id": repo_session.id}
+    source = str(repo.get("source") or "")
+    if source == "local":
+        repo_path = str(repo.get("path") or "")
+        worktree_id = _worktree_id_from_local_path(repo_path) if repo_path else ""
+        metadata_patch.update({
+            "repo_id": repo_session.id,
+            "repo_path": repo_path,
+            "worktree_id": worktree_id,
+            "repo_source": "local",
+        })
+    elif source == "github":
+        metadata_patch.update({
+            "repo_id": str(repo.get("full_name") or repo_session.id),
+            "repo_source": "github",
+            "clone_url": repo.get("clone_url") or "",
+        })
+
+    work_session.metadata = {**work_session.metadata, **metadata_patch}
+    return work_session
+
+
 @router.post("/sessions/{session_id}/chat")
-def append_graph_session_chat_turn(
+async def append_graph_session_chat_turn(
     session_id: str,
     body: GraphSessionChatRequest,
     context: RequestContext = Depends(_context),
@@ -229,8 +287,9 @@ def append_graph_session_chat_turn(
 
     if classification.route == "continue_active":
         created_session = _make_work_session(session, content, turn, now, context, body.mode, narration)
+        created_session = _apply_repo_execution_metadata(created_session, session, graph.sessions)
         readiness_request = build_graph_work_execution_readiness_request(work_session=created_session, parent_session=session)
-        readiness_result = scaffold_execution_readiness_result(readiness_request)
+        readiness_result = await ExecutionActivationService(start_workflow=start_graph_workflow).activate(readiness_request)
         created_session = record_execution_readiness_on_work_session(created_session, readiness_result)
         readiness_response = execution_readiness_response(readiness_result)
         if narration:
@@ -266,7 +325,7 @@ def append_graph_session_chat_turn(
             },
             created_at=now,
         )
-        chat_status = "needs_repo" if created_session.status == SessionStatus.BLOCKED else "ready"
+        chat_status = "started" if execution_started else "needs_repo" if created_session.status == SessionStatus.BLOCKED else "ready"
 
     elif classification.route in {"create_child_goal", "create_sibling_goal"}:
         created_session = _make_goal_session(session, content, turn, now, context, classification.route)
@@ -348,7 +407,7 @@ def append_graph_session_chat_turn(
         "events": [event.model_dump(mode="json") for event in [user_event, extra_event] if event is not None],
         "chat_status": chat_status,
         "execution_state": execution_state,
-        "auto_started": False,
+        "auto_started": readiness_response.get("auto_started") if readiness_response else False,
         "narration": narration,
     }
     if assistant_turn is not None:
