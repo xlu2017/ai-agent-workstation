@@ -15,6 +15,10 @@ PROMPT_ROUTES = {"continue_active", "question_only", "create_child_goal", "creat
 ROUTE_PROMPT_VISIBLE_ACTIONS = ["session.route_prompt"]
 
 
+class PromptRoutingUnavailable(RuntimeError):
+    """Raised when agent-core cannot provide a valid prompt route."""
+
+
 @dataclass(frozen=True)
 class PromptRouteRecommendation:
     route: str
@@ -42,50 +46,6 @@ def _session_context(session: Any, prompt: str) -> dict[str, Any]:
         "repo_session_id": session.metadata.get("repo_session_id"),
         "root_session_id": session.root_id or session.id,
     }
-
-
-def _fallback_direct_answer(prompt: str) -> str:
-    """Return deterministic answers only for trivial fallback cases."""
-
-    text = " ".join(prompt.strip().lower().split()).rstrip("?")
-    tokens = text.split()
-    if len(tokens) >= 3 and tokens[0] in {"who", "what"} and tokens[1] in {"are", "r"} and tokens[2] in {"you", "u"}:
-        return "I am an AI agent to help you understand, plan, and work on software tasks."
-    if text.startswith("are you "):
-        return "No."
-    if text in {"is the world round", "is earth round", "is the earth round"}:
-        return "Yes. Earth is roughly spherical, more precisely an oblate spheroid."
-    return "I can answer that, but no direct answer is available yet."
-
-
-def _search_phrase_for_prompt(prompt: str) -> str:
-    text = " ".join(prompt.strip().lower().replace("?", "").split())
-    prefixes = (
-        "why is ",
-        "why are ",
-        "why does ",
-        "why do ",
-        "is ",
-        "are ",
-        "what is ",
-        "what are ",
-        "explain ",
-        "can you explain ",
-    )
-    for prefix in prefixes:
-        if text.startswith(prefix):
-            text = text[len(prefix):].strip()
-            break
-    return text or "that topic"
-
-
-def _repo_context_narration(prompt: str) -> str:
-    phrase = _search_phrase_for_prompt(prompt)
-    return (
-        f"Let me see if I can find references to {phrase} in your repository. "
-        f"I'll search for references to {phrase}. "
-        "Feel free to clarify what you want as I search."
-    )
 
 
 def _parse_route_params(params: Any, reason: str, source: str, payload: dict[str, Any]) -> PromptRouteRecommendation | None:
@@ -144,60 +104,12 @@ def _parse_recommendation(payload: dict[str, Any]) -> PromptRouteRecommendation 
     return _parse_next_task_decision(payload) or _parse_legacy_recommendation(payload)
 
 
-def _is_self_description_question(text: str) -> bool:
-    tokens = text.replace("?", "").split()
-    return len(tokens) >= 3 and tokens[0] in {"who", "what"} and tokens[1] in {"are", "r"} and tokens[2] in {"you", "u"}
-
-
-def _local_route_fallback(session: Any, prompt: str, source: str, reason: str) -> PromptRouteRecommendation:
-    text = " ".join(prompt.strip().lower().split())
-    root_phrases = ("new session", "new root", "separate session", "different goal", "unrelated task", "unrelated goal", "start over")
-    child_phrases = ("separate task", "child task", "subtask", "also create a task", "track this separately")
-    question_prefixes = ("why ", "what ", "how ", "where ", "when ", "who ", "is ", "are ", "can you explain", "explain ")
-    action_words = {"continue", "implement", "fix", "add", "remove", "change", "update", "refactor", "run", "test", "create", "build"}
-
-    if any(phrase in text for phrase in root_phrases):
-        return PromptRouteRecommendation("create_sibling_goal", "User requested a separate goal.", source, {})
-    if any(phrase in text for phrase in child_phrases):
-        return PromptRouteRecommendation("create_child_goal", "User requested a separately tracked subtask.", source, {})
-    question_like = text.endswith("?") or any(text.startswith(prefix) for prefix in question_prefixes)
-    has_action_word = any(word in action_words for word in text.replace("?", "").split())
-    has_repo_context = bool(session.metadata.get("repo_session_id"))
-    if question_like and not has_action_word and _is_self_description_question(text):
-        return PromptRouteRecommendation(
-            "question_only",
-            reason,
-            source,
-            {},
-            assistant_response=_fallback_direct_answer(prompt),
-            response_session_kind="question",
-        )
-    if question_like and not has_action_word and has_repo_context:
-        return PromptRouteRecommendation(
-            "continue_active",
-            "Prompt is explanatory, but repo context is attached; inspect repository context before answering.",
-            source,
-            {},
-            narration=_repo_context_narration(prompt),
-        )
-    if question_like and not has_action_word:
-        return PromptRouteRecommendation(
-            "question_only",
-            reason,
-            source,
-            {},
-            assistant_response=_fallback_direct_answer(prompt),
-            response_session_kind="question",
-        )
-    return PromptRouteRecommendation("continue_active", "Prompt appears to continue the active session goal.", source, {})
-
-
 def recommend_graph_prompt_route(session: Any, prompt: str) -> PromptRouteRecommendation:
     """Return the advisory prompt route from a constrained recommend-next pass.
 
-    The platform chooses visible_actions because this endpoint is known to be a
-    graph-session prompt-routing phase. The user prompt never determines the
-    visible action set.
+    Graph chat must fail closed when agent-core cannot route the prompt. The
+    platform should not silently guess a route when the configured LLM or
+    agent-core recommend-next service is unavailable.
     """
     context = _session_context(session, prompt)
     request_body = {
@@ -214,9 +126,11 @@ def recommend_graph_prompt_route(session: Any, prompt: str) -> PromptRouteRecomm
     try:
         response = httpx.post(f"{AGENT_CORE_URL}/actions/recommend-next", json=request_body, timeout=AGENT_CORE_TIMEOUT)
         response.raise_for_status()
-        parsed = _parse_recommendation(response.json())
-        if parsed is not None:
-            return parsed
-        return _local_route_fallback(session, prompt, "invalid_agent_core_response", "agent-core did not return a valid session.route_prompt recommendation")
+        payload = response.json()
     except Exception as exc:
-        return _local_route_fallback(session, prompt, "agent_core_unavailable", f"agent-core prompt routing unavailable: {exc}")
+        raise PromptRoutingUnavailable(f"agent-core prompt routing unavailable: {exc}") from exc
+
+    parsed = _parse_recommendation(payload)
+    if parsed is None:
+        raise PromptRoutingUnavailable("agent-core did not return a valid session.route_prompt recommendation")
+    return parsed
