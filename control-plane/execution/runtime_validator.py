@@ -42,6 +42,13 @@ GATED_ACTIONS = {
 
 PATH_KEYS = {"path", "file", "target", "directory", "output_path", "repo_path"}
 PATH_LIST_KEYS = {"paths", "files", "directories"}
+READ_ONLY_ACTION_ALIASES = {
+    "glob": {"glob", "find_files", "search_files", "list_files", "search_code", "grep"},
+    "find_files": {"glob", "find_files", "search_files", "list_files", "search_code", "grep"},
+    "search_files": {"glob", "find_files", "search_files", "list_files", "search_code", "grep"},
+    "view_file": {"view_file", "read_file_range", "read_file"},
+    "read_file_range": {"view_file", "read_file_range", "read_file"},
+}
 
 
 @dataclass
@@ -80,71 +87,52 @@ class RuntimeValidator:
     ) -> ValidationResult:
         """Validate an action before execution."""
 
-        # 1. Session exists
         session = self.session_store.get(session_id)
         if session is None:
-            return ValidationResult(
-                allowed=False, reason=f"Session {session_id} not found"
-            )
+            return ValidationResult(allowed=False, reason=f"Session {session_id} not found")
 
-        # 2-3. Worktree path exists on disk when the action needs a worktree.
         wt_path: Path | None = None
         if session.worktree_id:
             wt_path = self.worktree_base / session.worktree_id
             if not wt_path.exists():
-                return ValidationResult(
-                    allowed=False,
-                    reason=f"Worktree path does not exist: {wt_path}",
-                )
+                return ValidationResult(allowed=False, reason=f"Worktree path does not exist: {wt_path}")
 
-        # 4. Action in allowed_actions
-        if session.allowed_actions and action_name not in session.allowed_actions:
-            return ValidationResult(
-                allowed=False,
-                reason=f"Action {action_name} is not in session allowed_actions",
-            )
+        if session.allowed_actions and not self._action_is_allowed(action_name, session.allowed_actions):
+            return ValidationResult(allowed=False, reason=f"Action {action_name} is not in session allowed_actions")
 
-        # 5. Path params do not escape worktree
         if wt_path is not None:
             path_escape = self._check_path_escape(wt_path, params)
             if path_escape:
                 return ValidationResult(allowed=False, reason=path_escape)
 
-        # 6. High-risk actions require gate evidence.
         if action_name in GATED_ACTIONS:
-            gate_id = str(
-                params.get("gate_id")
-                or params.get("approval_id")
-                or params.get("approval_token")
-                or ""
-            )
+            gate_id = str(params.get("gate_id") or params.get("approval_id") or "")
             sessions_dir = getattr(self.session_store, "sessions_dir", "/opt/workstation/sessions")
             ok, reason = gate_is_valid(sessions_dir, session_id, action_name, gate_id)
             if not ok:
                 return ValidationResult(allowed=False, reason=reason)
 
-        # 7. Commit requires non-empty message
         if action_name == "commit":
             message = params.get("message", "")
             if not isinstance(message, str) or not message.strip():
-                return ValidationResult(
-                    allowed=False,
-                    reason="Commit action requires a non-empty message",
-                )
+                return ValidationResult(allowed=False, reason="Commit action requires a non-empty message")
 
-        # 8. Composite action requires LangGraph or fallback
         if is_composite_action(action_name):
             if not self._langgraph_enabled and not self._allow_fallback_composite:
                 return ValidationResult(
                     allowed=False,
-                    reason=(
-                        f"Composite action {action_name} requires "
-                        "LANGGRAPH_ENABLED=true or ALLOW_FALLBACK_COMPOSITE_ACTIONS=true"
-                    ),
+                    reason=f"Composite action {action_name} requires LANGGRAPH_ENABLED=true or ALLOW_FALLBACK_COMPOSITE_ACTIONS=true",
                 )
 
         normalized = dict(params)
         return ValidationResult(allowed=True, normalized_params=normalized)
+
+    def _action_is_allowed(self, action_name: str, allowed_actions: list[str]) -> bool:
+        allowed = {str(action) for action in allowed_actions}
+        if action_name in allowed:
+            return True
+        alias_set = READ_ONLY_ACTION_ALIASES.get(action_name, {action_name})
+        return bool(alias_set & allowed)
 
     def _check_path_escape(self, worktree: Path, params: dict[str, Any]) -> str:
         """Recursively check path-like params against the resolved worktree."""
