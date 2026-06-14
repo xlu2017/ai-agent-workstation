@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from typing import Any
+
 from api.models.session_graph import (
-    AdapterMapping,
     ContextProjection,
     MountSessionRequest,
     ProjectionMode,
@@ -13,18 +14,28 @@ from api.models.session_graph import (
 from api.services.context_projection_budget import select_context_projection_budget
 
 
+def _mapping_value(mapping: object, name: str, default: object = "") -> object:
+    if isinstance(mapping, dict):
+        return mapping.get(name, default)
+    return getattr(mapping, name, default)
+
+
+def _enumish_value(value: object) -> str:
+    return str(getattr(value, "value", value) or "")
+
+
 def generate_budgeted_context_projection(
     source: SessionRecord,
     target: SessionRecord,
     request: MountSessionRequest,
-    mappings: list[AdapterMapping] | None = None,
+    mappings: list[Any] | None = None,
 ) -> ContextProjection:
-    """Generate a task-scoped projection that uses a dynamic budget profile.
+    """Generate a task-scoped projection with dynamic budget evidence.
 
-    The selected profile carries both the numeric budget and the direct logic rationale
-    for that budget in projection evidence, so previews and persisted events can explain
-    why a mount received 1000, 4000, 6000, 12000, 20000, or 22000 projected tokens.
+    This service is graph-model-native. Deprecated adapter-engine mapping objects
+    may still be passed as loose evidence, but they are not required.
     """
+
     broad_source = source.kind in {SessionKind.REPO, SessionKind.APP, SessionKind.CONTAINER}
     focused_target = target.kind in {SessionKind.GOAL, SessionKind.WORK, SessionKind.QUESTION}
     mapping_based = bool(mappings)
@@ -67,7 +78,8 @@ def generate_budgeted_context_projection(
     ]
     if mappings:
         evidence.append(f"mapping_count:{len(mappings)}")
-        evidence.extend(f"mapping:{mapping.id}:{mapping.relationship.value}:{mapping.confidence}" for mapping in mappings[:8])
+        for mapping in mappings[:8]:
+            evidence.append(f"mapping:{_mapping_value(mapping, 'id', '')}:{_enumish_value(_mapping_value(mapping, 'relationship', ''))}:{_mapping_value(mapping, 'confidence', '')}")
 
     return ContextProjection(
         active_session_id=target.id,
