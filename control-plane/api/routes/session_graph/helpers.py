@@ -96,7 +96,7 @@ def _get_edge_from_graph(graph: SessionGraphSnapshot, edge_id: str, context: Req
 def _get_projection_from_graph(graph: SessionGraphSnapshot, projection_id: str, context: RequestContext) -> ContextProjection:
     projection = next((candidate for candidate in graph.projections if candidate.id == projection_id), None)
     if projection is None:
-        raise HTTPException(404, f"Projection {projection.id} is outside workspace {context.workspace_id}.")
+        raise HTTPException(404, f"Projection {projection_id} not found")
     _assert_projection_visible(graph, projection, context)
     return projection
 
