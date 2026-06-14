@@ -14,6 +14,16 @@ from api.services.session_graph_prompt_recommendation import (  # noqa: E402
 )
 
 
+class _SessionStub:
+    def __init__(self, raw: dict[str, object]):
+        self.id = str(raw["id"])
+        self.kind = raw["kind"]
+        self.status = raw["status"]
+        self.title = str(raw["title"])
+        self.metadata = raw.get("metadata", {})
+        self.root_id = raw.get("root_id")
+
+
 def test_graph_chat_returns_503_when_prompt_routing_is_unavailable(tmp_path: Path, monkeypatch):
     os.environ["SESSION_GRAPH_PATH"] = str(tmp_path / "session-graph.json")
     client = TestClient(app)
@@ -52,7 +62,7 @@ def test_graph_prompt_route_rejects_agent_core_non_llm_source(tmp_path: Path, mo
         json={"id": "goal-provider-route", "kind": "goal", "title": "Provider route", "status": "active"},
     )
     assert response.status_code == 200
-    session = response.json()["session"]
+    session = _SessionStub(response.json()["session"])
 
     class FakeResponse:
         def raise_for_status(self):
@@ -76,8 +86,7 @@ def test_graph_prompt_route_rejects_agent_core_non_llm_source(tmp_path: Path, mo
     monkeypatch.setattr("api.services.session_graph_prompt_recommendation.httpx.post", lambda *_args, **_kwargs: FakeResponse())
 
     try:
-        recommend_graph_prompt_route(type("Session", (), session)(), "Continue.")
+        recommend_graph_prompt_route(session, "Continue.")
         assert False, "Expected PromptRoutingUnavailable"
     except PromptRoutingUnavailable as exc:
         assert "non-LLM" in str(exc)
-}
