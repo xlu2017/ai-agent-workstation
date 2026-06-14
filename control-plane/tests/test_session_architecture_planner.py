@@ -80,13 +80,7 @@ def test_plan_create_child_applies_with_parent_edge(tmp_path: Path):
 
 
 def test_plan_create_sibling_links_to_active_and_preserves_root():
-    active = SessionRecord(
-        id="work-a",
-        kind=SessionKind.WORK,
-        title="Fix auth bug",
-        parent_id="goal-a",
-        root_id="root-a",
-    )
+    active = SessionRecord(id="work-a", kind=SessionKind.WORK, title="Fix auth bug", parent_id="goal-a", root_id="root-a")
 
     plan = plan_create_sibling(active, SessionSeed(kind=SessionKind.WORK, title="Clean docs"))
 
@@ -100,16 +94,11 @@ def test_plan_create_sibling_links_to_active_and_preserves_root():
     assert edge.target_session_id == sibling.id
 
 
-def test_move_repo_under_goal_uses_non_destructive_adapter_mount():
+def test_move_repo_under_goal_marks_adapter_requested_without_running_adapter_engine():
     source = SessionRecord(id="openhands", kind=SessionKind.REPO, title="OpenHands")
     target = SessionRecord(id="goal", kind=SessionKind.GOAL, title="Integrate OpenHands")
 
-    plan = plan_move_under(
-        source,
-        target,
-        user_intent="Adapt executor behavior from OpenHands into this project goal.",
-        mount_mode=MountMode.REFERENCE,
-    )
+    plan = plan_move_under(source, target, user_intent="Adapt executor behavior from OpenHands into this project goal.", mount_mode=MountMode.REFERENCE)
 
     request = plan.proposal.mount_request
     assert request is not None
@@ -121,7 +110,7 @@ def test_move_repo_under_goal_uses_non_destructive_adapter_mount():
     assert "Adapter projection required" in plan.warnings[0]
 
 
-def test_move_under_applies_through_adapter_engine(tmp_path: Path):
+def test_move_under_applies_graph_native_mount(tmp_path: Path):
     store = _store(tmp_path)
     store.create_session(SessionRecord(id="openhands", kind=SessionKind.REPO, title="OpenHands"))
     store.create_session(SessionRecord(id="goal", kind=SessionKind.GOAL, title="Integrate executor behavior"))
@@ -129,18 +118,14 @@ def test_move_under_applies_through_adapter_engine(tmp_path: Path):
     target = store.get_session("goal")
     assert source is not None
     assert target is not None
-    plan = plan_move_under(
-        source,
-        target,
-        user_intent="Adapt executor behavior from OpenHands into this project goal.",
-    )
+    plan = plan_move_under(source, target, user_intent="Adapt executor behavior from OpenHands into this project goal.")
 
     graph = store.apply_update_proposal(plan.proposal)
 
     assert any(edge.type == EdgeType.MOUNTED_UNDER for edge in graph.edges)
-    assert any(edge.type == EdgeType.ADAPTS_FROM for edge in graph.edges)
-    assert any(session.kind == SessionKind.ADAPTER for session in graph.sessions)
-    assert graph.projections
+    assert not any(edge.type == EdgeType.ADAPTS_FROM for edge in graph.edges)
+    assert not any(session.kind == SessionKind.ADAPTER for session in graph.sessions)
+    assert not graph.projections
 
 
 def test_move_same_kind_short_intent_can_plain_mount():
@@ -185,22 +170,9 @@ def test_question_only_apply_records_update_event(tmp_path: Path):
 
 
 def test_propose_context_sources_prefers_same_root_and_repo_context():
-    active = SessionRecord(
-        id="work",
-        kind=SessionKind.WORK,
-        title="Auth fix",
-        summary="Need frontend repo context.",
-        parent_id="goal",
-        root_id="root",
-    )
+    active = SessionRecord(id="work", kind=SessionKind.WORK, title="Auth fix", summary="Need frontend repo context.", parent_id="goal", root_id="root")
     repo = SessionRecord(id="repo", kind=SessionKind.REPO, title="Frontend repo", root_id="root")
-    sibling = SessionRecord(
-        id="sibling",
-        kind=SessionKind.WORK,
-        title="Sibling task",
-        parent_id="goal",
-        root_id="root",
-    )
+    sibling = SessionRecord(id="sibling", kind=SessionKind.WORK, title="Sibling task", parent_id="goal", root_id="root")
     unrelated = SessionRecord(id="other", kind=SessionKind.QUESTION, title="Other", root_id="other-root")
 
     ranked = propose_context_sources(active, [unrelated, repo, sibling])
