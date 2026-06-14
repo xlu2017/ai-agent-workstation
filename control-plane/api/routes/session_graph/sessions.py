@@ -24,6 +24,10 @@ from api.routes.session_graph.helpers import (
     _store,
     _visible_sessions,
 )
+from api.services.session_graph_repo_execution import (
+    execution_context_was_attached,
+    reactivate_blocked_work_sessions_after_repo_attach,
+)
 
 router = APIRouter()
 
@@ -72,11 +76,11 @@ def get_session(
 
 
 @router.patch("/sessions/{session_id}")
-def update_session(
+async def update_session(
     session_id: str,
     body: UpdateSessionRequest,
     context: RequestContext = Depends(_context),
-) -> dict[str, dict[str, object]]:
+) -> dict[str, object]:
     store = _store()
     graph = store.load()
     index = next((idx for idx, session in enumerate(graph.sessions) if session.id == session_id), None)
@@ -86,6 +90,7 @@ def update_session(
     session = graph.sessions[index]
     _assert_session_visible(session, context)
     before = session.model_dump(mode="json")
+    before_metadata = dict(session.metadata)
     fields = body.model_fields_set
 
     if "title" in fields and body.title is not None:
@@ -125,8 +130,22 @@ def update_session(
         "session.updated",
         {"before": before, "after": session.model_dump(mode="json"), "reason": body.reason, "source": "session_graph.crud"},
     )
+
+    reactivated_work_sessions: list[dict[str, object]] = []
+    if execution_context_was_attached(before_metadata, session.metadata):
+        reactivated_work_sessions = await reactivate_blocked_work_sessions_after_repo_attach(
+            graph=graph,
+            parent_session=session,
+            source_event_id=event.id,
+        )
+
     _save_or_400(store, graph)
-    return {"session": session.model_dump(mode="json"), "event": event.model_dump(mode="json")}
+    return {
+        "session": session.model_dump(mode="json"),
+        "event": event.model_dump(mode="json"),
+        "reactivated_work_sessions": reactivated_work_sessions,
+        "reactivated_work_session_count": len(reactivated_work_sessions),
+    }
 
 
 @router.delete("/sessions/{session_id}")
