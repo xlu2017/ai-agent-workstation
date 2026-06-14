@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -149,8 +150,39 @@ class SessionEvent(BaseModel):
     created_at: str = Field(default_factory=utc_now)
 
 
+class ContextProjection(BaseModel):
+    id: str = Field(default_factory=lambda: f"projection-{uuid4().hex[:12]}")
+    active_session_id: str
+    source_session_ids: list[str] = Field(default_factory=list)
+    summary: str = ""
+    data: dict[str, object] = Field(default_factory=dict)
+    created_at: str = Field(default_factory=utc_now)
+
+
 class SessionGraph(BaseModel):
     sessions: list[SessionRecord] = Field(default_factory=list)
     edges: list[SessionEdge] = Field(default_factory=list)
     events: list[SessionEvent] = Field(default_factory=list)
+    projections: list[ContextProjection] = Field(default_factory=list)
     version: int = 1
+
+
+SessionGraphSnapshot = SessionGraph
+
+
+class SessionUpdateClassification(str, Enum):
+    NONE = "none"
+    CREATE_SESSION = "create_session"
+    UPDATE_SESSION = "update_session"
+    CREATE_EDGE = "create_edge"
+    MOUNT_SESSION = "mount_session"
+
+
+class SessionUpdateProposal(BaseModel):
+    classification: SessionUpdateClassification = SessionUpdateClassification.NONE
+    reason: str = ""
+    active_session_id: str | None = None
+    created_sessions: list[SessionRecord] = Field(default_factory=list)
+    updated_sessions: list[SessionRecord] = Field(default_factory=list)
+    created_edges: list[SessionEdge] = Field(default_factory=list)
+    mount_request: Any | None = None
