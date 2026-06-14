@@ -56,7 +56,7 @@ def _parse_route_params(params: Any, reason: str, source: str, payload: dict[str
         return None
     route_reason = str(params.get("reason") or reason or "agent-core recommended prompt route")
     assistant_response = str(params.get("assistant_response") or "")
-    response_session_kind = str(params.get("response_session_kind") or ("question" if route == "question_only" else ""))
+    response_session_kind = str(params.get("response_session_kind") or ("chat" if route == "question_only" else ""))
     narration = str(params.get("narration") or params.get("progress_note") or "")
     return PromptRouteRecommendation(
         route=route,
