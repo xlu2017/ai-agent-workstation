@@ -123,6 +123,19 @@ class ActionRisk(str, Enum):
     HIGH = "high"
 
 
+class MountMode(str, Enum):
+    REFERENCE = "reference"
+    COMPONENT = "component"
+    DEPENDENCY = "dependency"
+    VENDOR = "vendor"
+    TEMPLATE = "template"
+    COMPARE = "compare"
+    PORT = "port"
+    WRAP = "wrap"
+    FORK = "fork"
+    UNKNOWN = "unknown"
+
+
 class ProjectionMode(str, Enum):
     SUMMARY = "summary"
     BEHAVIOR_MAP = "behavior_map"
@@ -171,6 +184,15 @@ class SessionPolicy(BaseModel):
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class MountSessionRequest(BaseModel):
+    source_session_id: str
+    target_session_id: str
+    user_intent: str = "Mount source session under target session."
+    mount_mode: MountMode = MountMode.REFERENCE
+    create_adaptation_session: bool = False
+    make_active: bool = False
 
 
 class SessionRecord(BaseModel):
@@ -241,9 +263,14 @@ SessionGraphSnapshot = SessionGraph
 class SessionUpdateClassification(str, Enum):
     NONE = "none"
     CREATE_SESSION = "create_session"
+    CREATE_PARENT = "create_parent"
+    CREATE_CHILD = "create_child"
+    CREATE_SIBLING = "create_sibling"
     UPDATE_SESSION = "update_session"
     CREATE_EDGE = "create_edge"
     MOUNT_SESSION = "mount_session"
+    ADAPT_SESSION = "adapt_session"
+    QUESTION_ONLY = "question_only"
 
 
 class SessionUpdateProposal(BaseModel):
@@ -253,4 +280,4 @@ class SessionUpdateProposal(BaseModel):
     created_sessions: list[SessionRecord] = Field(default_factory=list)
     updated_sessions: list[SessionRecord] = Field(default_factory=list)
     created_edges: list[SessionEdge] = Field(default_factory=list)
-    mount_request: Any | None = None
+    mount_request: MountSessionRequest | dict[str, Any] | None = None
