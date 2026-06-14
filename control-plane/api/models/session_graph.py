@@ -156,6 +156,12 @@ class ProjectionSelector(str, Enum):
     BEHAVIORS = "behaviors"
     INTERFACES = "interfaces"
     TERMINATION_CONDITIONS = "termination_conditions"
+    SUCCESS_CRITERIA = "success_criteria"
+    RELEVANT_FILES = "relevant_files"
+    SECURITY_CONSTRAINTS = "security_constraints"
+    API_CONTRACTS = "api_contracts"
+    KNOWN_PATHS = "known_paths"
+    KNOWN_COMMANDS = "known_commands"
     UNRELATED_UI = "unrelated_ui"
     DEPLOYMENT = "deployment"
     PLUGINS = "plugins"
@@ -167,6 +173,7 @@ class ContextProjectionBudget(BaseModel):
     max_tokens: int = 0
     max_files: int = 0
     max_events: int = 0
+    recency_days: int = 0
 
 
 class SessionPolicy(BaseModel):
