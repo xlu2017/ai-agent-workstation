@@ -82,7 +82,7 @@ def _parse_next_task_decision(payload: dict[str, Any]) -> PromptRouteRecommendat
     return _parse_route_params(
         decision.get("params"),
         str(decision.get("reason") or ""),
-        str(payload.get("source") or "agent_core_next_task"),
+        str(payload.get("source") or ""),
         payload,
     )
 
@@ -96,7 +96,7 @@ def _parse_legacy_recommendation(payload: dict[str, Any]) -> PromptRouteRecommen
     return _parse_route_params(
         recommendation.get("params"),
         str(recommendation.get("rationale") or ""),
-        str(payload.get("source") or "agent_core"),
+        str(payload.get("source") or ""),
         payload,
     )
 
@@ -107,8 +107,8 @@ def _parse_recommendation(payload: dict[str, Any]) -> PromptRouteRecommendation 
 
 def _assert_llm_route_source(payload: dict[str, Any]) -> None:
     source = str(payload.get("source") or "")
-    if source and source not in LLM_ROUTE_SOURCES:
-        raise PromptRoutingUnavailable(f"agent-core returned non-LLM prompt route source: {source}")
+    if source not in LLM_ROUTE_SOURCES:
+        raise PromptRoutingUnavailable(f"agent-core returned non-LLM prompt route source: {source or '<missing>'}")
 
 
 def recommend_graph_prompt_route(session: Any, prompt: str) -> PromptRouteRecommendation:
