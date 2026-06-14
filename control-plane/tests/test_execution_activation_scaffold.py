@@ -170,4 +170,3 @@ def test_graph_work_records_ready_activation_plan_when_repo_context_exists():
     assert activation["plan"]["after_step"]["requires_llm_after_outcome"] is True
     assert activation["workflow"]["status"] == "not_started"
     assert activation["metadata"]["workflow_adapter_start_scaffolded"] is True
-}
