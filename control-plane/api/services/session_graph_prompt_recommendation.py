@@ -13,6 +13,7 @@ AGENT_CORE_TIMEOUT = float(os.environ.get("AGENT_CORE_TIMEOUT", "10"))
 
 PROMPT_ROUTES = {"continue_active", "question_only", "create_child_goal", "create_sibling_goal"}
 ROUTE_PROMPT_VISIBLE_ACTIONS = ["session.route_prompt"]
+LLM_ROUTE_SOURCES = {"llm_next_task_decision", "llm_recommend_next"}
 
 
 class PromptRoutingUnavailable(RuntimeError):
@@ -104,6 +105,12 @@ def _parse_recommendation(payload: dict[str, Any]) -> PromptRouteRecommendation 
     return _parse_next_task_decision(payload) or _parse_legacy_recommendation(payload)
 
 
+def _assert_llm_route_source(payload: dict[str, Any]) -> None:
+    source = str(payload.get("source") or "")
+    if source and source not in LLM_ROUTE_SOURCES:
+        raise PromptRoutingUnavailable(f"agent-core returned non-LLM prompt route source: {source}")
+
+
 def recommend_graph_prompt_route(session: Any, prompt: str) -> PromptRouteRecommendation:
     """Return the advisory prompt route from a constrained recommend-next pass.
 
@@ -127,10 +134,13 @@ def recommend_graph_prompt_route(session: Any, prompt: str) -> PromptRouteRecomm
         response = httpx.post(f"{AGENT_CORE_URL}/actions/recommend-next", json=request_body, timeout=AGENT_CORE_TIMEOUT)
         response.raise_for_status()
         payload = response.json()
+    except PromptRoutingUnavailable:
+        raise
     except Exception as exc:
         raise PromptRoutingUnavailable(f"agent-core prompt routing unavailable: {exc}") from exc
 
+    _assert_llm_route_source(payload)
     parsed = _parse_recommendation(payload)
     if parsed is None:
-        raise PromptRoutingUnavailable("agent-core did not return a valid session.route_prompt recommendation")
+        raise PromptRoutingUnavailable("agent-core did not return a valid LLM-backed session.route_prompt recommendation")
     return parsed
