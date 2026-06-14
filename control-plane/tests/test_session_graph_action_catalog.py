@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from api.models.session_graph import EdgeType, MountMode, SessionKind, SessionRecord  # noqa: E402
+from api.models.session_graph import EdgeType, SessionKind, SessionRecord  # noqa: E402
 from api.services.session_action_catalog import (  # noqa: E402
     execute_session_action,
     get_session_action,
@@ -29,7 +29,7 @@ def _mount_params() -> dict[str, object]:
         "source_session_id": "repo-session",
         "target_session_id": "goal-session",
         "user_intent": "Use repo context to implement the goal.",
-        "mount_mode": MountMode.REFERENCE.value,
+        "mount_mode": "reference",
         "create_adaptation_session": True,
         "make_active": False,
     }
@@ -43,6 +43,7 @@ def test_session_action_catalog_exposes_mount_actions():
     assert catalog["executor_scope"] == "session_graph"
     assert "session.mount" in names
     assert "session.mount.preview" in names
+    assert "session.unmount" in names
     assert get_session_action("session.mount")["executor"] == "session_graph.mount_session"
 
 
@@ -66,8 +67,8 @@ def test_session_mount_action_persists_graph_edge(tmp_path):
 
     assert applied["preview"] is False
     assert any(edge.type == EdgeType.MOUNTED_UNDER for edge in graph.edges)
-    assert graph.projections
-    assert any(session.kind == SessionKind.ADAPTER for session in graph.sessions)
+    assert not graph.projections
+    assert not any(session.kind == SessionKind.ADAPTER for session in graph.sessions)
 
 
 def test_session_unmount_action_removes_mounted_edge(tmp_path):
