@@ -13,6 +13,7 @@ from api.models.session_graph import (
     SessionEventActor,
     SessionEventType,
     SessionGraphSnapshot,
+    SessionKind,
     SessionRecord,
     SessionUpdateClassification,
     SessionUpdateProposal,
@@ -22,7 +23,6 @@ from api.models.session_graph import (
 
 CONTAINMENT_EDGE_TYPES = {
     EdgeType.CONTAINS,
-    EdgeType.COMPONENT_OF,
     EdgeType.MOUNTED_UNDER,
     EdgeType.ADAPTED_UNDER,
     EdgeType.MERGED_INTO,
@@ -170,12 +170,9 @@ class SessionGraphStore:
 
     def apply_update_proposal(self, proposal: SessionUpdateProposal) -> SessionGraphSnapshot:
         if proposal.mount_request is not None or proposal.classification == SessionUpdateClassification.MOUNT_SESSION:
-            from api.services.session_adapter_engine import mount_session
-
             if proposal.mount_request is None:
                 raise ValueError("mount_session proposal requires mount_request.")
-            mount_session(self, proposal.mount_request)
-            return self.load()
+            return _apply_mount_request(self, proposal.mount_request, proposal.reason)
 
         graph = self.load()
         existing_ids = {session.id for session in graph.sessions}
@@ -217,15 +214,72 @@ class SessionGraphStore:
         return graph
 
 
+def _mount_field(mount_request: object, key: str, default: object = "") -> object:
+    if isinstance(mount_request, dict):
+        return mount_request.get(key, default)
+    return getattr(mount_request, key, default)
+
+
+def _apply_mount_request(store: SessionGraphStore, mount_request: object, reason: str) -> SessionGraphSnapshot:
+    graph = store.load()
+    source_id = str(_mount_field(mount_request, "source_session_id"))
+    target_id = str(_mount_field(mount_request, "target_session_id"))
+    if not source_id or not target_id:
+        raise ValueError("mount_request requires source_session_id and target_session_id.")
+    if source_id == target_id:
+        raise ValueError("A session cannot be mounted under itself.")
+
+    source = next((session for session in graph.sessions if session.id == source_id), None)
+    target_index = next((idx for idx, session in enumerate(graph.sessions) if session.id == target_id), None)
+    if source is None:
+        raise ValueError(f"Source session {source_id} not found.")
+    if target_index is None:
+        raise ValueError(f"Target session {target_id} not found.")
+    if any(edge.type == EdgeType.MOUNTED_UNDER and edge.source_session_id == source_id and edge.target_session_id == target_id for edge in graph.edges):
+        raise ValueError(f"Duplicate mounted_under edge {source_id} -> {target_id}.")
+
+    edge = SessionEdge(
+        type=EdgeType.MOUNTED_UNDER,
+        source_session_id=source_id,
+        target_session_id=target_id,
+        metadata={
+            "reason": reason or str(_mount_field(mount_request, "user_intent", "Mount session.")),
+            "mount_mode": str(_mount_field(mount_request, "mount_mode", "reference")),
+            "source": "session_graph_service",
+        },
+    )
+    graph.edges.append(edge)
+
+    if bool(_mount_field(mount_request, "make_active", False)):
+        target = graph.sessions[target_index]
+        metadata = dict(target.metadata)
+        metadata["active_context_session_id"] = source_id
+        if source.kind == SessionKind.REPO:
+            metadata["repo_session_id"] = source_id
+            repo_facet = source.facets.get("repo", {})
+            if isinstance(repo_facet, dict):
+                if isinstance(repo_facet.get("path"), str):
+                    metadata["repo_path"] = repo_facet["path"]
+                if isinstance(repo_facet.get("full_name"), str):
+                    metadata["repo_id"] = repo_facet["full_name"]
+        target.metadata = metadata
+        graph.sessions[target_index] = target
+
+    graph.events.append(SessionEvent(
+        type=SessionEventType.SESSION_MOUNTED,
+        session_id=target_id,
+        actor=SessionEventActor.SYSTEM,
+        data={"source_session_id": source_id, "target_session_id": target_id, "edge_id": edge.id},
+    ))
+    store.save(graph)
+    return graph
+
+
 def session_ids(graph: SessionGraphSnapshot) -> set[str]:
     return {session.id for session in graph.sessions}
 
 
-def reachable(
-    edges: list[SessionEdge],
-    start_session_id: str,
-    target_session_id: str,
-) -> bool:
+def reachable(edges: list[SessionEdge], start_session_id: str, target_session_id: str) -> bool:
     visited: set[str] = set()
     stack = [start_session_id]
     while stack:
@@ -279,11 +333,7 @@ def validate_graph_update(graph: SessionGraphSnapshot) -> list[str]:
             issues.append(f"Edge {edge.id} references missing target {edge.target_session_id}.")
         if edge.source_session_id == edge.target_session_id:
             issues.append(f"Edge {edge.id} creates a self-cycle.")
-        if edge.type in CONTAINMENT_EDGE_TYPES and reachable(
-            all_edges,
-            edge.target_session_id,
-            edge.source_session_id,
-        ):
+        if edge.type in CONTAINMENT_EDGE_TYPES and reachable(all_edges, edge.target_session_id, edge.source_session_id):
             issues.append(f"Edge {edge.id} creates a containment cycle.")
     return issues
 
