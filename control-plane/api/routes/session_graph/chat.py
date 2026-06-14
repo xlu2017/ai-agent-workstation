@@ -289,7 +289,8 @@ async def append_graph_session_chat_turn(
         created_session = _make_work_session(session, content, turn, now, context, body.mode, narration)
         created_session = _apply_repo_execution_metadata(created_session, session, graph.sessions)
         readiness_request = build_graph_work_execution_readiness_request(work_session=created_session, parent_session=session)
-        readiness_result = await ExecutionActivationService(start_workflow=start_graph_workflow).activate(readiness_request)
+        start_callback = start_graph_workflow if readiness_request.worktree_id else None
+        readiness_result = await ExecutionActivationService(start_workflow=start_callback).activate(readiness_request)
         created_session = record_execution_readiness_on_work_session(created_session, readiness_result)
         readiness_response = execution_readiness_response(readiness_result)
         if narration:
