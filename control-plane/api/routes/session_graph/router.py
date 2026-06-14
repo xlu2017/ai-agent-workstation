@@ -3,7 +3,6 @@
 from fastapi import APIRouter
 
 from api.routes.session_graph.actions import router as actions_router
-from api.routes.session_graph.adapters import router as adapters_router
 from api.routes.session_graph.chat import router as chat_router
 from api.routes.session_graph.dev_workflow import router as dev_workflow_router
 from api.routes.session_graph.edges import router as edges_router
@@ -20,7 +19,8 @@ router = APIRouter(prefix="/api/session-graph", tags=["session-graph"])
 router.include_router(sessions_router)
 router.include_router(edges_router)
 router.include_router(projections_router)
-router.include_router(adapters_router)
+# Deprecated: the old adapter/mount router imports the removed adapter-engine
+# model surface. Canonical graph mutations now go through /actions/apply.
 router.include_router(events_router)
 router.include_router(settings_router)
 router.include_router(platform_apps_router)
