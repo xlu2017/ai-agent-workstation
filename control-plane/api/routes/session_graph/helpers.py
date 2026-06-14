@@ -9,6 +9,7 @@ from api.models.session_graph import (
     ContextProjection,
     SessionEdge,
     SessionEvent,
+    SessionEventActor,
     SessionGraphSnapshot,
     SessionRecord,
     utc_now,
@@ -95,7 +96,7 @@ def _get_edge_from_graph(graph: SessionGraphSnapshot, edge_id: str, context: Req
 def _get_projection_from_graph(graph: SessionGraphSnapshot, projection_id: str, context: RequestContext) -> ContextProjection:
     projection = next((candidate for candidate in graph.projections if candidate.id == projection_id), None)
     if projection is None:
-        raise HTTPException(404, f"Projection {projection_id} not found")
+        raise HTTPException(404, f"Projection {projection.id} is outside workspace {context.workspace_id}.")
     _assert_projection_visible(graph, projection, context)
     return projection
 
@@ -131,6 +132,7 @@ def _append_event_to_graph(
     event = SessionEvent(
         type=event_type,
         session_id=session_id,
+        actor=SessionEventActor.SYSTEM,
         data=data or {},
         created_at=utc_now(),
     )
