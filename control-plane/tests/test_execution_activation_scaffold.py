@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from api.models.session_graph import SessionKind, SessionRecord, SessionStatus  # noqa: E402
 from api.services.session_graph_execution_bridge import (  # noqa: E402
     build_graph_work_activation_request,
+    build_graph_work_execution_plan,
     record_activation_result_on_work_session,
     scaffold_activation_result,
     should_activate_graph_work_session,
@@ -100,6 +101,27 @@ def test_graph_work_activation_request_uses_parent_repo_context():
     assert request.prompt == "Run validation"
 
 
+def test_graph_work_execution_plan_scaffolds_first_context_action_then_llm_gate():
+    request = ExecutionActivationRequest(
+        session_id="work-1",
+        prompt="Why is the world round?",
+        source=ExecutionActivationSource.SESSION_GRAPH_CHAT,
+        repo_context_id="repo-session-1",
+    )
+
+    plan = build_graph_work_execution_plan(request)
+
+    assert plan["workflow_start"]["status"] == "scaffolded_not_started"
+    assert plan["workflow_start"]["auto_started"] is False
+    assert len(plan["steps"]) == 1
+    assert plan["steps"][0]["decision"] == "find_out_more"
+    assert plan["steps"][0]["task_name"] == "search_code"
+    assert plan["steps"][0]["params"]["query"] == "Why is the world round?"
+    assert plan["steps"][0]["params"]["scope"] == "repo-session-1"
+    assert plan["after_step"]["requires_llm_after_outcome"] is True
+    assert plan["after_step"]["max_top_level_actions_before_next_llm"] == 1
+
+
 def test_graph_work_records_non_starting_activation_result():
     work = SessionRecord(
         id="work-1",
@@ -117,3 +139,35 @@ def test_graph_work_records_non_starting_activation_result():
     assert work.state["execution_activation"]["status"] == "blocked_needs_repo"
     assert work.state["execution_activation"]["auto_started"] is False
     assert work.facets["work"]["activation"]["auto_started"] is False
+
+
+def test_graph_work_records_ready_activation_plan_when_repo_context_exists():
+    parent = SessionRecord(
+        id="goal-1",
+        kind=SessionKind.GOAL,
+        title="Goal",
+        status=SessionStatus.ACTIVE,
+        metadata={"repo_session_id": "repo-session-1"},
+    )
+    work = SessionRecord(
+        id="work-1",
+        kind=SessionKind.WORK,
+        title="Work",
+        status=SessionStatus.ACTIVE,
+        parent_id="goal-1",
+        root_id="goal-1",
+        facets={"work": {"prompt": "Why is the world round?", "execution_state": "ready_for_execution", "requires_execution_start": True, "auto_started": False}},
+    )
+
+    request = build_graph_work_activation_request(work_session=work, parent_session=parent)
+    result = scaffold_activation_result(request)
+    record_activation_result_on_work_session(work, result)
+
+    activation = work.state["execution_activation"]
+    assert activation["status"] == "ready_not_started"
+    assert activation["auto_started"] is False
+    assert activation["plan"]["steps"][0]["task_name"] == "search_code"
+    assert activation["plan"]["after_step"]["requires_llm_after_outcome"] is True
+    assert activation["workflow"]["status"] == "not_started"
+    assert activation["metadata"]["workflow_adapter_start_scaffolded"] is True
+}
