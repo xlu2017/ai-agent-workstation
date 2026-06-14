@@ -71,14 +71,14 @@ def test_graph_session_chat_appends_user_turn_and_creates_work_session(tmp_path:
     assert work_session["facets"]["work"]["activation"]["auto_started"] is False
     assert work_session["parent_id"] == session["id"]
     assert body["created_edge"]["type"] == "component_of"
-    assert [event["type"] for event in body["events"]] == ["user.interjected", "work.started"]
+    assert [event["type"] for event in body["events"]] == ["user.interjected", "work.activation_recorded"]
     assert body["events"][-1]["data"]["auto_started"] is False
     assert body["events"][-1]["data"]["activation"]["auto_started"] is False
 
     events_response = client.get(f"/api/session-graph/events?session_id={work_session['id']}")
     assert events_response.status_code == 200
     event_types = [event["type"] for event in events_response.json()["events"]]
-    assert "work.started" in event_types
+    assert "work.activation_recorded" in event_types
 
 
 def test_graph_session_chat_marks_work_ready_when_repo_is_attached(tmp_path: Path, monkeypatch):
@@ -101,6 +101,7 @@ def test_graph_session_chat_marks_work_ready_when_repo_is_attached(tmp_path: Pat
     assert body["work_session"]["facets"]["work"]["requires_execution_start"] is True
     assert body["work_session"]["facets"]["work"]["requires_repo"] is False
     assert body["work_session"]["facets"]["work"]["activation"]["auto_started"] is False
+    assert [event["type"] for event in body["events"]] == ["user.interjected", "work.activation_recorded"]
 
 
 def test_graph_session_chat_question_only_answers_without_work_when_no_repo_context(tmp_path: Path, monkeypatch):
@@ -145,6 +146,7 @@ def test_graph_session_chat_repo_context_question_routes_to_work_before_answerin
     assert body["work_session"]["kind"] == "work"
     assert body["work_session"]["facets"]["work"]["requires_execution_start"] is True
     assert body["execution_activation"]["status"] == "ready_not_started"
+    assert [event["type"] for event in body["events"]] == ["user.interjected", "work.activation_recorded"]
 
 
 def test_graph_session_chat_can_create_child_goal(tmp_path: Path, monkeypatch):
