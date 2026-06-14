@@ -246,8 +246,9 @@ def append_graph_session_chat_turn(
         )
         graph.edges.append(created_edge)
         execution_state = str(created_session.state.get("execution_state", "ready_for_execution"))
+        activation_started = activation_response.get("status") == "started" and activation_response.get("auto_started") is True
         extra_event = SessionEvent(
-            type=SessionEventType.WORK_STARTED,
+            type=SessionEventType.WORK_STARTED if activation_started else SessionEventType.WORK_ACTIVATION_RECORDED,
             session_id=created_session.id,
             root_session_id=created_session.root_id,
             actor=SessionEventActor.SYSTEM,
