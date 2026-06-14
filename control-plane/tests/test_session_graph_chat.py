@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from api.routes.session_graph import chat as chat_route  # noqa: E402
 from api.server import app  # noqa: E402
+from api.services.session_graph_prompt_recommendation import PromptRouteRecommendation  # noqa: E402
 
 
 def _client(tmp_path: Path) -> TestClient:
@@ -24,9 +26,25 @@ def _create_goal_session(client: TestClient, session_id: str = "goal-chat", repo
     return response.json()["session"]
 
 
-def test_graph_session_chat_appends_user_turn_and_creates_work_session(tmp_path: Path):
+def _stub_prompt_routing(monkeypatch, *, route: str, reason: str = "test route", assistant_response: str = "", narration: str = "") -> None:
+    def route_prompt(session, prompt):
+        return PromptRouteRecommendation(
+            route=route,
+            reason=reason,
+            source="test_stub",
+            payload={},
+            assistant_response=assistant_response,
+            response_session_kind="chat" if route == "question_only" else "",
+            narration=narration,
+        )
+
+    monkeypatch.setattr(chat_route, "recommend_graph_prompt_route", route_prompt)
+
+
+def test_graph_session_chat_appends_user_turn_and_creates_work_session(tmp_path: Path, monkeypatch):
     client = _client(tmp_path)
     session = _create_goal_session(client)
+    _stub_prompt_routing(monkeypatch, route="continue_active")
 
     response = client.post(
         f"/api/session-graph/sessions/{session['id']}/chat",
@@ -63,9 +81,10 @@ def test_graph_session_chat_appends_user_turn_and_creates_work_session(tmp_path:
     assert "work.started" in event_types
 
 
-def test_graph_session_chat_marks_work_ready_when_repo_is_attached(tmp_path: Path):
+def test_graph_session_chat_marks_work_ready_when_repo_is_attached(tmp_path: Path, monkeypatch):
     client = _client(tmp_path)
     session = _create_goal_session(client, repo_session_id="repo-context")
+    _stub_prompt_routing(monkeypatch, route="continue_active")
 
     response = client.post(f"/api/session-graph/sessions/{session['id']}/chat", json={"content": "Run validation."})
 
@@ -84,9 +103,10 @@ def test_graph_session_chat_marks_work_ready_when_repo_is_attached(tmp_path: Pat
     assert body["work_session"]["facets"]["work"]["activation"]["auto_started"] is False
 
 
-def test_graph_session_chat_question_only_answers_without_work_when_no_repo_context(tmp_path: Path):
+def test_graph_session_chat_question_only_answers_without_work_when_no_repo_context(tmp_path: Path, monkeypatch):
     client = _client(tmp_path)
     session = _create_goal_session(client)
+    _stub_prompt_routing(monkeypatch, route="question_only", assistant_response="This is a chat response.")
 
     response = client.post(f"/api/session-graph/sessions/{session['id']}/chat", json={"content": "Why is this a work session?"})
 
@@ -107,9 +127,10 @@ def test_graph_session_chat_question_only_answers_without_work_when_no_repo_cont
     assert [event["type"] for event in body["events"]] == ["user.interjected", "observation.recorded"]
 
 
-def test_graph_session_chat_repo_context_question_routes_to_work_before_answering(tmp_path: Path):
+def test_graph_session_chat_repo_context_question_routes_to_work_before_answering(tmp_path: Path, monkeypatch):
     client = _client(tmp_path)
     session = _create_goal_session(client, repo_session_id="game-repo-context")
+    _stub_prompt_routing(monkeypatch, route="continue_active")
 
     response = client.post(f"/api/session-graph/sessions/{session['id']}/chat", json={"content": "Why is the world round?"})
 
@@ -126,9 +147,10 @@ def test_graph_session_chat_repo_context_question_routes_to_work_before_answerin
     assert body["execution_activation"]["status"] == "ready_not_started"
 
 
-def test_graph_session_chat_can_create_child_goal(tmp_path: Path):
+def test_graph_session_chat_can_create_child_goal(tmp_path: Path, monkeypatch):
     client = _client(tmp_path)
     session = _create_goal_session(client)
+    _stub_prompt_routing(monkeypatch, route="create_child_goal")
 
     response = client.post(f"/api/session-graph/sessions/{session['id']}/chat", json={"content": "Create a child task to audit settings."})
 
@@ -141,9 +163,10 @@ def test_graph_session_chat_can_create_child_goal(tmp_path: Path):
     assert body["created_edge"]["type"] == "component_of"
 
 
-def test_graph_session_chat_can_create_sibling_goal(tmp_path: Path):
+def test_graph_session_chat_can_create_sibling_goal(tmp_path: Path, monkeypatch):
     client = _client(tmp_path)
     session = _create_goal_session(client)
+    _stub_prompt_routing(monkeypatch, route="create_sibling_goal")
 
     response = client.post(f"/api/session-graph/sessions/{session['id']}/chat", json={"content": "Start a new session for billing docs."})
 
