@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from enum import Enum
 from pathlib import Path
 
 from api.models.session_graph import (
@@ -60,26 +61,16 @@ class SessionGraphStore:
         issues = validate_graph_update(graph)
         if issues:
             raise ValueError(" ".join(issues))
-
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_fd = os.open(self.lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
             try:
                 import fcntl
-
                 fcntl.flock(lock_fd, fcntl.LOCK_EX)
             except ImportError:
                 pass
-
-            with tempfile.NamedTemporaryFile(
-                "w",
-                encoding="utf-8",
-                dir=self.path.parent,
-                prefix=f".{self.path.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as tmp:
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=self.path.parent, prefix=f".{self.path.name}.", suffix=".tmp", delete=False) as tmp:
                 tmp.write(graph.model_dump_json(indent=2))
                 tmp.write("\n")
                 tmp_path = Path(tmp.name)
@@ -87,7 +78,6 @@ class SessionGraphStore:
         finally:
             try:
                 import fcntl
-
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
             except ImportError:
                 pass
@@ -110,13 +100,7 @@ class SessionGraphStore:
         if session.root_id is None:
             session.root_id = session.parent_id or session.id
         graph.sessions.append(session)
-        event = SessionEvent(
-            type=SessionEventType.SESSION_CREATED,
-            session_id=session.id,
-            root_session_id=session.root_id,
-            actor=SessionEventActor.SYSTEM,
-            data={"session": session.model_dump(mode="json")},
-        )
+        event = SessionEvent(type=SessionEventType.SESSION_CREATED, session_id=session.id, root_session_id=session.root_id, actor=SessionEventActor.SYSTEM, data={"session": session.model_dump(mode="json")})
         graph.events.append(event)
         self.save(graph)
         return session
@@ -125,24 +109,14 @@ class SessionGraphStore:
         edges = self.load().edges
         if session_id is None:
             return edges
-        return [
-            edge for edge in edges
-            if edge.source_session_id == session_id or edge.target_session_id == session_id
-        ]
+        return [edge for edge in edges if edge.source_session_id == session_id or edge.target_session_id == session_id]
 
     def append_edge(self, edge: SessionEdge) -> SessionEdge:
         graph = self.load()
         if any(existing.id == edge.id for existing in graph.edges):
             raise ValueError(f"Edge {edge.id} already exists.")
-        if any(
-            existing.type == edge.type
-            and existing.source_session_id == edge.source_session_id
-            and existing.target_session_id == edge.target_session_id
-            for existing in graph.edges
-        ):
-            raise ValueError(
-                f"Duplicate edge {edge.type.value} {edge.source_session_id} -> {edge.target_session_id}."
-            )
+        if any(existing.type == edge.type and existing.source_session_id == edge.source_session_id and existing.target_session_id == edge.target_session_id for existing in graph.edges):
+            raise ValueError(f"Duplicate edge {edge.type.value} {edge.source_session_id} -> {edge.target_session_id}.")
         graph.edges.append(edge)
         self.save(graph)
         return edge
@@ -162,8 +136,7 @@ class SessionGraphStore:
         return projection
 
     def get_projection_for(self, session_id: str) -> ContextProjection | None:
-        projections = self.load().projections
-        for projection in reversed(projections):
+        for projection in reversed(self.load().projections):
             if projection.active_session_id == session_id or session_id in projection.source_session_ids:
                 return projection
         return None
@@ -193,31 +166,18 @@ class SessionGraphStore:
         for updated in proposal.updated_sessions:
             if updated.id not in existing_ids:
                 raise ValueError(f"Cannot update missing session {updated.id}.")
-            graph.sessions = [
-                updated if session.id == updated.id else session
-                for session in graph.sessions
-            ]
+            graph.sessions = [updated if session.id == updated.id else session for session in graph.sessions]
 
-        graph.events.append(SessionEvent(
-            type=SessionEventType.SESSION_UPDATED,
-            session_id=proposal.active_session_id or "session-graph",
-            root_session_id=proposal.active_session_id,
-            actor=SessionEventActor.SYSTEM,
-            data={
-                "classification": proposal.classification.value,
-                "reason": proposal.reason,
-                "created_session_ids": [session.id for session in proposal.created_sessions],
-                "created_edge_ids": [edge.id for edge in proposal.created_edges],
-            },
-        ))
+        graph.events.append(SessionEvent(type=SessionEventType.SESSION_UPDATED, session_id=proposal.active_session_id or "session-graph", root_session_id=proposal.active_session_id, actor=SessionEventActor.SYSTEM, data={"classification": proposal.classification.value, "reason": proposal.reason, "created_session_ids": [session.id for session in proposal.created_sessions], "created_edge_ids": [edge.id for edge in proposal.created_edges]}))
         self.save(graph)
         return graph
 
 
 def _mount_field(mount_request: object, key: str, default: object = "") -> object:
-    if isinstance(mount_request, dict):
-        return mount_request.get(key, default)
-    return getattr(mount_request, key, default)
+    value = mount_request.get(key, default) if isinstance(mount_request, dict) else getattr(mount_request, key, default)
+    if isinstance(value, Enum):
+        return value.value
+    return value
 
 
 def _apply_mount_request(store: SessionGraphStore, mount_request: object, reason: str) -> SessionGraphSnapshot:
@@ -228,7 +188,6 @@ def _apply_mount_request(store: SessionGraphStore, mount_request: object, reason
         raise ValueError("mount_request requires source_session_id and target_session_id.")
     if source_id == target_id:
         raise ValueError("A session cannot be mounted under itself.")
-
     source = next((session for session in graph.sessions if session.id == source_id), None)
     target_index = next((idx for idx, session in enumerate(graph.sessions) if session.id == target_id), None)
     if source is None:
@@ -237,19 +196,8 @@ def _apply_mount_request(store: SessionGraphStore, mount_request: object, reason
         raise ValueError(f"Target session {target_id} not found.")
     if any(edge.type == EdgeType.MOUNTED_UNDER and edge.source_session_id == source_id and edge.target_session_id == target_id for edge in graph.edges):
         raise ValueError(f"Duplicate mounted_under edge {source_id} -> {target_id}.")
-
-    edge = SessionEdge(
-        type=EdgeType.MOUNTED_UNDER,
-        source_session_id=source_id,
-        target_session_id=target_id,
-        metadata={
-            "reason": reason or str(_mount_field(mount_request, "user_intent", "Mount session.")),
-            "mount_mode": str(_mount_field(mount_request, "mount_mode", "reference")),
-            "source": "session_graph_service",
-        },
-    )
+    edge = SessionEdge(type=EdgeType.MOUNTED_UNDER, source_session_id=source_id, target_session_id=target_id, metadata={"reason": reason or str(_mount_field(mount_request, "user_intent", "Mount session.")), "mount_mode": str(_mount_field(mount_request, "mount_mode", "reference")), "source": "session_graph_service"})
     graph.edges.append(edge)
-
     if bool(_mount_field(mount_request, "make_active", False)):
         target = graph.sessions[target_index]
         metadata = dict(target.metadata)
@@ -264,13 +212,7 @@ def _apply_mount_request(store: SessionGraphStore, mount_request: object, reason
                     metadata["repo_id"] = repo_facet["full_name"]
         target.metadata = metadata
         graph.sessions[target_index] = target
-
-    graph.events.append(SessionEvent(
-        type=SessionEventType.SESSION_MOUNTED,
-        session_id=target_id,
-        actor=SessionEventActor.SYSTEM,
-        data={"source_session_id": source_id, "target_session_id": target_id, "edge_id": edge.id},
-    ))
+    graph.events.append(SessionEvent(type=SessionEventType.SESSION_MOUNTED, session_id=target_id, actor=SessionEventActor.SYSTEM, data={"source_session_id": source_id, "target_session_id": target_id, "edge_id": edge.id}))
     store.save(graph)
     return graph
 
@@ -296,16 +238,15 @@ def reachable(edges: list[SessionEdge], start_session_id: str, target_session_id
 
 
 def _parent_edges(graph: SessionGraphSnapshot) -> list[SessionEdge]:
-    return [
-        SessionEdge(
-            type=EdgeType.CONTAINS,
-            source_session_id=session.parent_id,
-            target_session_id=session.id,
-            metadata={"derived_from": "parent_id"},
-        )
-        for session in graph.sessions
-        if session.parent_id is not None
-    ]
+    explicit_contains = {(edge.source_session_id, edge.target_session_id) for edge in graph.edges if edge.type == EdgeType.CONTAINS}
+    parent_edges: list[SessionEdge] = []
+    for session in graph.sessions:
+        if session.parent_id is None:
+            continue
+        if (session.parent_id, session.id) in explicit_contains:
+            continue
+        parent_edges.append(SessionEdge(type=EdgeType.CONTAINS, source_session_id=session.parent_id, target_session_id=session.id, metadata={"derived_from": "parent_id"}))
+    return parent_edges
 
 
 def validate_graph_update(graph: SessionGraphSnapshot) -> list[str]:
@@ -314,11 +255,9 @@ def validate_graph_update(graph: SessionGraphSnapshot) -> list[str]:
     duplicate_session_ids = {session.id for session in graph.sessions if sum(1 for candidate in graph.sessions if candidate.id == session.id) > 1}
     for session_id in sorted(duplicate_session_ids):
         issues.append(f"Duplicate session id {session_id}.")
-
     for session in graph.sessions:
         if session.parent_id is not None and session.parent_id not in ids:
             issues.append(f"Session {session.id} references missing parent {session.parent_id}.")
-
     all_edges = [*graph.edges, *_parent_edges(graph)]
     seen_edge_keys: set[tuple[EdgeType, str, str]] = set()
     for edge in all_edges:
@@ -326,7 +265,6 @@ def validate_graph_update(graph: SessionGraphSnapshot) -> list[str]:
         if key in seen_edge_keys:
             issues.append(f"Duplicate edge {edge.type.value} {edge.source_session_id} -> {edge.target_session_id}.")
         seen_edge_keys.add(key)
-
         if edge.source_session_id not in ids:
             issues.append(f"Edge {edge.id} references missing source {edge.source_session_id}.")
         if edge.target_session_id not in ids:
@@ -338,36 +276,10 @@ def validate_graph_update(graph: SessionGraphSnapshot) -> list[str]:
     return issues
 
 
-def create_session_edge(
-    edge_type: EdgeType,
-    source_session_id: str,
-    target_session_id: str,
-    metadata: dict[str, object] | None = None,
-    event_id: str | None = None,
-) -> SessionEdge:
-    return SessionEdge(
-        type=edge_type,
-        source_session_id=source_session_id,
-        target_session_id=target_session_id,
-        metadata=metadata or {},
-        created_from_event_id=event_id,
-    )
+def create_session_edge(edge_type: EdgeType, source_session_id: str, target_session_id: str, metadata: dict[str, object] | None = None, event_id: str | None = None) -> SessionEdge:
+    return SessionEdge(type=edge_type, source_session_id=source_session_id, target_session_id=target_session_id, metadata=metadata or {}, created_from_event_id=event_id)
 
 
-def append_session_event(
-    store: SessionGraphStore,
-    session_id: str,
-    event_type: SessionEventType,
-    data: dict[str, object] | None = None,
-    root_session_id: str | None = None,
-    actor: SessionEventActor = SessionEventActor.SYSTEM,
-) -> SessionEvent:
-    event = SessionEvent(
-        type=event_type,
-        session_id=session_id,
-        root_session_id=root_session_id,
-        actor=actor,
-        data=data or {},
-        created_at=utc_now(),
-    )
+def append_session_event(store: SessionGraphStore, session_id: str, event_type: SessionEventType, data: dict[str, object] | None = None, root_session_id: str | None = None, actor: SessionEventActor = SessionEventActor.SYSTEM) -> SessionEvent:
+    event = SessionEvent(type=event_type, session_id=session_id, root_session_id=root_session_id, actor=actor, data=data or {}, created_at=utc_now())
     return store.append_event(event)
