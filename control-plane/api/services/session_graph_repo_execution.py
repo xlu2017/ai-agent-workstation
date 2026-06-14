@@ -231,9 +231,9 @@ async def reactivate_blocked_work_sessions_after_repo_attach(
                 "auto_started": readiness_response.get("auto_started") is True,
                 "execution_readiness": readiness_response,
                 "source": ExecutionActivationSource.REPO_ATTACHMENT_TRIGGER.value,
+                "source_event_id": source_event_id or "",
             },
             created_at=utc_now(),
-            created_from_event_id=source_event_id,
         )
         graph.events.append(event)
         results.append(
