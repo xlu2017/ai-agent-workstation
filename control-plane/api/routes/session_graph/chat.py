@@ -18,9 +18,10 @@ from api.models.session_graph import (
 )
 from api.routes.session_graph.helpers import RequestContext, _assert_session_visible, _context, _save_or_400, _store
 from api.services.session_graph_execution_bridge import (
-    build_graph_work_activation_request,
-    record_activation_result_on_work_session,
-    scaffold_activation_result,
+    build_graph_work_execution_readiness_request,
+    execution_readiness_response,
+    record_execution_readiness_on_work_session,
+    scaffold_execution_readiness_result,
 )
 from api.services.session_graph_prompt_recommendation import PromptRoutingUnavailable, recommend_graph_prompt_route
 
@@ -221,19 +222,19 @@ def append_graph_session_chat_turn(
     created_session: SessionRecord | None = None
     created_edge: SessionEdge | None = None
     extra_event: SessionEvent | None = None
-    activation_response: dict[str, object] | None = None
+    readiness_response: dict[str, object] | None = None
     assistant_turn: dict[str, object] | None = None
     chat_status = classification.route
     execution_state = classification.route
 
     if classification.route == "continue_active":
         created_session = _make_work_session(session, content, turn, now, context, body.mode, narration)
-        activation_request = build_graph_work_activation_request(work_session=created_session, parent_session=session)
-        activation_result = scaffold_activation_result(activation_request)
-        created_session = record_activation_result_on_work_session(created_session, activation_result)
-        activation_response = activation_result.to_response_dict()
+        readiness_request = build_graph_work_execution_readiness_request(work_session=created_session, parent_session=session)
+        readiness_result = scaffold_execution_readiness_result(readiness_request)
+        created_session = record_execution_readiness_on_work_session(created_session, readiness_result)
+        readiness_response = execution_readiness_response(readiness_result)
         if narration:
-            activation_response["narration"] = narration
+            readiness_response["narration"] = narration
         created_session.created_from_event_id = user_event.id
         graph.sessions.append(created_session)
         created_edge = SessionEdge(
@@ -246,10 +247,10 @@ def append_graph_session_chat_turn(
         )
         graph.edges.append(created_edge)
         execution_state = str(created_session.state.get("execution_state", "ready_for_execution"))
-        activation_auto_started = activation_response.get("auto_started") is True
-        activation_started = activation_response.get("status") == "started" and activation_auto_started
+        readiness_auto_started = readiness_response.get("auto_started") is True
+        execution_started = readiness_response.get("status") == "started" and readiness_auto_started
         extra_event = SessionEvent(
-            type=SessionEventType.WORK_STARTED if activation_started else SessionEventType.WORK_ACTIVATION_RECORDED,
+            type=SessionEventType.WORK_STARTED if execution_started else SessionEventType.WORK_EXECUTION_READINESS_RECORDED,
             session_id=created_session.id,
             root_session_id=created_session.root_id,
             actor=SessionEventActor.SYSTEM,
@@ -258,8 +259,8 @@ def append_graph_session_chat_turn(
                 "prompt": content,
                 "requires_repo": not bool(session.metadata.get("repo_session_id")),
                 "execution_state": execution_state,
-                "auto_started": activation_auto_started,
-                "activation": activation_response or {},
+                "auto_started": readiness_auto_started,
+                "execution_readiness": readiness_response or {},
                 "source": classification.source,
                 "narration": narration,
             },
@@ -353,8 +354,8 @@ def append_graph_session_chat_turn(
     if assistant_turn is not None:
         response["assistant_turn"] = assistant_turn
         response["assistant_response"] = assistant_turn["content"]
-    if activation_response is not None:
-        response["execution_activation"] = activation_response
+    if readiness_response is not None:
+        response["execution_readiness"] = readiness_response
     if created_session is not None:
         key = "work_session" if created_session.kind == SessionKind.WORK else "goal_session"
         if created_session.kind == SessionKind.CHAT:
