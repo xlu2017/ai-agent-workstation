@@ -1,8 +1,8 @@
 """Session graph schema options for frontend forms.
 
-This endpoint exposes only the canonical graph model values that are still owned
-by the current session graph model. Deprecated adapter-engine enums are not part
-of this route.
+This endpoint exposes canonical graph model values that are still owned by the
+current session graph model. Deprecated adapter-engine enums are not part of this
+route.
 """
 
 from __future__ import annotations
@@ -12,7 +12,10 @@ from enum import Enum
 from fastapi import APIRouter
 
 from api.models.session_graph import (
+    ActionRisk,
+    ActionStakes,
     EdgeType,
+    MountMode,
     ProjectionMode,
     ProjectionSelector,
     ProjectionSource,
@@ -42,8 +45,11 @@ def get_session_graph_options() -> dict[str, list[str]]:
         "edge_types": _values(EdgeType),
         "event_types": _values(SessionEventType),
         "event_actors": _values(SessionEventActor),
+        "mount_modes": _values(MountMode),
         "projection_modes": _values(ProjectionMode),
         "projection_sources": _values(ProjectionSource),
         "projection_selectors": _values(ProjectionSelector),
         "session_update_classifications": _values(SessionUpdateClassification),
+        "action_stakes": _values(ActionStakes),
+        "action_risks": _values(ActionRisk),
     }
