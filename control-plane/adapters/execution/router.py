@@ -4,7 +4,8 @@ ExecutionRouter — capability-aware routing to agentic, deterministic, or app a
 Routing policy:
 
   DeterministicExecutor:
-    grep, search_code, read_file, list_files, git_status, git_diff,
+    grep, search_code, glob, find_files, search_files, read_file,
+    read_file_range, view_file, list_files, git_status, git_diff,
     inspect_diff, summarize_diff, apply_patch (with explicit patch/content),
     run_tests (explicit command, no repair loop), run_lint, run_typecheck,
     write_file, commit
@@ -47,7 +48,8 @@ from execution.results import ExecutionResult
 
 # Actions that deterministic executor handles directly
 DETERMINISTIC_ACTIONS = {
-    "grep", "search_code", "read_file", "list_files",
+    "grep", "search_code", "glob", "find_files", "search_files",
+    "read_file", "read_file_range", "view_file", "list_files",
     "git_status", "git_diff", "inspect_diff", "summarize_diff",
     "run_lint", "run_typecheck", "write_file",
 }
@@ -258,10 +260,5 @@ class ExecutionRouter:
     @property
     def backend_name(self) -> str:
         """Return the name of the primary configured backend."""
-        if self._backend in ("agentic", "deterministic"):
-            return self._backend
-        if self._agentic_enabled:
-            return "agentic"
-        if self._allow_deterministic:
-            return "deterministic"
-        return "none"
+        adapter, backend, _, _ = self._route_action("__probe__", {})
+        return backend
