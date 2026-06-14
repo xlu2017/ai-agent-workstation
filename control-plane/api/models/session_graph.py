@@ -90,7 +90,7 @@ class SessionEventType(str, Enum):
     SESSION_ADAPTER_WARNING_ADDED = "session.adapter_warning_added"
     SESSION_MERGED = "session.merged"
     SESSION_FORKED = "session.forked"
-    WORK_ACTIVATION_RECORDED = "work.activation_recorded"
+    WORK_EXECUTION_READINESS_RECORDED = "work.execution_readiness_recorded"
     WORK_STARTED = "work.started"
     WORK_PAUSED = "work.paused"
     WORK_RESUMED = "work.resumed"
