@@ -144,13 +144,23 @@ def test_repo_attach_reactivates_blocked_graph_work_session(tmp_path: Path, monk
     )
     assert repo_response.status_code == 200
 
-    patch_response = client.patch(
-        f"/api/session-graph/sessions/{session['id']}",
-        json={"metadata": {"repo_session_id": "repo-local"}, "reason": "Attach local repo."},
+    mount_response = client.post(
+        "/api/session-graph/actions/apply",
+        json={
+            "action_name": "session.mount",
+            "params": {
+                "source_session_id": "repo-local",
+                "target_session_id": session["id"],
+                "user_intent": "Attach local repo.",
+                "mount_mode": "reference",
+                "create_adaptation_session": True,
+                "make_active": True,
+            },
+        },
     )
 
-    assert patch_response.status_code == 200
-    body = patch_response.json()
+    assert mount_response.status_code == 200
+    body = mount_response.json()["result"]
     assert body["reactivated_work_session_count"] == 1
     reactivated = body["reactivated_work_sessions"][0]
     assert reactivated["session"]["id"] == blocked_work["id"]
