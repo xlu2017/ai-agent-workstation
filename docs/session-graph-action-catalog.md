@@ -47,4 +47,4 @@ The catalog action preserves the source session identity. It creates graph relat
 
 A planner may propose `session.mount` when a repo, runtime, app, memory, validation, or artifact session must become available to a goal or work session. The platform must still validate visibility and graph policy before applying the action.
 
-The action catalog is local and authoritative for graph-owned actions. `agent-core` may advise which action to use, but `jubilant-goggles` performs validation and application.
+The action catalog is local and authoritative for graph-owned actions. `agent-core` may advise which action to use, but `ai-agent-workstation` performs validation and application.

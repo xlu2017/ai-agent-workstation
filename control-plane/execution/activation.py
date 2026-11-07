@@ -16,7 +16,7 @@ The service exists so all entry points can share one path:
 Boundaries
 ----------
 * agent-core remains advisory: it recommends and validates action contract shape.
-* jubilant-goggles remains authoritative: it validates repo/worktree/runtime safety
+* ai-agent-workstation remains authoritative: it validates repo/worktree/runtime safety
   and starts or refuses execution.
 * No caller may mark ``auto_started`` true unless a workflow adapter actually
   accepted a plan.

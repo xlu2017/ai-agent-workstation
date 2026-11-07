@@ -1,20 +1,20 @@
 @echo off
 REM launch-dashboard.bat
 REM Quick launcher - opens SSH tunnel and dashboard in one click.
-REM Requires: SSH key at %USERPROFILE%\.ssh\hetzner_workstation
+REM Requires: SSH key at %USERPROFILE%\.ssh\workstation_key
 
 echo === Workstation Dashboard ===
 echo.
 
-if not exist "%USERPROFILE%\.ssh\hetzner_workstation" (
-    echo ERROR: SSH key not found at %USERPROFILE%\.ssh\hetzner_workstation
+if not exist "%USERPROFILE%\.ssh\workstation_key" (
+    echo ERROR: SSH key not found at %USERPROFILE%\.ssh\workstation_key
     echo Copy your private key there or edit this script.
     pause
     exit /b 1
 )
 
 echo Starting SSH tunnel...
-start /b ssh -i "%USERPROFILE%\.ssh\hetzner_workstation" -N -L 9877:localhost:9877 -L 9876:localhost:9876 -o ServerAliveInterval=30 -o StrictHostKeyChecking=no agent@<server-ip>
+start /b ssh -i "%USERPROFILE%\.ssh\workstation_key" -N -L 9877:localhost:9877 -L 9876:localhost:9876 -o ServerAliveInterval=30 -o StrictHostKeyChecking=no agent@<server-ip>
 
 timeout /t 3 /nobreak >nul
 

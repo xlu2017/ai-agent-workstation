@@ -91,7 +91,7 @@ Built a working source-aware multi-agent glue layer that connects browser UI ins
 
 ```bash
 # SSH into server
-ssh -i ~/.ssh/hetzner_workstation agent@<server-ip>
+ssh -i ~/.ssh/workstation_key agent@<server-ip>
 
 # Ensure services running
 export PATH="$HOME/.local/bin:$PATH"

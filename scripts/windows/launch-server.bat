@@ -11,7 +11,7 @@ REM   launch-server.bat tunnel       SSH tunnel for local access
 
 set SERVER=<server-ip>
 set USER=agent
-set KEY=%USERPROFILE%\.ssh\hetzner_workstation
+set KEY=%USERPROFILE%\.ssh\workstation_key
 
 if "%1"=="desktop" goto :desktop
 if "%1"=="status" goto :status

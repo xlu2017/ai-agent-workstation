@@ -46,7 +46,7 @@ def _github_headers() -> dict[str, str]:
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "jubilant-goggles-app-automation",
+        "User-Agent": "ai-agent-workstation-app-automation",
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"

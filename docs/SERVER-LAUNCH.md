@@ -38,7 +38,7 @@ This starts services and opens the remote desktop.
 ```
 
 ### Prerequisites (Windows)
-1. SSH key at `%USERPROFILE%\.ssh\hetzner_workstation`
+1. SSH key at `%USERPROFILE%\.ssh\workstation_key`
 2. OpenSSH client installed (built into Windows 10+)
 3. Remote Desktop Connection (built into Windows)
 
@@ -125,7 +125,7 @@ sudo systemctl restart workstation
 
 ### SSH Tunnel for local access
 ```bash
-ssh -i ~/.ssh/hetzner_workstation -N \
+ssh -i ~/.ssh/workstation_key -N \
     -L 4000:localhost:4000 \
     -L 3000:localhost:3000 \
     -L 9877:localhost:9877 \

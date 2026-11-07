@@ -19,7 +19,7 @@ only the type-level question:
 Should the platform execute, find out more, ask the user, or stop?
 ```
 
-After that, jubilant-goggles may choose a granular platform operation.
+After that, ai-agent-workstation may choose a granular platform operation.
 
 The scaffold catalog lives in:
 

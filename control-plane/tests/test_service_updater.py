@@ -95,7 +95,7 @@ def test_configured_branch_does_not_call_git(monkeypatch):
 
     monkeypatch.setattr(service_updater, "_run_cmd", fail_run)
 
-    branch, error = _resolve_branch("https://github.com/xlu2017/jubilant-goggles.git", "main", "token")
+    branch, error = _resolve_branch("https://github.com/xlu2017/ai-agent-workstation.git", "main", "token")
 
     assert branch == "main"
     assert error is None
@@ -105,7 +105,7 @@ def test_default_branch_resolves_from_remote_head(monkeypatch):
     result = MagicMock(returncode=0, stdout="ref: refs/heads/trunk\tHEAD\n", stderr="")
     monkeypatch.setattr(service_updater, "_run_cmd", lambda *_args, **_kwargs: result)
 
-    branch, error = _resolve_branch("https://github.com/xlu2017/jubilant-goggles.git", None, "token")
+    branch, error = _resolve_branch("https://github.com/xlu2017/ai-agent-workstation.git", None, "token")
 
     assert branch == "trunk"
     assert error is None

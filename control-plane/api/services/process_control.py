@@ -18,7 +18,7 @@ def service_commands() -> dict:
         },
         "control-plane": {
             "port": 9877,
-            "start": "cd /opt/workstation/repos/jubilant-goggles/control-plane && nohup /home/agent/.local/bin/uvicorn api.server:app --host 0.0.0.0 --port 9877 --reload > /opt/workstation/logs/control-plane.log 2>&1 &",
+            "start": "cd /opt/workstation/repos/ai-agent-workstation/control-plane && nohup /home/agent/.local/bin/uvicorn api.server:app --host 0.0.0.0 --port 9877 --reload > /opt/workstation/logs/control-plane.log 2>&1 &",
         },
         "vendor-runtime": {
             "port": 3000,
@@ -27,7 +27,7 @@ def service_commands() -> dict:
         },
         "dashboard": {
             "port": 5173,
-            "start": "cd /opt/workstation/repos/jubilant-goggles/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
+            "start": "cd /opt/workstation/repos/ai-agent-workstation/control-plane/web && nohup pnpm dev --host 0.0.0.0 --port 5173 > /opt/workstation/logs/dashboard.log 2>&1 &",
         },
     }
 

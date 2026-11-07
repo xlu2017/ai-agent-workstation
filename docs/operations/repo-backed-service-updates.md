@@ -57,7 +57,7 @@ A service can override the branch with environment variables:
 
 ```bash
 AGENT_CORE_UPDATE_BRANCH=main
-JUBILANT_GOGGLES_UPDATE_BRANCH=main
+AGENT_WORKSTATION_UPDATE_BRANCH=main
 ```
 
 ## Repo and path overrides
@@ -66,9 +66,9 @@ Defaults:
 
 ```bash
 AGENT_CORE_REPO_URL=https://github.com/xlu2017/agent-core.git
-JUBILANT_GOGGLES_REPO_URL=https://github.com/xlu2017/jubilant-goggles.git
+AGENT_WORKSTATION_REPO_URL=https://github.com/xlu2017/ai-agent-workstation.git
 AGENT_CORE_REPO_PATH=/opt/workstation/repos/agent-core
-JUBILANT_GOGGLES_REPO_PATH=/opt/workstation/repos/jubilant-goggles
+AGENT_WORKSTATION_REPO_PATH=/opt/workstation/repos/ai-agent-workstation
 ```
 
 Each can be overridden through the matching environment variable.
@@ -119,7 +119,7 @@ For a missing checkout, the updater clones the repo and then runs the same insta
 
 ## Self-update behavior
 
-`dashboard` and `control-plane` share the `jubilant-goggles` checkout. Updating that checkout can cause uvicorn `--reload` to restart the running API before the HTTP response completes.
+`dashboard` and `control-plane` share the `ai-agent-workstation` checkout. Updating that checkout can cause uvicorn `--reload` to restart the running API before the HTTP response completes.
 
 To avoid a browser-side network error, self-updates are deferred to a background thread. The API returns immediately, persists `in_progress`, and the UI polls `GET /api/services` until `last_update` is available.
 

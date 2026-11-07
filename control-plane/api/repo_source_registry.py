@@ -42,9 +42,9 @@ def _default_service_sources() -> dict[str, dict[str, Any]]:
     """
     agent_owner = _env("AGENT_CORE_REPO_OWNER", "xlu2017")
     agent_repo = _env("AGENT_CORE_REPO_NAME", "agent-core")
-    app_owner = _env("JUBILANT_GOGGLES_REPO_OWNER", "xlu2017")
-    app_repo = _env("JUBILANT_GOGGLES_REPO_NAME", "jubilant-goggles")
-    app_path = _env("JUBILANT_GOGGLES_REPO_PATH", "/opt/workstation/repos/jubilant-goggles")
+    app_owner = _env("AGENT_WORKSTATION_REPO_OWNER", "xlu2017")
+    app_repo = _env("AGENT_WORKSTATION_REPO_NAME", "ai-agent-workstation")
+    app_path = _env("AGENT_WORKSTATION_REPO_PATH", "/opt/workstation/repos/ai-agent-workstation")
 
     return {
         "agent-core": {
@@ -66,8 +66,8 @@ def _default_service_sources() -> dict[str, dict[str, Any]]:
             "repo_provider": "github",
             "owner": app_owner,
             "repo": app_repo,
-            "repo_url": _env("JUBILANT_GOGGLES_REPO_URL"),
-            "branch": _env("JUBILANT_GOGGLES_UPDATE_BRANCH"),
+            "repo_url": _env("AGENT_WORKSTATION_REPO_URL"),
+            "branch": _env("AGENT_WORKSTATION_UPDATE_BRANCH"),
             "path": app_path,
             "install_commands": [
                 "pnpm install --frozen-lockfile",
@@ -84,8 +84,8 @@ def _default_service_sources() -> dict[str, dict[str, Any]]:
             "repo_provider": "github",
             "owner": app_owner,
             "repo": app_repo,
-            "repo_url": _env("JUBILANT_GOGGLES_REPO_URL"),
-            "branch": _env("JUBILANT_GOGGLES_UPDATE_BRANCH"),
+            "repo_url": _env("AGENT_WORKSTATION_REPO_URL"),
+            "branch": _env("AGENT_WORKSTATION_UPDATE_BRANCH"),
             "path": app_path,
             "install_commands": ["pnpm install --frozen-lockfile"],
             "build_commands": [],

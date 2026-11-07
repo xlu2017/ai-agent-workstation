@@ -8,7 +8,7 @@ When a user sends a follow-up message to:
 POST /api/session-graph/sessions/{session_id}/chat
 ```
 
-jubilant-goggles knows the phase: prompt routing inside an existing graph session. The platform must therefore constrain agent-core recommend-next to the route action only:
+ai-agent-workstation knows the phase: prompt routing inside an existing graph session. The platform must therefore constrain agent-core recommend-next to the route action only:
 
 ```json
 ["session.route_prompt"]

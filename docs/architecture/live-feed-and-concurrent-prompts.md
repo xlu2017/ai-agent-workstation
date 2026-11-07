@@ -2,15 +2,15 @@
 
 ## Overview
 
-jubilant-goggles implements a live event stream and concurrent prompt routing system that enables users to submit prompts at any time during plan execution. The platform decides how to handle each new prompt — whether to append it, modify the current plan, interrupt, spawn a child session, start a new session, or queue it.
+ai-agent-workstation implements a live event stream and concurrent prompt routing system that enables users to submit prompts at any time during plan execution. The platform decides how to handle each new prompt — whether to append it, modify the current plan, interrupt, spawn a child session, start a new session, or queue it.
 
 This is the execution and orchestration counterpart to agent-core's advisory planning. The boundary is:
 
 ```
 agent-core validates action contracts.
-jubilant-goggles validates runtime permissions and executes.
+ai-agent-workstation validates runtime permissions and executes.
 agent-core may return loop/open-ended/commit-capable plans.
-jubilant-goggles decides whether commits actually happen.
+ai-agent-workstation decides whether commits actually happen.
 Users may submit prompts at any time during execution.
 ```
 
@@ -154,13 +154,13 @@ The router uses deterministic heuristics to classify incoming prompts:
 1. **One mutating executor per worktree.** Two sessions cannot both write to the same worktree.
 2. **Parallel read-only sessions may share a repo checkout.**
 3. **Parallel mutating sessions require separate worktrees.**
-4. **Commits require platform validation.** agent-core may propose commits; jubilant-goggles decides.
+4. **Commits require platform validation.** agent-core may propose commits; ai-agent-workstation decides.
 5. **PRs require platform validation.**
 6. **File conflict detection.** If two sessions touch overlapping files, a conflict event is surfaced.
 
 ## agent-core Integration
 
-jubilant-goggles calls agent-core for:
+ai-agent-workstation calls agent-core for:
 
 | Endpoint | Purpose |
 |----------|---------|
@@ -171,7 +171,7 @@ jubilant-goggles calls agent-core for:
 | `GET /actions` | Fetch the action catalog |
 | `POST /memory/search` | Search memories |
 
-jubilant-goggles does NOT ask agent-core to: execute, schedule, pause, cancel, commit, create worktrees, create branches, or create PRs.
+ai-agent-workstation does NOT ask agent-core to: execute, schedule, pause, cancel, commit, create worktrees, create branches, or create PRs.
 
 ## Truthful Status
 

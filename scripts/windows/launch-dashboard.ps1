@@ -5,7 +5,7 @@
 param(
     [string]$Server = "<server-ip>",
     [string]$User = "agent",
-    [string]$KeyPath = "$env:USERPROFILE\.ssh\hetzner_workstation",
+    [string]$KeyPath = "$env:USERPROFILE\.ssh\workstation_key",
     [int]$DashboardPort = 9877,
     [int]$BridgePort = 9876
 )

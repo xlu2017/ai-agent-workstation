@@ -4,7 +4,7 @@
 
 The mandatory decision layer is not an Agent-Dash-specific component. The source of next-action intelligence is `agent-core`.
 
-`jubilant-goggles` owns execution, runtime validation, authorization, worktrees, UI, and events. `agent-core` owns advisory next-action recommendation and action contract intelligence.
+`ai-agent-workstation` owns execution, runtime validation, authorization, worktrees, UI, and events. `agent-core` owns advisory next-action recommendation and action contract intelligence.
 
 ## Invariant
 

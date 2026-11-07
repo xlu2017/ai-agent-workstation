@@ -472,9 +472,9 @@ def _auto_provision_workspace(session_id: str, session_dir: Path) -> tuple[str, 
     if default_repo and Path(default_repo).exists() and (Path(default_repo) / ".git").exists():
         repo_path = default_repo
     else:
-        # Scan repos dir for any git repo (prefer agent-core or jubilant-goggles)
+        # Scan repos dir for any git repo (prefer agent-core or ai-agent-workstation)
         if repos_dir.exists():
-            preferred = ["jubilant-goggles", "agent-core"]
+            preferred = ["ai-agent-workstation", "agent-core"]
             for name in preferred:
                 candidate = repos_dir / name
                 if candidate.exists() and (candidate / ".git").exists():

@@ -48,7 +48,7 @@ VENDOR_RUNTIME_FIELDS: dict[str, dict[str, Any]] = {
         "kind": "url",
         "label": "n8n webhook URL",
         "description": "Controlled n8n webhook endpoint that accepts normalized action envelopes.",
-        "placeholder": "https://internal.example/webhook/jubilant-goggles",
+        "placeholder": "https://internal.example/webhook/ai-agent-workstation",
     },
     "stagehand": {
         "env_name": "STAGEHAND_COMMAND",

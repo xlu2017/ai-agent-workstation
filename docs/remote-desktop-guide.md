@@ -21,7 +21,7 @@ The fastest and most reliable way to interact with the server.
 ### Connect
 
 ```bash
-ssh -i ~/.ssh/hetzner_workstation agent@<server-ip>
+ssh -i ~/.ssh/workstation_key agent@<server-ip>
 ```
 
 ### First-time setup (add key to local SSH config)
@@ -32,7 +32,7 @@ Add to `~/.ssh/config`:
 Host workstation
     HostName <server-ip>
     User agent
-    IdentityFile ~/.ssh/hetzner_workstation
+    IdentityFile ~/.ssh/workstation_key
     ServerAliveInterval 60
     ServerAliveCountMax 3
 ```

@@ -19,7 +19,7 @@ session event log
 ## Control-plane boundary
 
 ```text
-jubilant-goggles
+ai-agent-workstation
   owns collection, session scoping, redaction, policy, runtime validation, and execution
 
 agent-core

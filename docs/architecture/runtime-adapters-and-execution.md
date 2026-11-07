@@ -2,12 +2,12 @@
 
 ## Overview
 
-jubilant-goggles implements a layered execution architecture that connects advisory plans from agent-core to actual code execution through durable workflows, composite action subflows, and execution backends.
+ai-agent-workstation implements a layered execution architecture that connects advisory plans from agent-core to actual code execution through durable workflows, composite action subflows, and execution backends.
 
 ```
 LLM proposes.
 agent-core validates action contracts.
-jubilant-goggles authorizes and executes.
+ai-agent-workstation authorizes and executes.
 ```
 
 ## System Boundary
@@ -20,7 +20,7 @@ agent-core owns:
   - Plan validation
   - Trace/outcome storage
 
-jubilant-goggles owns:
+ai-agent-workstation owns:
   - Live feed and prompt routing
   - Sessions and worktrees
   - Durable workflow execution (Hatchet)
@@ -29,15 +29,15 @@ jubilant-goggles owns:
   - Execution backends (AgenticExecutor, DeterministicExecutor)
   - Commits and PRs
 
-Repo context adapters must NOT be added to jubilant-goggles.
-jubilant-goggles consumes agent-core context APIs only.
+Repo context adapters must NOT be added to ai-agent-workstation.
+ai-agent-workstation consumes agent-core context APIs only.
 ```
 
 ## Execution Flow
 
 ```
 User prompt
-  → jubilant-goggles session route
+  → ai-agent-workstation session route
   → prompt router (6 routing decisions)
   → agent-core POST /actions/plan
   → agent-core POST /actions/validate-plan

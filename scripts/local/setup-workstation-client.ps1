@@ -52,7 +52,7 @@ Do not launch Remote Desktop after successful tests.
 .\scripts\local\setup-workstation-client.ps1
 
 .EXAMPLE
-.\scripts\local\setup-workstation-client.ps1 -WorkstationHost <hostname> -WorkstationUser agent -SshAlias ai-workstation
+.\scripts\local\setup-workstation-client.ps1 -WorkstationHost workstation -WorkstationUser agent -SshAlias ai-workstation
 #>
 
 [CmdletBinding()]

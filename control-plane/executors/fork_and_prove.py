@@ -25,7 +25,7 @@ from executors.direct_executor import DirectExecutor
 LITELLM_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
 LITELLM_KEY = os.environ.get(
     "LITELLM_MASTER_KEY",
-    "<litellm-key>",
+    "",
 )
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-v4-flash")
 

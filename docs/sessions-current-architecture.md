@@ -293,7 +293,7 @@ Current runtime hardening includes:
 ```text
 agent-core execution endpoints are deprecated
 agent-core plans are advisory only
-jubilant-goggles performs runtime validation
+ai-agent-workstation performs runtime validation
 high-risk actions require gate evidence
 commit is not a default allowed action
 path validation resolves paths relative to worktree

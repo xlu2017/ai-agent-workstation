@@ -17,7 +17,7 @@ Windows browser
 ## Start
 
 ```bash
-cd ~/jubilant-goggles
+cd ~/ai-agent-workstation
 cp ops/remote-desktop/.env.example ops/remote-desktop/.env
 nano ops/remote-desktop/.env
 docker compose --env-file ops/remote-desktop/.env -f ops/remote-desktop/docker-compose.guacamole.yml up -d

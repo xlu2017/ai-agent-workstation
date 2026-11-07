@@ -193,7 +193,7 @@ def restart_service(name: str):
             "sleep 1; "
             "fuser -k 9877/tcp; "
             "sleep 1; "
-            "cd /opt/workstation/repos/jubilant-goggles/control-plane && "
+            "cd /opt/workstation/repos/ai-agent-workstation/control-plane && "
             "nohup /home/agent/.local/bin/uvicorn api.server:app --host 0.0.0.0 --port 9877 --reload "
             "> /opt/workstation/logs/control-plane.log 2>&1 &"
         )

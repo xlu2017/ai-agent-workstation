@@ -345,7 +345,7 @@ class PlanExecutor:
                 status=status,
                 output=output or {},
                 duration_ms=duration_ms,
-                executor=executor or "jubilant-goggles",
+                executor=executor or "ai-agent-workstation",
                 rationale=rationale,
                 error=error,
                 files_touched=files_touched or [],

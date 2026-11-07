@@ -27,11 +27,11 @@ Complete record of the initial workstation deployment performed on 2026-06-03.
 
 | Field | Value |
 |-------|-------|
-| Private Key | `~/.ssh/hetzner_workstation` (Ed25519) |
-| Public Key | `ssh-ed25519 <ssh-key> ai-workstation` |
+| Private Key | `~/.ssh/workstation_key` (Ed25519) |
+| Public Key | `ssh-ed25519 <ssh-public-key> ai-workstation` |
 | SSH User | `agent` (non-root, has sudo) |
 | Root Login | Disabled (SSH hardened) |
-| Connect | `ssh -i ~/.ssh/hetzner_workstation agent@<server-ip>` |
+| Connect | `ssh -i ~/.ssh/workstation_key agent@<server-ip>` |
 
 ---
 

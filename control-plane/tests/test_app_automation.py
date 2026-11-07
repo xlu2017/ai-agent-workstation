@@ -114,7 +114,7 @@ def test_execute_read_only_action_dry_run_plans():
     response = _client().post("/api/app-automation/execute", json={
         "app_id": "github",
         "action_id": "github.search_repo",
-        "params": {"repo": "xlu2017/jubilant-goggles", "query": "executor"},
+        "params": {"repo": "xlu2017/ai-agent-workstation", "query": "executor"},
         "dry_run": True,
     })
 
@@ -133,7 +133,7 @@ def test_execute_read_only_action_completes_with_mock_runtime(monkeypatch):
     response = _client().post("/api/app-automation/execute", json={
         "app_id": "github",
         "action_id": "github.search_repo",
-        "params": {"repo": "xlu2017/jubilant-goggles", "query": "executor"},
+        "params": {"repo": "xlu2017/ai-agent-workstation", "query": "executor"},
         "dry_run": False,
     })
 
@@ -265,7 +265,7 @@ def test_execute_invalid_params_rejects_before_runtime_and_records_event(monkeyp
         "session_id": session_id,
         "app_id": "github",
         "action_id": "github.search_repo",
-        "params": {"repo": "xlu2017/jubilant-goggles"},
+        "params": {"repo": "xlu2017/ai-agent-workstation"},
         "dry_run": False,
     })
 
@@ -289,7 +289,7 @@ def test_execute_mock_runtime_records_executed_event_and_redacts_sensitive_param
         "session_id": session_id,
         "app_id": "github",
         "action_id": "github.search_repo",
-        "params": {"repo": "xlu2017/jubilant-goggles", "query": "executor", "api_key": "should-not-persist"},
+        "params": {"repo": "xlu2017/ai-agent-workstation", "query": "executor", "api_key": "should-not-persist"},
         "dry_run": False,
     })
 

@@ -1,5 +1,5 @@
 """
-agent-core HTTP client for jubilant-goggles.
+agent-core HTTP client for ai-agent-workstation.
 
 agent-core is an advisory service for memory, context, action knowledge,
 schema validation, and next-action recommendations.
@@ -20,7 +20,7 @@ This client must not ask agent-core to:
   create worktrees, branches, commits, pushes, deploys, or PRs
   perform runtime authorization
 
-Every response from agent-core must be treated as advisory. jubilant-goggles
+Every response from agent-core must be treated as advisory. ai-agent-workstation
 must still perform runtime policy checks, approval checks, path/command guards,
 executor authorization, and timeline/audit recording before doing anything real.
 """
@@ -141,7 +141,7 @@ class AgentCoreClient:
             "status": outcome.status,
             "output": outcome.output,
             "duration_ms": outcome.duration_ms,
-            "executor": outcome.executor or "jubilant-goggles",
+            "executor": outcome.executor or "ai-agent-workstation",
             "rationale": outcome.rationale,
             "error": outcome.error,
             "files_touched": outcome.files_touched,

@@ -70,7 +70,7 @@ The intended pipeline is:
 ```text
 LLM proposes next action
   -> agent-core/schema validator checks shape, params, stakes, and target sessions
-  -> jubilant-goggles authorization checks automation settings and runtime policy
+  -> ai-agent-workstation authorization checks automation settings and runtime policy
   -> executor runs the action only if authorized or explicitly confirmed
 ```
 

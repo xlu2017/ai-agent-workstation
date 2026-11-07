@@ -14,7 +14,7 @@ from api.config import TRUE_ENV_VALUES
 REMOTE_DESKTOP_ENV_FILE = Path(
     os.environ.get(
         "REMOTE_DESKTOP_ENV_FILE",
-        "/opt/workstation/repos/jubilant-goggles/ops/remote-desktop/.env",
+        "/opt/workstation/repos/ai-agent-workstation/ops/remote-desktop/.env",
     )
 )
 

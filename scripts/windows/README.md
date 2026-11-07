@@ -4,7 +4,7 @@ Scripts for managing the workstation from Windows.
 
 ## Prerequisites
 
-1. SSH key at `%USERPROFILE%\.ssh\hetzner_workstation` (or pass `-KeyPath` to scripts)
+1. SSH key at `%USERPROFILE%\.ssh\workstation_key` (or pass `-KeyPath` to scripts)
 2. OpenSSH client (built into Windows 10+)
 
 ## Scripts

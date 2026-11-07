@@ -22,7 +22,7 @@ agent-core (advisory only):
   rule solving + recommendations
   trace storage
 
-jubilant-goggles (authoritative execution):
+ai-agent-workstation (authoritative execution):
   sessions / worktrees
   runtime adapters (OpenHands)
   Hatchet queue integration
@@ -71,7 +71,7 @@ Sessions report truthful state, never guessing:
 
 ## Key Endpoints
 
-### Control Plane (jubilant-goggles)
+### Control Plane (ai-agent-workstation)
 
 | Endpoint | Purpose |
 |----------|---------|

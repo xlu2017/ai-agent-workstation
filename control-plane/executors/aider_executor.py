@@ -22,7 +22,7 @@ from executors.base import ExecutorAdapter, TaskPacket, TaskResult, SESSIONS_DIR
 
 LITELLM_KEY = os.environ.get(
     "LITELLM_MASTER_KEY",
-    "<litellm-key>",
+    "",
 )
 LITELLM_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-v4-flash")

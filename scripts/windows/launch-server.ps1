@@ -8,7 +8,7 @@
 #   .\launch-server.ps1 -Stop        # Stop all services
 #
 # Prerequisites:
-#   - SSH key at ~\.ssh\hetzner_workstation
+#   - SSH key at ~\.ssh\workstation_key
 #   - Server at <server-ip> with setup.sh already run
 
 param(
@@ -19,7 +19,7 @@ param(
     [switch]$Tunnel,
     [string]$Server = "<server-ip>",
     [string]$User = "agent",
-    [string]$KeyPath = "$env:USERPROFILE\.ssh\hetzner_workstation"
+    [string]$KeyPath = "$env:USERPROFILE\.ssh\workstation_key"
 )
 
 $ErrorActionPreference = "Continue"

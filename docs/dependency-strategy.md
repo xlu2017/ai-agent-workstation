@@ -104,20 +104,20 @@ Those belong in an artifact store, private registry, or offline restore bundle.
 ## Recommended layout
 
 ```text
-jubilant-goggles/
+ai-agent-workstation/
   platform code
   vendor/openhands/                 # only if actively patched with the platform
   config/dependency-locks
   scripts/build and restore tooling
   docs/dependency strategy
 
-jubilant-goggles-vendor/openhands
+ai-agent-workstation-vendor/openhands
   optional external active fork or mirror
 
-jubilant-goggles-vendor/litellm
+ai-agent-workstation-vendor/litellm
   stable source mirror or fork
 
-jubilant-goggles-vendor/hatchet
+ai-agent-workstation-vendor/hatchet
   stable source mirror or fork
 
 artifact store / private registry
