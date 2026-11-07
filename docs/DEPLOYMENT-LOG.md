@@ -15,7 +15,7 @@ Complete record of the initial workstation deployment performed on 2026-06-03.
 | Storage | 240 GB NVMe SSD |
 | Traffic | 30 TB/month |
 | Location | Falkenstein, Germany (eu-central) |
-| Server Name | `<hostname>` |
+| Server Name | `workstation` |
 | Public IPv4 | `<server-ip>` |
 | OS | Ubuntu 24.04 LTS |
 | Billing | Hourly ($0.119/hr, capped at $73.99/mo + $0.60/mo IPv4) |

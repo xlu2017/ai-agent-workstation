@@ -1,174 +1,359 @@
 # Operations Guide
 
-## Daily Operations
+Day-to-day operations for the AI coding agent workstation.
+
+---
+
+## Service Management
 
 ### Start all services
-```bash
-cd ~/ai-workstation && docker compose up -d
-```
 
-### Check status
 ```bash
-docker compose ps
-curl -s http://localhost:4000/health/liveliness  # "I'm alive!"
-curl -s http://localhost:3000 | head -1          # OpenHands HTML
-```
-
-### View logs
-```bash
-docker compose logs -f              # All services
-docker compose logs litellm -f      # LiteLLM only
-docker compose logs --tail=50       # Last 50 lines
+cd ~/ai-workstation
+docker compose up -d
 ```
 
 ### Stop all services
+
 ```bash
+cd ~/ai-workstation
 docker compose down
 ```
 
-## Access Methods
-
-Preferred access is Tailscale-first. The workstation does not rely on `ufw` or `fail2ban`; public ingress is controlled by the provider firewall and tailnet access is controlled by Tailscale ACLs/grants.
-
-| Method | Command | Use Case |
-|--------|---------|----------|
-| Tailscale SSH | `ssh agent@<tailscale-hostname>` | Primary terminal access on tailnet port 22 |
-| SSH + ports over Tailscale | `ssh -L 9877:localhost:9877 -L 4000:localhost:4000 agent@<tailscale-hostname>` | Control plane and LiteLLM UI without public exposure |
-| RDP over Tailscale | Connect to `<tailscale-hostname>:3389` | GUI/browser access when enabled by Tailscale policy |
-| Browser remote desktop | `/remote-desktop` with `/guacamole/` same-origin proxy | Browser-based desktop access without a native RDP client |
-| VS Code | Remote-SSH to `<tailscale-hostname>` | Development |
-| Local OpenSSH fallback | Provider console, then `ssh -p 2222 agent@127.0.0.1` | Local-only recovery after Tailscale-only SSH configuration |
-
-### Configure Tailscale-only SSH
-
-After confirming the server is authenticated to Tailscale and reachable from an admin device:
+### Restart a single service
 
 ```bash
-sudo /opt/workstation/scripts/configure-tailscale-ssh-only.sh
+docker compose restart litellm
+docker compose restart openhands
 ```
 
-This script enables Tailscale SSH, moves ordinary OpenSSH to `127.0.0.1:2222`, and leaves public TCP/22 blocking to the provider firewall.
-
-### Browser remote desktop
-
-Use Apache Guacamole for browser desktop access. Start the stack with:
+### View logs
 
 ```bash
-cd ~/jubilant-goggles
-cp ops/remote-desktop/.env.example ops/remote-desktop/.env
-nano ops/remote-desktop/.env
-docker compose --env-file ops/remote-desktop/.env -f ops/remote-desktop/docker-compose.guacamole.yml up -d
+# All services
+docker compose logs -f
+
+# Single service
+docker compose logs -f litellm
+docker compose logs -f openhands
+
+# Last 100 lines
+docker compose logs --tail=100 litellm
 ```
 
-Then open `/remote-desktop` in the dashboard. Keep Guacamole and xRDP private to Tailscale or an authenticated same-origin proxy. See [Browser Remote Desktop Operations](operations/remote-desktop.md).
-
-Provider firewall target:
-
-```text
-Public inbound: deny by default
-Temporary break-glass: allow TCP/22 only when needed
-Intentional public web: allow TCP/80 and TCP/443 only if serving a public app
-```
-
-## Worktree Management
-
-### Create new agent workspace
-```bash
-# First time: clone as bare repo
-git clone --bare https://github.com/user/repo.git /opt/workstation/repos/repo.git
-
-# Create worktree for a feature
-/opt/workstation/scripts/create-worktree.sh repo feature/my-feature main
-```
-
-### List active worktrees
-```bash
-/opt/workstation/scripts/list-worktrees.sh
-```
-
-### Destroy worktree
-```bash
-/opt/workstation/scripts/destroy-worktree.sh repo-feature-my-feature
-```
-
-## tmux Session Management
+### Check health
 
 ```bash
-# List sessions
-tmux ls
+# LiteLLM liveness (no auth required)
+curl -s http://localhost:4000/health/liveliness
+# Expected: "I'm alive!"
 
-# Attach to agent session
-tmux attach -t agent-repo-feature-my-feature
+# LiteLLM full health (requires auth)
+curl -s http://localhost:4000/health \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq .
 
-# Create manual session
-tmux new -s dev
+# OpenHands
+curl -s http://localhost:3000
 
-# Detach: Ctrl+B, then D
+# All containers
+docker compose ps
 ```
 
-## Chrome Remote Debugging
+---
+
+## Model Management
+
+### Test a model via LiteLLM
 
 ```bash
-# Launch Chrome with debugging port
-google-chrome --remote-debugging-port=9222 --no-first-run --user-data-dir=/tmp/chrome-debug
-
-# Access DevTools from local machine over Tailscale SSH forwarding
-# Forward: ssh -L 9222:localhost:9222 agent@<tailscale-hostname>
-# Open: http://localhost:9222
-```
-
-## LiteLLM Model Testing
-
-```bash
-# Load key
+# Load the master key
 export LITELLM_MASTER_KEY=$(grep LITELLM_MASTER_KEY ~/ai-workstation/.env | cut -d= -f2)
 
-# Test primary (DeepSeek)
+# Make a test call
 curl -s http://localhost:4000/v1/chat/completions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Say hi"}],"max_tokens":10}' | jq .choices[0].message.content
-
-# List available models
-curl -s http://localhost:4000/v1/models \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq '.data[].id'
+  -d '{
+    "model": "deepseek-v4-flash",
+    "messages": [{"role": "user", "content": "Hello, respond with one word."}],
+    "max_tokens": 50
+  }' | jq .choices[0].message.content
 ```
 
-## Knowledge System
+### Switch primary model
+
+Edit `config/litellm_config.yaml`, then:
 
 ```bash
-# Find relevant knowledge for a task
-python3 /opt/workstation/scripts/knowledge-loader.py \
-  --task "Create a React component" \
-  --packages react typescript
-
-# Add new knowledge file
-cp /opt/workstation/knowledge/example-react.yaml /opt/workstation/knowledge/my-project.yaml
-# Edit the new file with your project-specific knowledge
+docker compose restart litellm
 ```
 
-## Monitoring
+### Check API spend
+
+LiteLLM tracks costs per model. View at: `http://localhost:4000/ui`
+
+### Add a new model provider
+
+1. Add API key to `.env`
+2. Add model entry to `config/litellm_config.yaml`
+3. `docker compose restart litellm`
+
+---
+
+## Session Management
+
+### tmux basics
 
 ```bash
-# System metrics; keep exporter private and access through SSH forwarding/Tailscale only
-curl -s http://localhost:9100/metrics | grep -E "^node_(cpu|memory|disk)"
+# Start all sessions
+~/ai-workstation/scripts/start-sessions.sh
 
-# Docker resource usage
+# List sessions
+tmux list-sessions
+
+# Attach to a session
+tmux attach -t ws-dev
+
+# Detach from session (inside tmux)
+Ctrl+B, then D
+
+# Create new named session
+tmux new-session -s my-project
+
+# Kill a session
+tmux kill-session -t my-project
+```
+
+### Git worktrees for parallel agents
+
+```bash
+cd ~/projects
+
+# Clone as bare repo (one-time)
+git clone --bare https://github.com/user/repo.git repo.git
+
+# Create worktrees for parallel work
+git -C repo.git worktree add ../repo-main main
+git -C repo.git worktree add ../repo-feature-1 -b feature/new-api
+git -C repo.git worktree add ../repo-bugfix-2 -b fix/memory-leak
+
+# List worktrees
+git -C repo.git worktree list
+
+# Remove a worktree when done
+git -C repo.git worktree remove ../repo-feature-1
+```
+
+---
+
+## Docker Management
+
+### View resource usage
+
+```bash
 docker stats --no-stream
-
-# Disk usage
-df -h / && ncdu /opt/workstation
 ```
 
-## Backup
+### Clean up old images/containers
 
 ```bash
-# Manual backup now
-/opt/workstation/scripts/backup-now.sh
+# Remove stopped containers
+docker container prune -f
 
-# List backups
-borg list /opt/workstation/backups/main
+# Remove unused images
+docker image prune -f
 
-# Restore (see docs/backup.md for full guide)
-borg extract /opt/workstation/backups/main::LATEST
+# Remove everything unused (careful!)
+docker system prune -f
+
+# Check disk usage
+docker system df
+```
+
+### Update service images
+
+```bash
+cd ~/ai-workstation
+
+# Pull latest images
+docker compose pull
+
+# Restart with new images
+docker compose up -d
+
+# If issues, roll back:
+# docker compose down
+# docker compose up -d --force-recreate
+```
+
+---
+
+## System Maintenance
+
+### Disk usage
+
+```bash
+# Overview
+df -h
+
+# Find large directories
+ncdu /home/agent
+
+# Docker disk usage
+docker system df
+```
+
+### Memory usage
+
+```bash
+free -h
+# Or for detailed view:
+htop
+```
+
+### System updates
+
+Security updates are applied automatically. For manual full update:
+
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+
+### Check for reboot-required
+
+```bash
+if [ -f /var/run/reboot-required ]; then
+    echo "Reboot required"
+    cat /var/run/reboot-required.pkgs
+fi
+```
+
+---
+
+## Tailscale
+
+### Check status
+
+```bash
+tailscale status
+```
+
+### Get hostname/IP
+
+```bash
+tailscale ip -4
+tailscale status | grep $(hostname)
+```
+
+### Re-authenticate (if expired)
+
+```bash
+sudo tailscale up
+# Follow the URL to re-auth
+```
+
+---
+
+## Troubleshooting
+
+### LiteLLM not responding
+
+```bash
+# Check if container is running
+docker compose ps litellm
+
+# Check logs for errors
+docker compose logs --tail=50 litellm
+
+# Common issues:
+# - Invalid API key in .env
+# - Malformed litellm_config.yaml
+# - Port 4000 already in use
+
+# Fix: validate config
+docker compose exec litellm python -c "import yaml; yaml.safe_load(open('/app/config.yaml'))"
+
+# Restart
+docker compose restart litellm
+```
+
+### OpenHands not starting
+
+```bash
+# Check logs
+docker compose logs --tail=50 openhands
+
+# Common issues:
+# - Docker socket not accessible
+# - LiteLLM not healthy yet (dependency)
+# - Insufficient RAM
+
+# Fix: ensure docker socket is accessible
+ls -la /var/run/docker.sock
+
+# Restart
+docker compose restart openhands
+```
+
+### High memory usage
+
+```bash
+# Check what's using memory
+docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}"
+
+# If agent sandboxes are leaking:
+docker ps --filter "name=openhands-sandbox" --format "{{.Names}}: {{.Status}}"
+
+# Kill orphaned sandboxes
+docker ps --filter "name=openhands-sandbox" -q | xargs docker rm -f
+```
+
+### SSH connection issues
+
+```bash
+# Check SSH service
+sudo systemctl status sshd
+
+# Check firewall
+sudo ufw status
+
+# Check fail2ban (your IP might be banned)
+sudo fail2ban-client status sshd
+
+# Unban an IP
+sudo fail2ban-client set sshd unbanip <your-ip>
+```
+
+### DeepSeek API errors
+
+```bash
+# Test direct API access (bypassing LiteLLM)
+curl -s https://api.deepseek.com/chat/completions \
+  -H "Authorization: Bearer ${DEEPSEEK_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}' | jq .
+
+# If 503/429: DeepSeek is congested. Fallback models should engage automatically.
+# If 401: API key is invalid. Regenerate at https://platform.deepseek.com
+```
+
+---
+
+## Useful Aliases
+
+Add to `~/.bashrc`:
+
+```bash
+# AI Workstation shortcuts
+alias ws='cd ~/ai-workstation'
+alias wsu='cd ~/ai-workstation && docker compose up -d'
+alias wsd='cd ~/ai-workstation && docker compose down'
+alias wsl='cd ~/ai-workstation && docker compose logs -f'
+alias wss='docker compose -f ~/ai-workstation/docker-compose.yml ps'
+alias wsr='cd ~/ai-workstation && docker compose restart'
+
+# tmux shortcuts
+alias ta='tmux attach -t'
+alias tl='tmux list-sessions'
+alias tn='tmux new-session -s'
 ```

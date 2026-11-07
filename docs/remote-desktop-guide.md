@@ -6,7 +6,7 @@ This guide covers all methods to interact with your AI workstation's desktop and
 
 | Field | Value |
 |-------|-------|
-| Hostname | `<hostname>` |
+| Hostname | `workstation` |
 | Public IP | `<server-ip>` |
 | SSH User | `agent` |
 | Desktop | XFCE 4 via xRDP |
@@ -129,11 +129,11 @@ Follow the URL to authenticate in your Tailscale account.
 
 ### After Tailscale is active
 
-Your server gets a Tailscale hostname (e.g., `<hostname>`) and IP (e.g., `100.x.y.z`).
+Your server gets a Tailscale hostname (e.g., `workstation`) and IP (e.g., `100.x.y.z`).
 
 Access via Tailscale:
 ```bash
-ssh agent@<hostname>   # Tailscale hostname
+ssh agent@workstation   # Tailscale hostname
 ssh agent@100.x.y.z            # Tailscale IP
 ```
 

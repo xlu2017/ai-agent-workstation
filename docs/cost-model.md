@@ -1,72 +1,166 @@
 # Cost Model
 
-## Monthly Budget: $200/month target
+## Budget Target: Under $200/month all-in
 
-## Fixed Costs
+This document models the total monthly cost for the recommended configuration.
 
-| Item | Monthly | Notes |
-|------|---------|-------|
-| Hetzner Cloud CCX33 | $73.99 | 8 dedicated vCPU, 32GB RAM, 240GB SSD |
-| IPv4 address | $0.60 | Required for SSH/RDP access |
-| Extra volume (260GB) | $13.52 | To reach 500GB total ($0.052/GB/mo) |
-| **Subtotal** | **$88.11** | |
+---
 
-## Variable Costs (API Usage)
+## Recommended Configuration
 
-### Conservative (light usage: ~5 agent sessions/day)
+**Infrastructure:** Hetzner Dedicated AX42-U  
+**Primary model:** DeepSeek V4-Flash (direct API)  
+**Secondary model:** Qwen via DashScope or SiliconFlow  
+**Fallback models:** Claude Haiku 4.5, GPT-4.1-mini (emergency only)
 
-| Provider | Tokens/day | Monthly Cost |
-|----------|-----------|-------------|
-| DeepSeek V4-Flash | ~500K in + 200K out | $3.50 |
-| DashScope Qwen | ~100K in + 50K out | $0.20 |
-| **Subtotal** | | **$3.70** |
+---
 
-### Moderate (active development: ~20 sessions/day)
+## Infrastructure Costs
 
-| Provider | Tokens/day | Monthly Cost |
-|----------|-----------|-------------|
-| DeepSeek V4-Flash | ~2M in + 800K out | $14.00 |
-| DashScope Qwen | ~500K in + 200K out | $1.50 |
-| Claude/GPT fallback | ~100K in + 50K out | $3.00 |
-| **Subtotal** | | **$18.50** |
+| Component | Monthly Cost | Notes |
+|-----------|-------------|-------|
+| Hetzner AX42-U server | $59.00 | 8c/16t Zen4, 64GB DDR5, 2×512GB NVMe |
+| IPv4 address | Included | 1 dedicated IPv4 |
+| Traffic | Included | Unlimited at 1 Gbit/s |
+| Backup storage (optional) | $0–5.00 | Hetzner Storage Box BX11: 1TB for ~$4.18/mo |
+| Domain (optional) | $0–1.50 | If needed for HTTPS access |
+| **Infrastructure subtotal** | **$59–65** | |
 
-### Heavy (production: ~50 sessions/day)
+**Alternative: Hetzner Cloud CCX33**
 
-| Provider | Tokens/day | Monthly Cost |
-|----------|-----------|-------------|
-| DeepSeek V4-Flash | ~5M in + 2M out | $35.00 |
-| DashScope Qwen | ~1M in + 500K out | $5.00 |
-| Claude/GPT fallback | ~500K in + 200K out | $15.00 |
-| **Subtotal** | | **$55.00** |
+| Component | Monthly Cost | Notes |
+|-----------|-------------|-------|
+| CCX33 server | $73.99 | 8 dedicated AMD vCPU, 32GB, 240GB SSD |
+| Additional volume (200GB) | $9.60 | $0.048/GB/mo |
+| Snapshots (50GB) | $0.60 | $0.012/GB/mo |
+| **Infrastructure subtotal** | **$84** | |
 
-## Total Monthly Projections
+---
 
-| Scenario | Infrastructure | APIs | Total | % of Budget |
-|----------|---------------|------|-------|-------------|
-| Paused | $0.36 (snapshot) | $0 | **$0.36** | 0.2% |
-| Light | $88.11 | $3.70 | **$91.81** | 46% |
-| Moderate | $88.11 | $18.50 | **$106.61** | 53% |
-| Heavy | $88.11 | $55.00 | **$143.11** | 72% |
-| Extreme | $88.11 | $100.00 | **$188.11** | 94% |
+## Model/API Usage Costs
 
-All scenarios remain under $200/month budget.
+### Usage Assumptions
+
+Based on typical AI coding agent workloads (OpenHands-style):
+
+| Metric | Conservative | Moderate | Heavy |
+|--------|-------------|----------|-------|
+| Agent sessions/day | 5 | 15 | 30 |
+| Avg input tokens/session | 50K | 80K | 120K |
+| Avg output tokens/session | 10K | 20K | 40K |
+| Monthly input tokens | 7.5M | 36M | 108M |
+| Monthly output tokens | 1.5M | 9M | 36M |
+
+### Cost per Model at Moderate Usage (36M input / 9M output per month)
+
+| Model | Input Cost | Output Cost | Monthly Total |
+|-------|-----------|-------------|---------------|
+| DeepSeek V4-Flash (cache miss) | $5.04 | $2.52 | **$7.56** |
+| DeepSeek V4-Flash (50% cache hit) | $2.55 | $2.52 | **$5.07** |
+| DeepSeek V4-Pro | $15.66 | $7.83 | **$23.49** |
+| Qwen-turbo (DashScope) | $1.80 | $4.50 | **$6.30** |
+| Claude Haiku 4.5 | $36.00 | $45.00 | **$81.00** |
+| GPT-4.1-mini | $14.40 | $14.40 | **$28.80** |
+| Gemini 2.5 Flash | $5.40 | $5.40 | **$10.80** |
+
+### Recommended Monthly API Budget
+
+| Model | Role | Allocation | Est. Cost |
+|-------|------|-----------|-----------|
+| DeepSeek V4-Flash | Primary (80% of traffic) | 29M in / 7.2M out | $6.05 |
+| DeepSeek V4-Pro | Complex tasks (10%) | 3.6M in / 0.9M out | $2.35 |
+| Qwen-turbo | Secondary fallback (8%) | 2.9M in / 0.7M out | $0.50 |
+| Claude Haiku 4.5 / GPT-4.1-mini | Emergency (2%) | 0.7M in / 0.2M out | $1.70 |
+| **API subtotal** | | | **$10.60** |
+
+### Heavy Usage Scenario (108M input / 36M output per month)
+
+| Model | Role | Allocation | Est. Cost |
+|-------|------|-----------|-----------|
+| DeepSeek V4-Flash | Primary (80%) | 86.4M in / 28.8M out | $20.16 |
+| DeepSeek V4-Pro | Complex tasks (10%) | 10.8M in / 3.6M out | $7.83 |
+| Qwen-turbo | Secondary (8%) | 8.6M in / 2.9M out | $1.88 |
+| Claude Haiku / GPT-4.1-mini | Emergency (2%) | 2.2M in / 0.7M out | $5.70 |
+| **API subtotal (heavy)** | | | **$35.57** |
+
+---
+
+## Total Monthly Cost Projections
+
+### Option A: Hetzner Dedicated AX42-U (Recommended)
+
+| Scenario | Infra | API | Total | Under Budget? |
+|----------|-------|-----|-------|---------------|
+| Conservative | $59 | $5 | **$64** | Yes ($136 buffer) |
+| Moderate | $59 | $11 | **$70** | Yes ($130 buffer) |
+| Heavy | $59 | $36 | **$95** | Yes ($105 buffer) |
+| Extreme (2× heavy) | $59 | $72 | **$131** | Yes ($69 buffer) |
+
+### Option B: Hetzner Cloud CCX33
+
+| Scenario | Infra | API | Total | Under Budget? |
+|----------|-------|-----|-------|---------------|
+| Conservative | $84 | $5 | **$89** | Yes ($111 buffer) |
+| Moderate | $84 | $11 | **$95** | Yes ($105 buffer) |
+| Heavy | $84 | $36 | **$120** | Yes ($80 buffer) |
+
+### Option C: OVHcloud Rise-1
+
+| Scenario | Infra | API | Total | Under Budget? |
+|----------|-------|-----|-------|---------------|
+| Conservative | $70 | $5 | **$75** | Yes ($125 buffer) |
+| Moderate | $70 | $11 | **$81** | Yes ($119 buffer) |
+| Heavy | $70 | $36 | **$106** | Yes ($94 buffer) |
+
+---
+
+## Break-Even Analysis
+
+At what point does API usage exceed budget?
+
+With AX42-U ($59 infra), you have **$141/month** for API calls.
+
+At DeepSeek V4-Flash rates ($0.14/$0.28 per 1M):
+- $141 buys approximately **336M input tokens + 336M output tokens** (mixed)
+- That's roughly **1,000+ agent sessions/month** at moderate token usage
+- Or **33+ sessions/day** — well beyond typical single-developer needs
+
+**Conclusion:** DeepSeek pricing is so low that API costs are almost negligible relative to infrastructure. Even extreme usage stays well within the $200 budget.
+
+---
+
+## One-Time Costs
+
+| Item | Cost | Notes |
+|------|------|-------|
+| Hetzner AX42-U setup fee | ~$255 | One-time, non-refundable |
+| DeepSeek API initial top-up | $10–50 | Pre-paid balance |
+| Domain registration (optional) | $10–15/year | For HTTPS/DNS |
+| **One-time total** | **$275–320** | Amortized over first 3 months: +$92–107 |
+
+---
 
 ## Cost Optimization Strategies
 
-1. **DeepSeek cache hits**: Repeated prompts get 90% discount ($0.014/1M)
-2. **Pause when idle**: Delete server + keep snapshot = $0.36/mo
-3. **Qwen for simple tasks**: Route documentation/formatting to cheapest model
-4. **Budget limits in LiteLLM**: Hard cap per model per day
-5. **Volume only when needed**: Detach volume when server is paused ($13.52/mo saved)
+1. **Maximize cache hits:** DeepSeek V4-Flash cache hit pricing ($0.0028/M) is 50× cheaper than cache miss. Structure prompts to reuse system prompt prefixes.
 
-## Future: Dedicated Hardware Migration
+2. **Use V4-Flash for everything except complex reasoning:** Only escalate to V4-Pro for multi-step debugging or architecture decisions.
 
-After 6+ months of continuous use:
+3. **Qwen-turbo for simple tasks:** At $0.05/M input, use for linting suggestions, simple completions, documentation generation.
 
-| Item | One-time | Monthly | Payback |
-|------|----------|---------|---------|
-| Hetzner AX42-U setup | $255 | — | — |
-| AX42-U monthly | — | $59 | 3 months vs CCX33 |
-| **Net savings** | | **$29/mo** after payback | |
+4. **Avoid Claude/OpenAI except emergencies:** 30–100× more expensive than DeepSeek for comparable tasks.
 
-Break-even: 9 months (setup fee / monthly savings).
+5. **Snapshot before major changes:** On Hetzner dedicated, use Hetzner Storage Box for backups rather than expensive snapshot services.
+
+---
+
+## Comparison to Devin
+
+| | This Setup | Devin (estimated) |
+|--|-----------|-------------------|
+| Monthly cost | $70–130 | $500+ (seat license) |
+| Model flexibility | Full control | Locked to provider |
+| Customization | Complete | Limited |
+| Multi-session | Git worktrees + tmux | Built-in |
+| Persistence | Full | Session-based |
+| GPU burst | Add RunPod/Vast.ai | N/A |
