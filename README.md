@@ -19,9 +19,8 @@ Future work should keep the FastAPI models, API routes, SQL scaffold, UI panels,
 
 | Component | Status |
 |-----------|--------|
-| Server | `<hostname>` — CCX33, 8 vCPU, 32GB RAM, Falkenstein |
-| IP | `<server-ip>` |
-| LiteLLM Proxy | Running on port 4000 (healthy), budget: $150/mo cap |
+| Hetzner Cloud VM | CCX33-class, 8 vCPU, 32GB RAM |
+| LiteLLM Proxy | Running on port 4000 (healthy), monthly spend cap |
 | OpenHands | Running on port 3000 / allocated 3010+ |
 | Control Plane | Running on port 9877 |
 | DeepSeek API | Active (V4-Flash primary) |
@@ -202,4 +201,4 @@ For future Android emulator use (RFC-005), upgrade to Sunshine when GPU hardware
 - **Docker:** Agent sandboxes isolated from host
 - **Updates:** unattended-upgrades for automatic security patches
 - **Time:** chrony for NTP synchronization
-- **LiteLLM:** Protected by master key, $150/mo budget cap
+- **LiteLLM:** Protected by master key, monthly spend cap
