@@ -3,6 +3,14 @@ REM launch-dashboard.bat
 REM Quick launcher - opens SSH tunnel and dashboard in one click.
 REM Requires: SSH key at %USERPROFILE%\.ssh\workstation_key
 
+REM Required: set SERVER to your workstation IP or Tailscale hostname.
+set SERVER=<server-ip>
+if "%SERVER%"=="<server-ip>" (
+    echo ERROR: Edit this file and set SERVER to your workstation IP or Tailscale hostname.
+    pause
+    exit /b 1
+)
+
 echo === Workstation Dashboard ===
 echo.
 
@@ -14,7 +22,7 @@ if not exist "%USERPROFILE%\.ssh\workstation_key" (
 )
 
 echo Starting SSH tunnel...
-start /b ssh -i "%USERPROFILE%\.ssh\workstation_key" -N -L 9877:localhost:9877 -L 9876:localhost:9876 -o ServerAliveInterval=30 -o StrictHostKeyChecking=no agent@<server-ip>
+start /b ssh -i "%USERPROFILE%\.ssh\workstation_key" -N -L 9877:localhost:9877 -L 9876:localhost:9876 -o ServerAliveInterval=30 -o StrictHostKeyChecking=no agent@%SERVER%
 
 timeout /t 3 /nobreak >nul
 

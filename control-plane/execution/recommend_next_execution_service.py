@@ -13,8 +13,8 @@ four top-level decision types:
 * ``ask_user``
 * ``stop``
 
-Granular platform behavior must be decided after this boundary by jubilant-
-goggles controller code. For example:
+Granular platform behavior must be decided after this boundary by the
+workstation controller code (this repository). For example:
 
 * missing repo context is handled as ``stop`` at this controller level
 * creating or routing a session is handled as ``execute`` at this controller

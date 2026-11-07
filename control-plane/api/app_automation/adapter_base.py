@@ -38,7 +38,7 @@ class VendorAdapter:
         entrypoints = self.detect_entrypoints()
         notes = []
         if LOCAL_ADAPTER_FILENAME in entrypoints:
-            notes.append("Local Jubilant Goggles adapter contract is available.")
+            notes.append(f"Local adapter contract file ({LOCAL_ADAPTER_FILENAME}) is available.")
         return AdapterHealth(
             vendor=self.vendor_id,
             available=self.source_path.exists() and any(self.source_path.iterdir()),

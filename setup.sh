@@ -52,7 +52,8 @@ if id "${AGENT_USER}" &>/dev/null; then
 else
     adduser --disabled-password --gecos "" "${AGENT_USER}"
     usermod -aG sudo "${AGENT_USER}"
-    # Allow sudo without password for initial setup
+    # Passwordless sudo is a dedicated-VM convenience for automation; do not
+    # use this on shared hosts — require a password there instead.
     echo "${AGENT_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${AGENT_USER}"
     chmod 440 "/etc/sudoers.d/${AGENT_USER}"
 fi

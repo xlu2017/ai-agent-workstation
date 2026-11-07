@@ -9,7 +9,7 @@
 #
 # Prerequisites:
 #   - SSH key at ~\.ssh\workstation_key
-#   - Server at <server-ip> with setup.sh already run
+#   - A provisioned server (setup.sh already run); pass -Server with its IP or Tailscale hostname
 
 param(
     [switch]$Desktop,
@@ -17,10 +17,17 @@ param(
     [switch]$Status,
     [switch]$Stop,
     [switch]$Tunnel,
+    # Workstation IP or Tailscale hostname. Required — pass -Server or edit the default below.
     [string]$Server = "<server-ip>",
     [string]$User = "agent",
     [string]$KeyPath = "$env:USERPROFILE\.ssh\workstation_key"
 )
+
+if ($Server -eq "<server-ip>") {
+    Write-Host "ERROR: -Server is required. Example:" -ForegroundColor Red
+    Write-Host "  .\launch-server.ps1 -Server <your-server-ip-or-tailscale-hostname>" -ForegroundColor Yellow
+    exit 1
+}
 
 $ErrorActionPreference = "Continue"
 
@@ -121,7 +128,7 @@ function Start-Desktop {
     Write-Host "Connecting to ${Server}:${RDP_PORT}..." -ForegroundColor Yellow
     Start-Process "mstsc.exe" -ArgumentList "/v:${Server}:${RDP_PORT}"
     Write-Host "  RDP client launched." -ForegroundColor Green
-    Write-Host "  Login: agent / <rdp-password>" -ForegroundColor Gray
+    Write-Host "  Login: agent / your RDP password (set during deployment)" -ForegroundColor Gray
 }
 
 function Start-Tunnel {

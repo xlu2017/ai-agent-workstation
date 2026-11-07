@@ -20,10 +20,8 @@ sys.path.insert(0, str(_Path(__file__).parent.parent))
 from executors.base import ExecutorAdapter, TaskPacket, TaskResult, SESSIONS_DIR, TASKS_DIR
 
 
-LITELLM_KEY = os.environ.get(
-    "LITELLM_MASTER_KEY",
-    "",
-)
+# Required: tasks fail cleanly when LITELLM_MASTER_KEY is unset.
+LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY")
 LITELLM_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-v4-flash")
 
@@ -33,6 +31,11 @@ class AiderExecutor(ExecutorAdapter):
 
     def run_task(self, session_id: str, packet: TaskPacket) -> TaskResult:
         start_time = time.time()
+        if not LITELLM_KEY:
+            return TaskResult(
+                status="failed",
+                error="LITELLM_MASTER_KEY environment variable is not set",
+            )
         session_dir = SESSIONS_DIR / session_id
         events_dir = session_dir / "events"
         events_dir.mkdir(parents=True, exist_ok=True)

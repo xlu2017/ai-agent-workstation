@@ -3,12 +3,19 @@
 # Usage: .\launch-dashboard.ps1 [-KeyPath path\to\key]
 
 param(
+    # Workstation IP or Tailscale hostname. Required — pass -Server or edit the default below.
     [string]$Server = "<server-ip>",
     [string]$User = "agent",
     [string]$KeyPath = "$env:USERPROFILE\.ssh\workstation_key",
     [int]$DashboardPort = 9877,
     [int]$BridgePort = 9876
 )
+
+if ($Server -eq "<server-ip>") {
+    Write-Host "ERROR: -Server is required. Example:" -ForegroundColor Red
+    Write-Host "  .\launch-dashboard.ps1 -Server <your-server-ip-or-tailscale-hostname>" -ForegroundColor Yellow
+    exit 1
+}
 
 Write-Host "=== Workstation Dashboard Launcher ===" -ForegroundColor Cyan
 Write-Host ""

@@ -9,6 +9,8 @@
   "private_registry_image": null,
   "notes": [
     "Run scripts/vendor-openhands.sh to resolve ref to an exact commit and populate commit_sha/image_tag.",
+    "source_dir 'vendor/openhands' is an optional local checkout and is not populated in this repository; commit_sha stays null until vendor-openhands.sh runs.",
+    "vendor/openhands-sdk/ is a separate, committed tree containing the upstream OpenHands software-agent-sdk source.",
     "Run scripts/build-openhands-local.sh after vendoring to build the local runtime image.",
     "Do not use floating public images such as ghcr.io/all-hands-ai/openhands:latest for production execution."
   ]

@@ -2,6 +2,12 @@
 
 Complete record of the initial workstation deployment performed on 2026-06-03.
 
+> **Post-deployment update:** the repository no longer installs or manages `ufw`
+> or `fail2ban`. Steps 7–8 below describe the initial run; the current posture
+> denies public ingress at the provider firewall and restricts admin access to
+> Tailscale (see "Network Access Model" in `README.md`). Mentions of `ufw`
+> commands later in this log are historical.
+
 ---
 
 ## Server Provisioned
@@ -45,8 +51,8 @@ Complete record of the initial workstation deployment performed on 2026-06-03.
 4. Installed Docker CE + Docker Compose plugin
 5. Installed Node.js 20 (via NodeSource)
 6. Installed Tailscale
-7. Configured UFW firewall (SSH + Tailscale allowed)
-8. SSH hardening (disabled root login, disabled password auth, enabled fail2ban)
+7. Configured UFW firewall (SSH + Tailscale allowed) — superseded; UFW is no longer managed by this repo
+8. SSH hardening (disabled root login, disabled password auth, enabled fail2ban) — fail2ban later removed from managed setup
 9. Configured xRDP (port 3389, xfce4 session)
 10. Created workstation directory (`/home/agent/ai-workstation/`) with docker-compose.yml and .env
 
@@ -156,7 +162,7 @@ healthcheck:
 ## Remaining Steps (Post-Deployment)
 
 1. **Set up Tailscale** — `sudo tailscale up` (requires browser auth)
-2. **Close port 3389** after Tailscale is working — `sudo ufw delete allow 3389/tcp`
+2. **Close port 3389** after Tailscale is working — deny it at the provider firewall (UFW is no longer managed by this repo)
 3. **Optional:** Add DashScope, Anthropic, OpenAI, Gemini keys to `.env` for fallback models
 4. **Optional:** Set up Caddy reverse proxy for HTTPS (if using a domain)
 5. **Optional:** Configure git worktrees for parallel agent workspaces

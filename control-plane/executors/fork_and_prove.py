@@ -23,10 +23,8 @@ from executors.base import ExecutorAdapter, TaskPacket, TaskResult, SESSIONS_DIR
 from executors.direct_executor import DirectExecutor
 
 LITELLM_URL = os.environ.get("LITELLM_URL", "http://localhost:4000")
-LITELLM_KEY = os.environ.get(
-    "LITELLM_MASTER_KEY",
-    "",
-)
+# Required: candidate scoring fails cleanly when LITELLM_MASTER_KEY is unset.
+LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY")
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-v4-flash")
 
 POLICIES_DIR = Path(__file__).parent.parent / "policies"
@@ -78,6 +76,8 @@ class CandidateScorer:
 
     def generate_candidates(self, instruction: str, context: dict, max_candidates: int = 5) -> list:
         """Use LLM to generate candidate interpretations for an ambiguous task."""
+        if not LITELLM_KEY:
+            raise RuntimeError("LITELLM_MASTER_KEY environment variable is not set")
         import urllib.request
 
         prompt = f"""You are analyzing an ambiguous coding task. Generate {max_candidates} distinct plausible interpretations.
@@ -146,6 +146,8 @@ Return {max_candidates} candidates. No markdown, no explanation, just the JSON a
 
     def score_candidates(self, candidates: list, instruction: str, context: dict) -> list:
         """Score each candidate on all dimensions. Returns candidates with scores."""
+        if not LITELLM_KEY:
+            raise RuntimeError("LITELLM_MASTER_KEY environment variable is not set")
         import urllib.request
 
         scored = []

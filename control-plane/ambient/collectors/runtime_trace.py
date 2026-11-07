@@ -30,7 +30,7 @@ def ambient_trace_span(name: str, attributes: dict[str, Any] | None = None):
         return
     try:
         from opentelemetry import trace
-        tracer = trace.get_tracer("jubilant_goggles.ambient")
+        tracer = trace.get_tracer("ai_agent_workstation.ambient")
         with tracer.start_as_current_span(name) as span:
             for key, value in (attributes or {}).items():
                 try:

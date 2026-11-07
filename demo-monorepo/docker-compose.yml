@@ -1,3 +1,5 @@
+# Demo fixture only: Dockerfile.api and Dockerfile.web are intentionally not
+# included. See demo-monorepo/README.md — run the apps via npm workspaces.
 version: "3.8"
 
 services:

@@ -46,7 +46,7 @@ function valueLabel(vendor: RuntimeConfig): string {
 }
 
 function installFetchInterceptor() {
-  const key = '__jubilantAppAutomationFetchInterceptorInstalled'
+  const key = '__appAutomationFetchInterceptorInstalled'
   if ((window as any)[key]) return
   ;(window as any)[key] = true
   const originalFetch = window.fetch.bind(window)

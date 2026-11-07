@@ -81,16 +81,20 @@ See [docs/architecture.md](docs/architecture.md) for full details.
 
 ```text
 .
+├── .agents/                       # Agent skills consumed by coding assistants
 ├── control-plane/                 # Active FastAPI control plane, web UI, CLI, routes, tests
+├── vendor/                        # Vendored runtime dependencies (see vendor/README.md)
 ├── config/                        # LiteLLM and service configuration
 ├── scripts/                       # Worktree, backup, workstation, and local-client scripts
 ├── ops/                           # Active operational stacks such as Guacamole remote desktop
 ├── knowledge/                     # YAML knowledge files
 ├── docs/                          # Architecture, operations, API, and deprecation docs
 ├── rfcs/                          # Forward-looking design proposals
+├── bench-apps/                    # Benchmark application evaluations
 ├── bench-scripts/                 # Benchmark runner scripts
 ├── bench-tasks/                   # Benchmark task fixtures
 ├── bench-results/                 # Benchmark output artifacts
+├── demo-monorepo/                 # Demo fixture monorepo used by demo scripts
 ├── docker-compose.yml             # Service orchestration
 ├── setup.sh                       # Idempotent server setup
 └── .env.example                   # API key template
@@ -202,3 +206,24 @@ For future Android emulator use (RFC-005), upgrade to Sunshine when GPU hardware
 - **Updates:** unattended-upgrades for automatic security patches
 - **Time:** chrony for NTP synchronization
 - **LiteLLM:** Protected by master key, monthly spend cap
+
+## License
+
+Original work in this repository is released under the [MIT License](LICENSE).
+
+Vendored projects under `vendor/` and `control-plane/vendor/` carry their own
+upstream licenses — review them before redistributing or modifying vendored
+source. Terms declared in `control-plane/vendor/*/manifest.json`:
+
+| Project | License |
+|---------|---------|
+| n8n | Sustainable Use License / n8n Enterprise License |
+| Skyvern | AGPL-3.0 (core; upstream notes managed-cloud exceptions) |
+| Activepieces | MIT (Community Edition); commercial license for enterprise features |
+| Composio, Stagehand, Browser Use | MIT |
+| MCP reference servers | Apache-2.0 / MIT per upstream repository |
+| OpenHands SDK (`vendor/openhands-sdk/`) | MIT (upstream OpenHands software-agent-sdk) |
+
+Other vendored ambient-context providers (Playwright, watchfiles, Tree-sitter,
+pygls, pyte, OpenTelemetry, python-lsp-server, source-map) remain under their
+respective upstream licenses.

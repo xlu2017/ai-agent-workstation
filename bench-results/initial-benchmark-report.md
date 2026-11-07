@@ -1,5 +1,11 @@
 # Initial Benchmark Report
 
+> **WIP — updated 2026-11-07:** This report is still a planning stub. The
+> harness (`bench-scripts/`) and 10 task fixtures (`bench-tasks/`) are
+> committed, but no benchmark run has completed yet and the target
+> applications were never cloned onto the server. "Pending" entries below
+> reflect that state.
+
 **Date:** 2026-06-04
 **Author:** Automated setup
 **Status:** Infrastructure provisioning in progress

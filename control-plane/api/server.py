@@ -45,6 +45,9 @@ from api.routes.session_graph.router import router as session_graph_router
 
 app = FastAPI(title="Workstation Control Plane", version="0.1.0")
 
+# Permissive CORS by design: this API has no auth layer and must only be
+# reachable on a private network. Bind/expose it solely through Tailscale
+# (tailnet interface or SSH forwarding) — never on a public interface.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

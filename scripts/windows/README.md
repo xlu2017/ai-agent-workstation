@@ -4,8 +4,9 @@ Scripts for managing the workstation from Windows.
 
 ## Prerequisites
 
-1. SSH key at `%USERPROFILE%\.ssh\workstation_key` (or pass `-KeyPath` to scripts)
-2. OpenSSH client (built into Windows 10+)
+1. The workstation IP or Tailscale hostname — pass `-Server` to `.ps1` scripts, or edit `SERVER` at the top of `.bat` files (`<server-ip>` is a required placeholder; scripts exit with an error until you set it)
+2. SSH key at `%USERPROFILE%\.ssh\workstation_key` (or pass `-KeyPath` to scripts)
+3. OpenSSH client (built into Windows 10+)
 
 ## Scripts
 
@@ -22,22 +23,22 @@ Scripts for managing the workstation from Windows.
 
 ```powershell
 # Open dashboard (stays open until Ctrl+C)
-.\launch-dashboard.ps1
+.\launch-dashboard.ps1 -Server <server-ip-or-tailscale-hostname>
 
 # Check server health
-.\health-check.ps1
+.\health-check.ps1 -Server <server-ip-or-tailscale-hostname>
 
 # List sessions
-.\session-list.ps1
+.\session-list.ps1 -Server <server-ip-or-tailscale-hostname>
 
 # Run the full demo
-.\run-demo.ps1
+.\run-demo.ps1 -Server <server-ip-or-tailscale-hostname>
 ```
 
 ## If your key is elsewhere
 
 ```powershell
-.\launch-dashboard.ps1 -KeyPath C:\Users\you\.ssh\my_key
+.\launch-dashboard.ps1 -Server <server-ip-or-tailscale-hostname> -KeyPath C:\Users\you\.ssh\my_key
 ```
 
 ## Ports forwarded by launch-dashboard

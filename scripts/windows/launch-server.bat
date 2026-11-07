@@ -9,7 +9,12 @@ REM   launch-server.bat status       Check server status
 REM   launch-server.bat stop         Stop services
 REM   launch-server.bat tunnel       SSH tunnel for local access
 
+REM Required: set SERVER to your workstation IP or Tailscale hostname.
 set SERVER=<server-ip>
+if "%SERVER%"=="<server-ip>" (
+    echo ERROR: Edit this file and set SERVER to your workstation IP or Tailscale hostname.
+    exit /b 1
+)
 set USER=agent
 set KEY=%USERPROFILE%\.ssh\workstation_key
 
@@ -29,7 +34,7 @@ echo Launching Remote Desktop...
 start mstsc /v:%SERVER%
 echo.
 echo ==== Ready ====
-echo   Desktop: RDP to %SERVER% (agent / <rdp-password>)
+echo   Desktop: RDP to %SERVER% (agent / your RDP password)
 echo   API:     http://%SERVER%:9877
 echo   Tunnel:  launch-server.bat tunnel
 echo.
